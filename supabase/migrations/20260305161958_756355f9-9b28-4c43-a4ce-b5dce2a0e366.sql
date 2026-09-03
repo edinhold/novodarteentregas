@@ -1,0 +1,1 @@
+ALTER TABLE public.delivery_config ADD COLUMN IF NOT EXISTS payment_day integer NOT NULL DEFAULT 15;

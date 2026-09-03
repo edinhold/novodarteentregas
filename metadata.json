@@ -1,0 +1,10 @@
+{
+  "name": "Duarte Delivery",
+  "description": "Peça comida e receba na sua porta com o Duarte Delivery",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

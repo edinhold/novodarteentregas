@@ -1,0 +1,1 @@
+ALTER FUNCTION public.generate_driver_code() SET search_path = public;

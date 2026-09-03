@@ -1,0 +1,1 @@
+CREATE POLICY "Public can view driver photos" ON storage.objects FOR SELECT USING (bucket_id = 'driver-photos');

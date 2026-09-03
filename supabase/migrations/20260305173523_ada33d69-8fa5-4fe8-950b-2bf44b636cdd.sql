@@ -1,0 +1,1 @@
+ALTER TABLE public.delivery_config ADD COLUMN recharge_url text DEFAULT '';

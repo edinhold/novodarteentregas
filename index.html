@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>Duarte Delivery</title>
+    <meta name="description" content="Peça comida e receba na sua porta com o Duarte Delivery" />
+    <meta name="author" content="Duarte Delivery" />
+
+    <!-- PWA Meta Tags -->
+    <meta name="theme-color" content="#f97316" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Duarte" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon.png" />
+    <link rel="apple-touch-icon" href="/pwa-192x192.png" />
+
+    <!-- OG Tags -->
+    <meta property="og:title" content="Duarte Delivery" />
+    <meta property="og:description" content="Peça comida e receba na sua porta com o Duarte Delivery" />
+    <meta property="og:type" content="website" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+  
+  <style>
+#lovable-badge {
+  display: none !important;
+}
+a[href*="lovable.dev"],
+iframe[src*="lovable.dev"],
+div[style*="Edit with Lovable"],
+.lovable-badge {
+  display: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  position: absolute !important;
+  z-index: -9999 !important;
+}
+</style>
+</head>
+
+  <body>
+    <div id="root"></div>
+    <!-- Median JavaScript Bridge (only active inside Median-built native apps) -->
+    <script src="https://median.co/static/median_library_v1.1.4.min.js"></script>
+    <script>
+      // Global helper to detect if the app is running inside a Median.co native wrapper.
+      window.isMedianApp = function () {
+        return navigator.userAgent.toLowerCase().indexOf('median') > -1;
+      };
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

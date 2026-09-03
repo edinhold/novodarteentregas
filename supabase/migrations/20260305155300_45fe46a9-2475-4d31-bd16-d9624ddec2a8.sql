@@ -1,0 +1,1 @@
+ALTER TABLE public.delivery_config ADD COLUMN IF NOT EXISTS whatsapp_number text DEFAULT '';

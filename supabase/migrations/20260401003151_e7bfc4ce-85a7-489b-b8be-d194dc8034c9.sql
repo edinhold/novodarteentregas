@@ -1,0 +1,2 @@
+ALTER TABLE public.delivery_requests DROP CONSTRAINT IF EXISTS delivery_requests_restaurant_id_fkey;
+ALTER TABLE public.delivery_requests ADD CONSTRAINT delivery_requests_restaurant_id_fkey FOREIGN KEY (restaurant_id) REFERENCES public.restaurants(id) ON DELETE SET NULL;

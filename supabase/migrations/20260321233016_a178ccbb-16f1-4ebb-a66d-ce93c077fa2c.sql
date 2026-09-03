@@ -1,0 +1,1 @@
+ALTER TABLE public.delivery_config ADD COLUMN promo_credit_percent numeric NOT NULL DEFAULT 0;

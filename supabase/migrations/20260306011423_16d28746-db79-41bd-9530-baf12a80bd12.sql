@@ -1,0 +1,1 @@
+ALTER TABLE public.delivery_config ADD COLUMN IF NOT EXISTS app_fee_per_delivery numeric NOT NULL DEFAULT 2;
