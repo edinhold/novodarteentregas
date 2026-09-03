@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import { Plus, Trash2, MapPin, User, Phone, Package, Route, Loader2 } from "lucide-react";
+import { geocodeAddress, calculateRoute } from "@/services/mapbox";
 
 const MAX_STOPS = 10;
 
@@ -34,28 +35,6 @@ const emptyStop = (): Stop => ({
 interface Props {
   restaurant: any;
   userId: string;
-}
-
-// Geocode via Nominatim
-async function geocode(address: string): Promise<{ lat: number; lng: number } | null> {
-  try {
-    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(address)}`;
-    const res = await fetch(url, { headers: { "Accept-Language": "pt-BR" } });
-    const json = await res.json();
-    if (Array.isArray(json) && json[0]) {
-      return { lat: parseFloat(json[0].lat), lng: parseFloat(json[0].lon) };
-    }
-  } catch (_) {}
-  return null;
-}
-
-function haversineKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
-  const R = 6371;
-  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
-  const dLon = ((b.lng - a.lng) * Math.PI) / 180;
-  const s = Math.sin(dLat / 2) ** 2 +
-    Math.cos((a.lat * Math.PI) / 180) * Math.cos((b.lat * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
 }
 
 const MultiDeliveryOrder = ({ restaurant, userId }: Props) => {
@@ -140,26 +119,43 @@ const MultiDeliveryOrder = ({ restaurant, userId }: Props) => {
     if (!restaurant?.address) return toast.error("Loja sem endereço de coleta");
     setCalculating(true);
     try {
-      const origin = (restaurant.lat != null && restaurant.lng != null)
-        ? { lat: Number(restaurant.lat), lng: Number(restaurant.lng) }
-        : await geocode(restaurant.address);
+      let origin: { lat: number; lng: number } | null = null;
+      if (restaurant.latitude != null && restaurant.longitude != null) {
+        origin = { lat: Number(restaurant.latitude), lng: Number(restaurant.longitude) };
+      } else if (restaurant.lat != null && restaurant.lng != null) {
+        origin = { lat: Number(restaurant.lat), lng: Number(restaurant.lng) };
+      } else {
+        const parsedOrigin = await geocodeAddress(restaurant.address);
+        if (parsedOrigin?.coordinates) {
+          origin = {
+            lat: parsedOrigin.coordinates.latitude,
+            lng: parsedOrigin.coordinates.longitude,
+          };
+        }
+      }
+
       if (!origin) {
-        toast.error("Não foi possível localizar o endereço da loja");
+        toast.error("Não foi possível localizar o endereço da loja via Mapbox");
         return;
       }
+
       const next = [...stops];
       for (let i = 0; i < next.length; i++) {
         if (!next[i].delivery_address.trim()) continue;
-        const dest = await geocode(next[i].delivery_address);
-        if (dest) {
-          const km = haversineKm(origin, dest);
-          next[i] = { ...next[i], distance_km: km.toFixed(2) };
+        const dest = await geocodeAddress(next[i].delivery_address);
+        if (dest?.coordinates) {
+          const route = await calculateRoute(
+            origin,
+            { lat: dest.coordinates.latitude, lng: dest.coordinates.longitude },
+            { profile: "driving" }
+          );
+          next[i] = { ...next[i], distance_km: route.distanceKm.toFixed(2) };
         }
       }
       setStops(next);
-      toast.success("Distâncias calculadas");
+      toast.success("Distâncias calculadas via Mapbox");
     } catch (e: any) {
-      toast.error("Erro ao calcular distâncias");
+      toast.error(e?.userMessage || "Erro ao calcular distâncias via Mapbox");
     } finally {
       setCalculating(false);
     }

@@ -1,90 +1,83 @@
 import { useState, useEffect } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
-import { Ticket, Copy, Trash2, Percent, Save, Wallet, User } from "lucide-react";
+import { Ticket, Copy, Trash2, Percent, Save, Wallet, Store, ShieldCheck, Loader2 } from "lucide-react";
 
-const generateCode = () => {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let code = "";
-  for (let i = 0; i < 8; i++) code += chars[Math.floor(Math.random() * chars.length)];
-  return code;
-};
+export interface StoreItem {
+  id: string;
+  name: string;
+  owner_id: string | null;
+  phone: string | null;
+  balance: number;
+}
 
 const CreditsTab = () => {
   const queryClient = useQueryClient();
+
+  // State: Code generation
   const [quantity, setQuantity] = useState("1");
   const [value, setValue] = useState("10");
-  const [assignedTo, setAssignedTo] = useState<string>("");
+  const [targetStoreId, setTargetStoreId] = useState<string>("");
   const [generating, setGenerating] = useState(false);
+
+  // State: Promotion config
   const [promoPercent, setPromoPercent] = useState("");
   const [savingPromo, setSavingPromo] = useState(false);
 
-  // Direct recharge
-  const [directStore, setDirectStore] = useState<string>("");
+  // State: Direct recharge
+  const [directStoreId, setDirectStoreId] = useState<string>("");
   const [directAmount, setDirectAmount] = useState("50");
-  const [directPromo, setDirectPromo] = useState(false);
+  const [directPromo, setDirectPromo] = useState(true);
   const [directLoading, setDirectLoading] = useState(false);
+  const [idempotencyKey, setIdempotencyKey] = useState<string>(() => crypto.randomUUID());
 
-  const { data: storeOwners = [] } = useQuery({
-    queryKey: ["admin-store-owners"],
+  // 1. Query: Registered stores (restaurants table) with current balance
+  const { data: stores = [] } = useQuery<StoreItem[]>({
+    queryKey: ["admin-stores-list-credits"],
     queryFn: async () => {
-      // Try the RPC first (includes emails via auth.users)
-      const rpc = await supabase.rpc("admin_list_store_owners");
-      if (!rpc.error && Array.isArray(rpc.data) && rpc.data.length > 0) {
-        return rpc.data as any[];
-      }
-      if (rpc.error) {
-        console.warn("[CreditsTab] admin_list_store_owners falhou, usando fallback:", rpc.error.message);
-      }
-      // Fallback: query user_roles + profiles directly (admin RLS allows it)
-      const { data: roles, error: rolesErr } = await supabase
-        .from("user_roles")
-        .select("user_id")
-        .eq("role", "store_owner");
-      if (rolesErr) {
-        toast.error("Erro ao carregar lojistas: " + rolesErr.message);
-        throw rolesErr;
-      }
-      const ids = (roles || []).map((r: any) => r.user_id);
-      if (ids.length === 0) return [];
-      const { data: profiles, error: profErr } = await supabase
-        .from("profiles")
-        .select("user_id, full_name, phone")
-        .in("user_id", ids);
-      if (profErr) {
-        toast.error("Erro ao carregar perfis: " + profErr.message);
-        throw profErr;
-      }
-      const map = new Map((profiles || []).map((p: any) => [p.user_id, p]));
-      return ids.map((id) => {
-        const p: any = map.get(id) || {};
-        return {
-          user_id: id,
-          full_name: p.full_name || "",
-          email: p.phone || id.slice(0, 8),
-        };
-      });
+      const [{ data: restaurants, error: rErr }, { data: credits, error: cErr }] = await Promise.all([
+        supabase.from("restaurants").select("id, name, owner_id, phone").order("name"),
+        supabase.from("store_credits").select("user_id, balance"),
+      ]);
+
+      if (rErr) throw rErr;
+      if (cErr) console.warn("store_credits query warning:", cErr);
+
+      const creditsMap = new Map((credits || []).map((c) => [c.user_id, Number(c.balance || 0)]));
+      return (restaurants || []).map((r) => ({
+        id: r.id,
+        name: r.name,
+        owner_id: r.owner_id,
+        phone: r.phone,
+        balance: r.owner_id ? (creditsMap.get(r.owner_id) ?? 0) : 0,
+      }));
     },
   });
 
+  // 2. Query: Credit codes list
   const { data: codes = [] } = useQuery({
     queryKey: ["admin-credit-codes"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("credit_codes").select("*").order("created_at", { ascending: false }).limit(100);
+      const { data, error } = await supabase
+        .from("credit_codes")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(100);
       if (error) throw error;
       return data;
     },
   });
 
+  // 3. Query: Delivery config for promo percent
   const { data: config } = useQuery({
     queryKey: ["delivery-config"],
     queryFn: async () => {
@@ -100,8 +93,16 @@ const CreditsTab = () => {
     }
   }, [config]);
 
-  const storeLabel = (o: any) => o.full_name?.trim() ? `${o.full_name} — ${o.email}` : o.email;
+  const activePromoPercent = Number((config as any)?.promo_credit_percent || 0);
 
+  // Direct recharge calculations
+  const selectedDirectStore = stores.find((s) => s.id === directStoreId);
+  const currentDirectBalance = selectedDirectStore?.balance ?? 0;
+  const parsedDirectVal = parseFloat(directAmount) || 0;
+  const directBonus = directPromo && activePromoPercent > 0 ? (parsedDirectVal * activePromoPercent) / 100 : 0;
+  const directTotalCredited = parsedDirectVal + directBonus;
+
+  // Handler: Save promotion
   const handleSavePromo = async () => {
     const percent = parseFloat(promoPercent);
     if (isNaN(percent) || percent < 0 || percent > 100) {
@@ -125,47 +126,135 @@ const CreditsTab = () => {
     }
   };
 
-  const handleGenerate = async () => {
-    const qty = parseInt(quantity) || 1;
-    const val = parseFloat(value) || 10;
-    if (qty < 1 || qty > 50) { toast.error("Gere entre 1 e 50 códigos"); return; }
-    if (!assignedTo) { toast.error("Selecione o lojista destinatário"); return; }
-    setGenerating(true);
+  // Handler: Direct Recharge (using LOJAS with Idempotency)
+  const handleDirectRecharge = async () => {
+    if (!selectedDirectStore) {
+      toast.error("Selecione a loja destinatária da recarga");
+      return;
+    }
+    if (parsedDirectVal <= 0) {
+      toast.error("Informe um valor numérico válido maior que zero");
+      return;
+    }
+    if (!selectedDirectStore.owner_id) {
+      toast.error(`A loja "${selectedDirectStore.name}" não possui usuário proprietário associado.`);
+      return;
+    }
+
+    setDirectLoading(true);
     try {
-      const newCodes = Array.from({ length: qty }, () => ({
-        code: generateCode(),
-        value: val,
-        assigned_to_user_id: assignedTo,
-      }));
-      const { error } = await supabase.from("credit_codes").insert(newCodes as any);
-      if (error) throw error;
-      toast.success(`${qty} código(s) gerado(s) para o lojista!`);
+      // Invoke Edge Function with store_id and idempotency key
+      const { data, error } = await supabase.functions.invoke("admin-recharge-store", {
+        body: {
+          store_id: selectedDirectStore.id,
+          store_owner_id: selectedDirectStore.owner_id,
+          amount: parsedDirectVal,
+          apply_promo: directPromo,
+          idempotency_key: idempotencyKey,
+        },
+      });
+
+      if (error) {
+        // Fallback to RPC
+        const { data: rpcData, error: rpcError } = await supabase.rpc("admin_recharge_store", {
+          p_store_owner_id: selectedDirectStore.owner_id,
+          p_amount: parsedDirectVal,
+          p_apply_promo: directPromo,
+        });
+        if (rpcError) throw rpcError;
+
+        const directCode = `RECARGA-${selectedDirectStore.name.replace(/[^A-Za-z0-9]/g, "").slice(0, 4).toUpperCase()}-${idempotencyKey.slice(0, 6).toUpperCase()}`;
+        await supabase.from("credit_codes").insert({
+          code: directCode,
+          value: directTotalCredited,
+          assigned_to_user_id: selectedDirectStore.owner_id,
+          used_by: selectedDirectStore.owner_id,
+          is_used: true,
+          used_at: new Date().toISOString(),
+        } as any);
+
+        toast.success(
+          `Recarga de R$ ${parsedDirectVal.toFixed(2)} creditada na loja "${selectedDirectStore.name}"! Total creditado: R$ ${Number(rpcData || directTotalCredited).toFixed(2)}`
+        );
+      } else if (!data?.success) {
+        throw new Error(data?.message || "Erro ao realizar recarga");
+      } else {
+        toast.success(data.message);
+      }
+
+      setDirectAmount("50");
+      setDirectStoreId("");
+      setIdempotencyKey(crypto.randomUUID());
+      queryClient.invalidateQueries({ queryKey: ["admin-stores-list-credits"] });
       queryClient.invalidateQueries({ queryKey: ["admin-credit-codes"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-financial-data"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-store-credits"] });
     } catch (err: any) {
-      toast.error(err.message || "Erro ao gerar");
+      toast.error(err.message || "Erro na recarga da loja");
     } finally {
-      setGenerating(false);
+      setDirectLoading(false);
     }
   };
 
-  const handleDirectRecharge = async () => {
-    const amount = parseFloat(directAmount);
-    if (!directStore) { toast.error("Selecione o lojista"); return; }
-    if (isNaN(amount) || amount <= 0) { toast.error("Valor inválido"); return; }
-    setDirectLoading(true);
+  // Handler: Generate Credit Codes (linked to LOJA)
+  const handleGenerate = async () => {
+    const qty = parseInt(quantity) || 1;
+    const val = parseFloat(value) || 10;
+    if (qty < 1 || qty > 50) {
+      toast.error("Gere entre 1 e 50 códigos");
+      return;
+    }
+    if (!targetStoreId) {
+      toast.error("Selecione a loja destinatária dos códigos");
+      return;
+    }
+
+    const store = stores.find((s) => s.id === targetStoreId);
+    if (!store) {
+      toast.error("Loja não encontrada");
+      return;
+    }
+    if (!store.owner_id) {
+      toast.error(`A loja "${store.name}" não possui usuário associado para resgate.`);
+      return;
+    }
+
+    setGenerating(true);
     try {
-      const { data, error } = await supabase.rpc("admin_recharge_store", {
-        p_store_owner_id: directStore,
-        p_amount: amount,
-        p_apply_promo: directPromo,
+      // Invoke Edge Function
+      const { data, error } = await supabase.functions.invoke("generate-credit-codes", {
+        body: {
+          store_id: store.id,
+          store_owner_id: store.owner_id,
+          value: val,
+          quantity: qty,
+          expiration_days: 30,
+        },
       });
-      if (error) throw error;
-      toast.success(`Recarga concluída: R$ ${Number(data).toFixed(2)} creditados`);
-      setDirectAmount("50");
+
+      if (error) {
+        // Fallback to direct insert
+        const prefix = store.name.replace(/[^A-Za-z0-9]/g, "").slice(0, 4).toUpperCase();
+        const newCodes = Array.from({ length: qty }, () => ({
+          code: `${prefix ? `${prefix}-` : ""}CRED-${Math.round(val)}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`,
+          value: val,
+          assigned_to_user_id: store.owner_id,
+        }));
+        const { error: insertErr } = await supabase.from("credit_codes").insert(newCodes as any);
+        if (insertErr) throw insertErr;
+        toast.success(`${qty} código(s) gerado(s) para a loja "${store.name}"!`);
+      } else if (!data?.success) {
+        throw new Error(data?.message || "Erro ao gerar códigos");
+      } else {
+        toast.success(data.message || `${qty} código(s) gerado(s) com sucesso!`);
+      }
+
+      setQuantity("1");
+      queryClient.invalidateQueries({ queryKey: ["admin-credit-codes"] });
     } catch (err: any) {
-      toast.error(err.message || "Erro na recarga");
+      toast.error(err.message || "Erro ao gerar códigos");
     } finally {
-      setDirectLoading(false);
+      setGenerating(false);
     }
   };
 
@@ -185,120 +274,206 @@ const CreditsTab = () => {
     }
   };
 
-  const storeNameById = (id?: string | null) => {
-    if (!id) return "—";
-    const o = (storeOwners as any[]).find((s) => s.user_id === id);
-    return o ? storeLabel(o) : id.slice(0, 8);
+  // Helper to resolve store name by owner_id or store_id
+  const getStoreName = (assignedUserId?: string | null) => {
+    if (!assignedUserId) return "Geral (Sem Loja)";
+    const match = stores.find((s) => s.owner_id === assignedUserId);
+    return match ? match.name : assignedUserId.slice(0, 8);
   };
 
   return (
     <div className="space-y-4">
-      {/* Recarga Direta */}
+      {/* Recarga Direta na Loja */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
-            <Wallet className="w-4 h-4" /> Recarga Direta (crédito imediato no lojista)
+            <Store className="w-5 h-5 text-teal-600 dark:text-teal-400" />
+            Recarga Direta na Loja (Crédito Imediato no Saldo)
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          <p className="text-xs text-muted-foreground">
+            Selecione a loja cadastrada para injetar saldo de créditos diretamente na carteira, com controle de idempotência e auditoria.
+          </p>
           <div className="grid gap-3 md:grid-cols-[1fr_140px_auto_auto] items-end">
-            <div className="space-y-2">
-              <Label>Lojista *</Label>
-              <Select value={directStore} onValueChange={setDirectStore}>
-                <SelectTrigger><SelectValue placeholder="Selecione o lojista" /></SelectTrigger>
-                <SelectContent>
-                  {(storeOwners as any[]).map((o) => (
-                    <SelectItem key={o.user_id} value={o.user_id}>{storeLabel(o)}</SelectItem>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Loja Destinatária *</Label>
+              <Select value={directStoreId} onValueChange={setDirectStoreId}>
+                <SelectTrigger className="text-xs">
+                  <SelectValue placeholder="Selecione a loja..." />
+                </SelectTrigger>
+                <SelectContent className="max-h-60">
+                  {stores.map((s) => (
+                    <SelectItem key={s.id} value={s.id} className="text-xs">
+                      <span className="font-semibold">{s.name}</span>{" "}
+                      <span className="text-muted-foreground">(Saldo: R$ {s.balance.toFixed(2)})</span>
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2">
-              <Label>Valor (R$)</Label>
-              <Input type="number" step="10" value={directAmount} onChange={(e) => setDirectAmount(e.target.value)} />
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Valor (R$) *</Label>
+              <Input
+                type="number"
+                step="5"
+                min="1"
+                value={directAmount}
+                onChange={(e) => setDirectAmount(e.target.value)}
+                className="text-xs font-semibold"
+              />
             </div>
-            <label className="flex items-center gap-2 text-sm">
-              <Checkbox checked={directPromo} onCheckedChange={(v) => setDirectPromo(Boolean(v))} />
-              Aplicar promoção
+            <label className="flex items-center gap-2 text-xs cursor-pointer pb-2.5">
+              <Checkbox
+                checked={directPromo}
+                onCheckedChange={(v) => setDirectPromo(Boolean(v))}
+              />
+              <span>Aplicar bônus ({activePromoPercent}%)</span>
             </label>
-            <Button onClick={handleDirectRecharge} disabled={directLoading}>
-              {directLoading ? "Creditando..." : "Creditar agora"}
+            <Button
+              onClick={handleDirectRecharge}
+              disabled={directLoading || !directStoreId || parsedDirectVal <= 0}
+              className="bg-teal-600 hover:bg-teal-700 text-white text-xs h-9"
+            >
+              {directLoading ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> Creditando...
+                </>
+              ) : (
+                "Creditar na Loja"
+              )}
             </Button>
           </div>
+
+          {selectedDirectStore && (
+            <div className="flex flex-wrap items-center gap-4 p-2.5 rounded-lg bg-muted/40 border text-xs">
+              <div>
+                Loja: <strong className="text-foreground">{selectedDirectStore.name}</strong>
+              </div>
+              <div>
+                Saldo Atual: <strong className="text-foreground">R$ {currentDirectBalance.toFixed(2)}</strong>
+              </div>
+              {directBonus > 0 && (
+                <div className="text-amber-600 dark:text-amber-400">
+                  Bônus: <strong>+ R$ {directBonus.toFixed(2)}</strong>
+                </div>
+              )}
+              <div className="text-teal-600 dark:text-teal-400 font-medium">
+                Total Creditado: <strong>+ R$ {directTotalCredited.toFixed(2)}</strong>
+              </div>
+              <div className="text-primary font-bold ml-auto flex items-center gap-1">
+                <ShieldCheck className="w-3.5 h-3.5 text-teal-600" />
+                Novo Saldo: R$ {(currentDirectBalance + directTotalCredited).toFixed(2)}
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
-      {/* Seção Promoção */}
+      {/* Configuração de Promoção */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
-            <Percent className="w-4 h-4" /> Configuração de Promoção
+            <Percent className="w-4 h-4" /> Configuração de Bônus Promocional
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <p className="text-sm text-muted-foreground">
-            Porcentagem extra aplicada em resgates de código e (opcionalmente) em recargas diretas.
+        <CardContent className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Porcentagem extra aplicada nas recargas e resgates de códigos pelas lojas.
           </p>
           <div className="flex gap-3 items-end">
-            <div className="space-y-2">
-              <Label>Porcentagem (%)</Label>
-              <Input type="number" min="0" max="100" step="1" placeholder="Ex: 10" value={promoPercent} onChange={(e) => setPromoPercent(e.target.value)} className="w-32" />
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Porcentagem (%)</Label>
+              <Input
+                type="number"
+                min="0"
+                max="100"
+                step="1"
+                placeholder="Ex: 10"
+                value={promoPercent}
+                onChange={(e) => setPromoPercent(e.target.value)}
+                className="w-32 text-xs"
+              />
             </div>
-            <Button onClick={handleSavePromo} disabled={savingPromo}>
+            <Button onClick={handleSavePromo} disabled={savingPromo} size="sm">
               <Save className="w-4 h-4 mr-1" />
               {savingPromo ? "Salvando..." : "Salvar"}
             </Button>
           </div>
-          {config && (config as any).promo_credit_percent > 0 && (
-            <p className="text-sm text-primary font-medium">
-              Promoção ativa: {(config as any).promo_credit_percent}% de crédito extra
+          {activePromoPercent > 0 && (
+            <p className="text-xs text-primary font-medium">
+              Promoção ativa no sistema: {activePromoPercent}% de crédito extra nas recargas.
             </p>
           )}
         </CardContent>
       </Card>
 
-      {/* Gerar Códigos vinculados */}
+      {/* Gerar Códigos de Crédito Vinculados à LOJA */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
-            <Ticket className="w-4 h-4" /> Gerar Códigos de Crédito (vinculados a um lojista)
+            <Ticket className="w-4 h-4" /> Gerar Códigos de Crédito (Vinculados a uma Loja)
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          <p className="text-xs text-muted-foreground">
+            Gera tíquetes de recarga que só podem ser resgatados pela loja selecionada no painel dela.
+          </p>
           <div className="grid gap-3 md:grid-cols-[1fr_120px_140px_auto] items-end">
-            <div className="space-y-2">
-              <Label>Lojista destinatário *</Label>
-              <Select value={assignedTo} onValueChange={setAssignedTo}>
-                <SelectTrigger><SelectValue placeholder="Selecione o lojista" /></SelectTrigger>
-                <SelectContent>
-                  {(storeOwners as any[]).map((o) => (
-                    <SelectItem key={o.user_id} value={o.user_id}>{storeLabel(o)}</SelectItem>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Loja Destinatária *</Label>
+              <Select value={targetStoreId} onValueChange={setTargetStoreId}>
+                <SelectTrigger className="text-xs">
+                  <SelectValue placeholder="Selecione a loja..." />
+                </SelectTrigger>
+                <SelectContent className="max-h-60">
+                  {stores.map((s) => (
+                    <SelectItem key={s.id} value={s.id} className="text-xs">
+                      <span className="font-semibold">{s.name}</span>{" "}
+                      <span className="text-muted-foreground">(Saldo: R$ {s.balance.toFixed(2)})</span>
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2">
-              <Label>Quantidade</Label>
-              <Input type="number" min="1" max="50" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Quantidade</Label>
+              <Input
+                type="number"
+                min="1"
+                max="50"
+                value={quantity}
+                onChange={(e) => setQuantity(e.target.value)}
+                className="text-xs"
+              />
             </div>
-            <div className="space-y-2">
-              <Label>Valor (R$)</Label>
-              <Input type="number" step="5" value={value} onChange={(e) => setValue(e.target.value)} />
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Valor (R$)</Label>
+              <Input
+                type="number"
+                step="5"
+                min="1"
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+                className="text-xs font-semibold"
+              />
             </div>
-            <Button onClick={handleGenerate} disabled={generating}>
-              {generating ? "Gerando..." : "Gerar"}
+            <Button
+              onClick={handleGenerate}
+              disabled={generating || !targetStoreId}
+              size="sm"
+              className="h-9 text-xs"
+            >
+              {generating ? "Gerando..." : "Gerar Códigos"}
             </Button>
           </div>
-          <p className="text-xs text-muted-foreground">
-            Apenas o lojista selecionado poderá resgatar estes códigos.
-          </p>
         </CardContent>
       </Card>
 
       {/* Tabela de Códigos */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Códigos Gerados</CardTitle>
+          <CardTitle className="text-base">Histórico de Códigos e Recargas</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
           <Table>
@@ -306,43 +481,59 @@ const CreditsTab = () => {
               <TableRow>
                 <TableHead>Código</TableHead>
                 <TableHead>Valor</TableHead>
-                <TableHead>Vinculado a</TableHead>
+                <TableHead>Loja Vinculada</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead>Ações</TableHead>
+                <TableHead className="w-24">Ações</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {codes.map((c: any) => (
                 <TableRow key={c.id}>
-                  <TableCell className="font-mono font-bold">{c.code}</TableCell>
-                  <TableCell>R$ {Number(c.value).toFixed(2)}</TableCell>
+                  <TableCell className="font-mono font-bold text-xs">{c.code}</TableCell>
+                  <TableCell className="text-xs">R$ {Number(c.value).toFixed(2)}</TableCell>
                   <TableCell className="text-xs">
-                    <div className="flex items-center gap-1">
-                      <User className="w-3 h-3 opacity-60" />
-                      {storeNameById(c.assigned_to_user_id)}
+                    <div className="flex items-center gap-1.5">
+                      <Store className="w-3.5 h-3.5 text-primary opacity-80" />
+                      <span className="font-medium">{getStoreName(c.assigned_to_user_id)}</span>
                     </div>
                   </TableCell>
                   <TableCell>
-                    <Badge variant={c.is_used ? "secondary" : "default"}>
-                      {c.is_used ? "Usado" : "Disponível"}
+                    <Badge variant={c.is_used ? "secondary" : "default"} className="text-[11px]">
+                      {c.is_used ? "Utilizado" : "Disponível"}
                     </Badge>
                   </TableCell>
                   <TableCell>
                     <div className="flex gap-1">
                       {!c.is_used && (
-                        <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => copyCode(c.code)}>
-                          <Copy className="w-4 h-4" />
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7"
+                          onClick={() => copyCode(c.code)}
+                          title="Copiar código"
+                        >
+                          <Copy className="w-3.5 h-3.5" />
                         </Button>
                       )}
-                      <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" onClick={() => handleDelete(c.id)}>
-                        <Trash2 className="w-4 h-4" />
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7 text-destructive"
+                        onClick={() => handleDelete(c.id)}
+                        title="Excluir código"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
                       </Button>
                     </div>
                   </TableCell>
                 </TableRow>
               ))}
               {codes.length === 0 && (
-                <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-8">Nenhum código gerado</TableCell></TableRow>
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center text-muted-foreground py-8 text-xs">
+                    Nenhum código gerado até o momento.
+                  </TableCell>
+                </TableRow>
               )}
             </TableBody>
           </Table>

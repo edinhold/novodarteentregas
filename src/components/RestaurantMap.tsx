@@ -3,6 +3,7 @@ import { Restaurant } from "@/types";
 import { DEFAULT_CENTER, DEFAULT_ZOOM, MAP_LAYERS } from "@/config/maps";
 import { useNavigate } from "react-router-dom";
 import { useDriverLocations } from "@/hooks/useDriverLocations";
+import { geocodeAddress } from "@/services/mapbox";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -123,17 +124,10 @@ const geocodeRestaurant = async (restaurant: Restaurant): Promise<RestaurantWith
     const address = getGeocodeAddress(restaurant);
     if (!address) return null;
 
-    const url = new URL("https://nominatim.openstreetmap.org/search");
-    url.searchParams.set("format", "jsonv2");
-    url.searchParams.set("limit", "1");
-    url.searchParams.set("countrycodes", "br");
-    url.searchParams.set("q", address);
+    const result = await geocodeAddress(address);
+    if (!result?.coordinates) return null;
 
-    const response = await fetch(url.toString());
-    if (!response.ok) return null;
-    const [result] = await response.json();
-    const latitude = Number(result?.lat);
-    const longitude = Number(result?.lon);
+    const { latitude, longitude } = result.coordinates;
     if (!isValidCoordinate(latitude, longitude)) return null;
 
     cachePosition(restaurant, latitude, longitude);

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { User, Session } from "@supabase/supabase-js";
+import { autoRegisterDriverDevice, logoutPush } from "@/lib/push";
 
 export type AppRole = "admin" | "store_owner" | "driver" | "customer";
 
@@ -101,6 +102,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.log("[Auth] Role carregada:", resolved);
       setRole(resolved);
       setRoleLoading(false);
+
+      if (resolved === "driver" && uid) {
+        // Automatically registers driver device with OneSignal
+        void autoRegisterDriverDevice(uid);
+      }
     };
 
 
@@ -175,6 +181,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signOut = async () => {
     try { sessionStorage.removeItem("authRedirectDone"); } catch {}
+    if (user?.id) {
+      try {
+        await logoutPush(user.id);
+      } catch (e) {
+        console.warn("[Auth] Erro ao deslogar push:", e);
+      }
+    }
     await supabase.auth.signOut();
   };
 

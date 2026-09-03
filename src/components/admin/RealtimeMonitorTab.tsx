@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Layers, Truck, Package, Users, Search, Activity } from "lucide-react";
 import { MAP_LAYERS } from "@/config/maps";
 import MapErrorBoundary from "@/components/MapErrorBoundary";
+import { geocodeAddress } from "@/services/mapbox";
 
 import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
 import markerIcon from "leaflet/dist/images/marker-icon.png";
@@ -38,18 +39,6 @@ const iconAvailable = svgIcon("#22c55e", 28);
 const iconBusy = svgIcon("#ef4444", 32);
 const iconStore = svgIcon("#f59e0b", 28);
 const iconDest = svgIcon("#a855f7", 26);
-
-async function geocode(address: string): Promise<{ lat: number; lng: number } | null> {
-  try {
-    const res = await fetch(
-      `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(address + ", Primavera do Leste, MT")}`,
-      { headers: { Accept: "application/json" } }
-    );
-    const data = await res.json();
-    if (data?.[0]) return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
-  } catch {}
-  return null;
-}
 
 const RealtimeMonitorContent = () => {
   const qc = useQueryClient();
@@ -258,8 +247,9 @@ const RealtimeMonitorContent = () => {
         if (!loc?.latitude || !loc?.longitude) continue;
         const target = a.status === "picked_up" ? a.delivery_address : a.pickup_address;
         if (!target) continue;
-        const coords = await geocode(target);
-        if (!coords) continue;
+        const res = await geocodeAddress(target);
+        if (!res?.coordinates) continue;
+        const coords = { lat: res.coordinates.latitude, lng: res.coordinates.longitude };
 
         const color = a.status === "picked_up" ? "#a855f7" : "#f59e0b";
         const line = L.polyline(

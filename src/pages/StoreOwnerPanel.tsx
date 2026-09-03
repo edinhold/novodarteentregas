@@ -20,6 +20,7 @@ import AppSidebar from "@/components/AppSidebar";
 import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/sidebar";
 import { useIsMobile } from "@/hooks/use-mobile";
 import AdminSupportPanel from "@/components/AdminSupportPanel";
+import { AssignedDriverCard } from "@/components/store/AssignedDriverCard";
 
 const StoreOwnerPanel = () => {
   const { user, loading } = useAuth();
@@ -62,7 +63,11 @@ const StoreOwnerPanel = () => {
     enabled: !!user,
   });
 
-  const activeRequest = requests.find((r: any) => ["accepted", "picked_up"].includes(r.status));
+  // Active request prioritized: accepted/in_transit first, or pending request awaiting driver
+  const activeRequest =
+    requests.find((r: any) => ["accepted", "picked_up", "in_transit"].includes(r.status)) ||
+    requests.find((r: any) => r.status === "pending") ||
+    null;
 
   const { data: chatMessages = [] } = useQuery({
     queryKey: ["chat-messages", activeRequest?.id],
@@ -83,16 +88,19 @@ const StoreOwnerPanel = () => {
   useEffect(() => {
     if (!user) return;
     const channel = supabase.channel("store-owner-realtime")
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "delivery_requests", filter: `store_owner_id=eq.${user.id}` }, (payload: any) => {
-        queryClient.invalidateQueries({ queryKey: ["my-delivery-requests", user.id] });
-        if (payload.new?.status === "accepted" && payload.old?.status === "pending") {
-          toast.success("🎉 Um entregador aceitou sua entrega!", { duration: 8000 });
-          if ("Notification" in window && Notification.permission === "granted") {
-            new Notification("Entrega Aceita!", { body: "Um entregador aceitou seu pedido de entrega.", icon: "/favicon.ico" });
+      .on("postgres_changes", { event: "*", schema: "public", table: "delivery_requests", filter: `store_owner_id=eq.${user.id}` }, (payload: any) => {
+        queryClient.invalidateQueries({ queryKey: ["my-delivery-requests"] });
+        queryClient.invalidateQueries({ queryKey: ["assigned-driver-info"] });
+        if (payload.eventType === "UPDATE") {
+          if (payload.new?.status === "accepted" && payload.old?.status === "pending") {
+            toast.success("🎉 Um entregador aceitou sua entrega!", { duration: 8000 });
+            if ("Notification" in window && Notification.permission === "granted") {
+              new Notification("Entrega Aceita!", { body: "Um entregador aceitou seu pedido de entrega.", icon: "/favicon.ico" });
+            }
           }
+          if (payload.new?.status === "picked_up") toast.info("📦 Entregador coletou o pedido!");
+          if (payload.new?.status === "delivered") toast.success("✅ Entrega concluída!");
         }
-        if (payload.new?.status === "picked_up") toast.info("📦 Entregador coletou o pedido!");
-        if (payload.new?.status === "delivered") toast.success("✅ Entrega concluída!");
       })
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_messages" }, (payload: any) => {
         if (activeRequest) {
@@ -107,7 +115,7 @@ const StoreOwnerPanel = () => {
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [user, activeRequest?.id]);
+  }, [user, activeRequest?.id, queryClient]);
 
   if (loading || !user) {
     return (
@@ -133,6 +141,27 @@ const StoreOwnerPanel = () => {
           </header>
 
           <main className="p-4 max-w-4xl mx-auto w-full">
+            {activeRequest && activeTab !== "driver" && (
+              <div className="mb-4">
+                <AssignedDriverCard
+                  activeRequest={activeRequest}
+                  onCancelRequest={async (requestId) => {
+                    if (!confirm("Cancelar esta corrida? Os créditos descontados serão devolvidos à sua loja.")) return;
+                    try {
+                      const { data, error } = await (supabase as any).rpc("cancel_delivery_request", { p_request_id: requestId });
+                      if (error) throw error;
+                      if (!data) throw new Error("Não foi possível cancelar");
+                      toast.success("Corrida cancelada. Créditos devolvidos!");
+                      queryClient.invalidateQueries({ queryKey: ["my-delivery-requests"] });
+                      queryClient.invalidateQueries({ queryKey: ["my-credits"] });
+                    } catch (err: any) {
+                      toast.error(err.message || "Erro ao cancelar corrida");
+                    }
+                  }}
+                />
+              </div>
+            )}
+
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
               {isMobile && (
                 <TabsList className="grid w-full grid-cols-9 bg-muted/50 p-1 rounded-xl mb-4">

@@ -56,33 +56,86 @@ const AdminDashboard = () => {
 
   // Protect admin route
   useEffect(() => {
-    const checkAdmin = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        navigate("/admin/login", { replace: true });
-        return;
-      }
-      const { data: isAdmin, error: roleError } = await supabase.rpc("has_role", {
-        _user_id: session.user.id,
-        _role: "admin",
-      });
-      if (roleError) {
-        setAuthError("Não foi possível verificar sua permissão. Tente novamente em instantes.");
-        toast.error("Erro ao verificar permissão de administrador.");
-        return;
-      }
-      if (!isAdmin) {
-        toast.error("Acesso negado. Sua conta não possui permissão de administrador.", {
-          description: `Conta: ${session.user.email}`,
-          duration: 6000,
+    let mounted = true;
+
+    const verifyAdmin = async (userId: string, email?: string) => {
+      try {
+        const { data: isAdmin, error: roleError } = await supabase.rpc("has_role", {
+          _user_id: userId,
+          _role: "admin",
         });
-        await supabase.auth.signOut();
-        navigate("/admin/login", { replace: true });
+
+        if (!mounted) return;
+
+        if (roleError) {
+          console.warn("[AdminDashboard] Erro has_role, tentando fallback:", roleError);
+          const { data: roles } = await supabase
+            .from("user_roles")
+            .select("role")
+            .eq("user_id", userId);
+          const hasAdmin = Array.isArray(roles) && roles.some((r: any) => r.role === "admin");
+          if (hasAdmin) {
+            setAuthChecked(true);
+            return;
+          }
+          setAuthError("Não foi possível verificar sua permissão. Tente novamente em instantes.");
+          toast.error("Erro ao verificar permissão de administrador.");
+          return;
+        }
+
+        if (!isAdmin) {
+          toast.error("Acesso negado. Sua conta não possui permissão de administrador.", {
+            description: email ? `Conta: ${email}` : undefined,
+            duration: 6000,
+          });
+          await supabase.auth.signOut();
+          if (mounted) navigate("/admin/login", { replace: true });
+          return;
+        }
+
+        setAuthChecked(true);
+      } catch (err: any) {
+        if (mounted) {
+          setAuthError("Erro ao verificar permissões.");
+        }
+      }
+    };
+
+    const checkAdmin = async () => {
+      const hasOAuthParams =
+        window.location.hash.includes("access_token") ||
+        window.location.search.includes("code=");
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        await verifyAdmin(session.user.id, session.user.email);
         return;
       }
-      setAuthChecked(true);
+
+      // If returning from OAuth redirect, don't immediately redirect to login;
+      // let onAuthStateChange process the tokens.
+      if (hasOAuthParams) {
+        return;
+      }
+
+      navigate("/admin/login", { replace: true });
     };
+
     checkAdmin();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!mounted) return;
+      if (event === "SIGNED_IN" && session?.user) {
+        await verifyAdmin(session.user.id, session.user.email);
+      } else if (event === "SIGNED_OUT") {
+        navigate("/admin/login", { replace: true });
+      }
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, [navigate]);
 
   // Realtime: notify admin on new withdrawal requests

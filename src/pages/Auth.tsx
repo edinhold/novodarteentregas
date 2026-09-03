@@ -89,11 +89,13 @@ const Auth = () => {
   const handleGoogleLogin = async () => {
     try {
       setLoading(true);
-      const { error } = await lovable.auth.signInWithOAuth("google", {
+      const result = await lovable.auth.signInWithOAuth("google", {
         redirect_uri: window.location.origin,
       });
-      if (error) {
-        toast.error((error as any).message || "Erro ao conectar com Google. Verifique a configuração do provedor.");
+      if (result?.error) {
+        toast.error((result.error as any).message || "Erro ao conectar com Google. Verifique a configuração do provedor.");
+      } else if ((result as any)?.popup) {
+        toast.info("Janela de autenticação com Google aberta.");
       }
     } catch (err: any) {
       toast.error(err?.message || "Erro ao conectar com Google");
@@ -105,11 +107,13 @@ const Auth = () => {
   const handleAppleLogin = async () => {
     try {
       setLoading(true);
-      const { error } = await lovable.auth.signInWithOAuth("apple", {
+      const result = await lovable.auth.signInWithOAuth("apple", {
         redirect_uri: window.location.origin,
       });
-      if (error) {
-        toast.error((error as any).message || "Erro ao conectar com Apple");
+      if (result?.error) {
+        toast.error((result.error as any).message || "Erro ao conectar com Apple");
+      } else if ((result as any)?.popup) {
+        toast.info("Janela de autenticação com Apple aberta.");
       }
     } catch (err: any) {
       toast.error(err?.message || "Erro ao conectar com Apple");

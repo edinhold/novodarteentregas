@@ -52,3 +52,58 @@ export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABL
     autoRefreshToken: true,
   }
 });
+
+// Configure functions invocation to use the application server endpoints without CORS or 404 issues
+if (typeof window !== "undefined") {
+  try {
+    const origInvoke = supabase.functions.invoke.bind(supabase.functions);
+    supabase.functions.invoke = async (functionName: string, options: any = {}) => {
+      try {
+        const session = (await supabase.auth.getSession()).data.session;
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json",
+          ...(options.headers || {}),
+        };
+        if (session?.access_token) {
+          headers["Authorization"] = `Bearer ${session.access_token}`;
+        }
+        if (SUPABASE_PUBLISHABLE_KEY) {
+          headers["apikey"] = SUPABASE_PUBLISHABLE_KEY;
+        }
+
+        const localUrl = `${window.location.origin}/functions/v1/${functionName}`;
+        const res = await fetch(localUrl, {
+          method: options.method || "POST",
+          headers,
+          body: options.body ? JSON.stringify(options.body) : undefined,
+        });
+
+        if (res.ok) {
+          const data = await res.json().catch(() => ({}));
+          return { data, error: null };
+        }
+
+        // If local returned a non-OK status, extract JSON or error text
+        const errJson = await res.json().catch(() => null);
+        if (errJson) {
+          return { data: errJson, error: new Error(errJson.message || errJson.error || `HTTP ${res.status}`) };
+        }
+
+        return { data: null, error: new Error(`Erro ao chamar a Edge Function (${res.status})`) };
+      } catch (err: any) {
+        console.warn(`[functions.invoke] Local dispatch error for ${functionName}:`, err);
+        // Fallback to original invoke
+        try {
+          return await origInvoke(functionName, options);
+        } catch (origErr: any) {
+          return {
+            data: { success: false, code: "ERRO_CONEXAO", message: origErr.message || "Erro de conexão com a função." },
+            error: origErr,
+          };
+        }
+      }
+    };
+  } catch (e) {
+    console.warn("Could not enhance supabase.functions.invoke", e);
+  }
+}
