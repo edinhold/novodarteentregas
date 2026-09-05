@@ -56,8 +56,7 @@ const Index = () => {
   useEffect(() => {
     const standalone =
       window.matchMedia("(display-mode: standalone)").matches ||
-      // @ts-ignore iOS Safari
-      window.navigator.standalone === true;
+      (window.navigator as unknown as { standalone?: boolean }).standalone === true;
     setIsInstalled(standalone);
 
     const onPrompt = (e: Event) => {

@@ -229,10 +229,22 @@ const DriverPanel = () => {
   const { data: deliveryConfig } = useQuery({
     queryKey: ["delivery-config"],
     queryFn: async () => {
-      const { data } = await (supabase as any).rpc("get_public_delivery_config");
-      return Array.isArray(data) ? data[0] : data;
+      const { data, error } = await supabase
+        .from("delivery_config")
+        .select("*")
+        .limit(1)
+        .maybeSingle();
+      if (!error && data) return data;
+      const { data: rpcData } = await (supabase as any).rpc("get_public_delivery_config");
+      return Array.isArray(rpcData) ? rpcData[0] : rpcData;
     },
   });
+
+  const appFeePercent = Number((deliveryConfig as any)?.app_fee_per_delivery ?? 2);
+  const getNetFee = (grossFee: number): number => {
+    if (!grossFee || grossFee <= 0) return 0;
+    return Math.max(0, grossFee * (1 - appFeePercent / 100));
+  };
 
   // Request local notification permission (no push provider configured).
   useEffect(() => {
@@ -435,8 +447,9 @@ const DriverPanel = () => {
       });
       if (error) throw error;
       const fee = Number((data as any)?.driver_fee || 0);
+      const netFee = getNetFee(fee);
       console.log("[Delivery] Motorista aceitou", requestId, data);
-      toast.success(fee > 0 ? `Entrega aceita com sucesso! Você ganhará R$ ${fee.toFixed(2)}` : "Entrega aceita com sucesso!");
+      toast.success(netFee > 0 ? `Entrega aceita com sucesso! Ganho líquido: R$ ${netFee.toFixed(2)}` : "Entrega aceita com sucesso!");
       void cancelDeliveryNotification(requestId);
       queryClient.invalidateQueries({ queryKey: ["driver-pending-requests"] });
       queryClient.invalidateQueries({ queryKey: ["driver-my-requests"] });
@@ -712,7 +725,7 @@ const DriverPanel = () => {
                       <CardHeader className="pb-2">
                         <CardTitle className="text-base flex items-center gap-2">
                           <MapPin className="w-4 h-4 text-primary" /> Entrega Ativa
-                          <Badge className="ml-auto">R$ {Number((activeRequest as any).driver_fee || deliveryConfig?.base_fee || 5).toFixed(2)}</Badge>
+                          <Badge className="ml-auto bg-green-600 hover:bg-green-700">R$ {getNetFee(Number((activeRequest as any).driver_fee || deliveryConfig?.base_fee || 5)).toFixed(2)} (líquido)</Badge>
                         </CardTitle>
                       </CardHeader>
                       <CardContent className="space-y-3">
@@ -792,9 +805,12 @@ const DriverPanel = () => {
                                     <p className="text-[10px] text-primary font-semibold mt-1">⭐ Direcionada a você (favorito)</p>
                                   )}
                                 </div>
-                                <p className="text-sm font-bold text-primary whitespace-nowrap">
-                                  R$ {Number(r.driver_fee || deliveryConfig?.base_fee || 5).toFixed(2)}
-                                </p>
+                                <div className="text-right">
+                                  <p className="text-sm font-bold text-green-600 whitespace-nowrap">
+                                    R$ {getNetFee(Number(r.driver_fee || deliveryConfig?.base_fee || 5)).toFixed(2)}
+                                  </p>
+                                  <p className="text-[10px] text-muted-foreground font-medium">ganho líquido</p>
+                                </div>
                               </div>
                               <div className="grid grid-cols-2 gap-2">
                                 <Button variant="outline" size="sm" onClick={() => {

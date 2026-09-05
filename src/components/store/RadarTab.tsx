@@ -9,7 +9,6 @@ import { Badge } from "@/components/ui/badge";
 import { Layers, Navigation, Package, Truck, MapPin } from "lucide-react";
 import { MAP_LAYERS } from "@/config/maps";
 import MapErrorBoundary from "@/components/MapErrorBoundary";
-import { geocodeAddress } from "@/services/mapbox";
 
 import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
 import markerIcon from "leaflet/dist/images/marker-icon.png";
@@ -54,6 +53,20 @@ function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number)
 function formatDistance(m: number) {
   if (m < 1000) return `${Math.round(m)} m`;
   return `${(m / 1000).toFixed(2)} km`;
+}
+
+async function geocode(address: string): Promise<{ lat: number; lng: number } | null> {
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(address)}`,
+      { headers: { Accept: "application/json" } }
+    );
+    const data = await res.json();
+    if (data?.[0]) return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+  } catch (e) {
+    console.error("[RadarTab] geocode error", e);
+  }
+  return null;
 }
 
 interface Props {
@@ -195,10 +208,8 @@ const RadarTabContent = ({ restaurant, userId }: Props) => {
   useEffect(() => {
     if (activeDelivery?.status === "picked_up" && activeDelivery.delivery_address) {
       let cancelled = false;
-      geocodeAddress(activeDelivery.delivery_address).then((c) => {
-        if (!cancelled && c?.coordinates) {
-          setDestCoords({ lat: c.coordinates.latitude, lng: c.coordinates.longitude });
-        }
+      geocode(activeDelivery.delivery_address).then((c) => {
+        if (!cancelled) setDestCoords(c);
       });
       return () => {
         cancelled = true;

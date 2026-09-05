@@ -123,7 +123,7 @@ const FeesConfigTab = () => {
         <div className="space-y-2">
           <Label>Taxa de saque antecipado (%)</Label>
           <Input type="number" step="1" min="0" max="100" value={form.early_withdrawal_fee_percent} onChange={(e) => setForm(f => ({ ...f, early_withdrawal_fee_percent: e.target.value }))} />
-          <p className="text-xs text-muted-foreground">Porcentagem descontada em saques antecipados do motorista</p>
+          <p className="text-xs text-muted-foreground">Porcentagem descontada em saques antecipados (solicitados fora do dia oficial de pagamento, no qual a taxa é de R$ 1,00)</p>
         </div>
         <div className="border-t pt-4 mt-4 space-y-2">
           <Label className="flex items-center gap-2"><MessageCircle className="w-4 h-4 text-[#25D366]" /> Número do WhatsApp</Label>

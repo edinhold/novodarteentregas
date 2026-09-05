@@ -3,7 +3,6 @@ import { Restaurant } from "@/types";
 import { DEFAULT_CENTER, DEFAULT_ZOOM, MAP_LAYERS } from "@/config/maps";
 import { useNavigate } from "react-router-dom";
 import { useDriverLocations } from "@/hooks/useDriverLocations";
-import { geocodeAddress } from "@/services/mapbox";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -117,25 +116,27 @@ const cachePosition = (restaurant: Restaurant, latitude: number, longitude: numb
 };
 
 const geocodeRestaurant = async (restaurant: Restaurant): Promise<RestaurantWithMapPosition | null> => {
-  try {
-    const cached = getCachedPosition(restaurant);
-    if (cached) return cached;
+  const cached = getCachedPosition(restaurant);
+  if (cached) return cached;
 
-    const address = getGeocodeAddress(restaurant);
-    if (!address) return null;
+  const address = getGeocodeAddress(restaurant);
+  if (!address) return null;
 
-    const result = await geocodeAddress(address);
-    if (!result?.coordinates) return null;
+  const url = new URL("https://nominatim.openstreetmap.org/search");
+  url.searchParams.set("format", "jsonv2");
+  url.searchParams.set("limit", "1");
+  url.searchParams.set("countrycodes", "br");
+  url.searchParams.set("q", address);
 
-    const { latitude, longitude } = result.coordinates;
-    if (!isValidCoordinate(latitude, longitude)) return null;
+  const response = await fetch(url.toString());
+  if (!response.ok) return null;
+  const [result] = await response.json();
+  const latitude = Number(result?.lat);
+  const longitude = Number(result?.lon);
+  if (!isValidCoordinate(latitude, longitude)) return null;
 
-    cachePosition(restaurant, latitude, longitude);
-    return { ...restaurant, mapLatitude: latitude, mapLongitude: longitude };
-  } catch (err) {
-    console.warn("[RestaurantMap] Geocode failed:", err);
-    return null;
-  }
+  cachePosition(restaurant, latitude, longitude);
+  return { ...restaurant, mapLatitude: latitude, mapLongitude: longitude };
 };
 
 const RestaurantMap = ({ restaurants }: RestaurantMapProps) => {

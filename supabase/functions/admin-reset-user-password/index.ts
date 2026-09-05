@@ -71,7 +71,7 @@ Deno.serve(async (req) => {
 
     let successCount = 0;
     let failureCount = 0;
-    let action = mode === "send_recovery" ? "single_recovery" : "single_set_password";
+    const action = mode === "send_recovery" ? "single_recovery" : "single_set_password";
 
     if (mode === "send_recovery") {
       if (!targetEmail) return json(400, { error: "Email do usuário indisponível" });

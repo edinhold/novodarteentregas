@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { User, Session } from "@supabase/supabase-js";
-import { autoRegisterDriverDevice, logoutPush } from "@/lib/push";
 
 export type AppRole = "admin" | "store_owner" | "driver" | "customer";
 
@@ -102,11 +101,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.log("[Auth] Role carregada:", resolved);
       setRole(resolved);
       setRoleLoading(false);
-
-      if (resolved === "driver" && uid) {
-        // Automatically registers driver device with OneSignal
-        void autoRegisterDriverDevice(uid);
-      }
     };
 
 
@@ -153,22 +147,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     console.log("[Auth] Listener registrado");
 
     console.log("[Auth] Recuperando sessão");
-    supabase.auth.getSession().then(({ data: { session }, error }) => {
-      if (error) {
-        console.warn("[Auth] Erro ao recuperar sessão, limpando estado:", error);
-        try {
-          localStorage.removeItem("sb-qhlunszfcpzsfjjugkus-auth-token");
-        } catch {}
-        apply(null, "getSession:error");
-        return;
-      }
+    supabase.auth.getSession().then(({ data: { session } }) => {
       apply(session, "getSession");
-    }).catch((err) => {
-      console.warn("[Auth] Erro ao recuperar sessão:", err);
-      try {
-        localStorage.removeItem("sb-qhlunszfcpzsfjjugkus-auth-token");
-      } catch {}
-      apply(null, "getSession:error");
     });
 
     return () => {
@@ -181,13 +161,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signOut = async () => {
     try { sessionStorage.removeItem("authRedirectDone"); } catch {}
-    if (user?.id) {
-      try {
-        await logoutPush(user.id);
-      } catch (e) {
-        console.warn("[Auth] Erro ao deslogar push:", e);
-      }
-    }
     await supabase.auth.signOut();
   };
 

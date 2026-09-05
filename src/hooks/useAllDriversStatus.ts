@@ -50,62 +50,57 @@ export const useAllDriversStatus = () => {
   return useQuery({
     queryKey: ["all_drivers_status"],
     queryFn: async () => {
-      try {
-        // 1. Fetch all drivers
-        const { data: drivers, error: driversError } = await supabase
-          .from("drivers")
-          .select("id, user_id, full_name, driver_code, is_active");
-        
-        if (driversError) return [];
+      // 1. Fetch all drivers
+      const { data: drivers, error: driversError } = await supabase
+        .from("drivers")
+        .select("id, user_id, full_name, driver_code, is_active");
+      
+      if (driversError) throw driversError;
 
-        // 2. Fetch all latest locations
-        const { data: locations, error: locationsError } = await supabase
-          .from("driver_locations")
-          .select("*");
-        
-        if (locationsError) return [];
+      // 2. Fetch all latest locations
+      const { data: locations, error: locationsError } = await supabase
+        .from("driver_locations")
+        .select("*");
+      
+      if (locationsError) throw locationsError;
 
-        // 3. Fetch active deliveries
-        const { data: activeDeliveries, error: deliveriesError } = await supabase
-          .from("delivery_requests")
-          .select("id, driver_id, status")
-          .in("status", ["accepted", "picked_up"]);
-        
-        if (deliveriesError) return [];
+      // 3. Fetch active deliveries
+      const { data: activeDeliveries, error: deliveriesError } = await supabase
+        .from("delivery_requests")
+        .select("id, driver_id, status")
+        .in("status", ["accepted", "picked_up"]);
+      
+      if (deliveriesError) throw deliveriesError;
 
-        // Create maps for quick lookup
-        const locationMap = new Map((locations || []).map(l => [l.user_id, l]));
-        const deliveryMap = new Map((activeDeliveries || []).map(d => [d.driver_id, d]));
+      // Create maps for quick lookup
+      const locationMap = new Map(locations.map(l => [l.user_id, l]));
+      const deliveryMap = new Map(activeDeliveries.map(d => [d.driver_id, d]));
 
-        // Combine everything
-        const combined: DriverWithLocation[] = (drivers || []).map(driver => {
-          const location = locationMap.get(driver.user_id);
-          const activeDelivery = deliveryMap.get(driver.user_id);
+      // Combine everything
+      const combined: DriverWithLocation[] = drivers.map(driver => {
+        const location = locationMap.get(driver.user_id);
+        const activeDelivery = deliveryMap.get(driver.user_id);
 
-          let status: DriverStatus = "inactive";
-          if (driver.is_active) {
-            status = activeDelivery ? "in_delivery" : "available";
-          }
+        let status: DriverStatus = "inactive";
+        if (driver.is_active) {
+          status = activeDelivery ? "in_delivery" : "available";
+        }
 
-          return {
-            id: driver.id,
-            user_id: driver.user_id,
-            full_name: driver.full_name || "Motorista sem nome",
-            driver_code: driver.driver_code || "---",
-            is_active: driver.is_active,
-            latitude: location?.latitude || null,
-            longitude: location?.longitude || null,
-            updated_at: location?.updated_at || null,
-            status,
-            active_delivery_id: activeDelivery?.id
-          };
-        });
+        return {
+          id: driver.id,
+          user_id: driver.user_id,
+          full_name: driver.full_name || "Motorista sem nome",
+          driver_code: driver.driver_code || "---",
+          is_active: driver.is_active,
+          latitude: location?.latitude || null,
+          longitude: location?.longitude || null,
+          updated_at: location?.updated_at || null,
+          status,
+          active_delivery_id: activeDelivery?.id
+        };
+      });
 
-        return combined;
-      } catch (err) {
-        console.warn("[useAllDriversStatus] Error fetching driver status:", err);
-        return [];
-      }
+      return combined;
     },
     refetchInterval: 30000, // Refresh every 30s as fallback
   });

@@ -24,28 +24,9 @@ const RouteRestorer = () => {
   const navigate = useNavigate();
   const { user, loading } = useAuth();
 
-  // If this window was opened as an OAuth popup and authentication finished,
-  // notify the opener window and close the popup.
-  useEffect(() => {
-    if (window.opener && window.opener !== window) {
-      if (user) {
-        try {
-          window.opener.postMessage({ type: "OAUTH_AUTH_SUCCESS" }, "*");
-        } catch {}
-        setTimeout(() => {
-          try { window.close(); } catch {}
-        }, 300);
-      }
-    }
-  }, [user]);
-
   // Save current route on every navigation
   useEffect(() => {
     const path = location.pathname + location.search;
-    const hasAdminIntent = localStorage.getItem("admin_login_intent") === "true";
-    if (hasAdminIntent && path === "/") {
-      return;
-    }
     if (!isExcludedRoute(location.pathname) && (!isProtectedPanelRoute(location.pathname) || user)) {
       localStorage.setItem(STORAGE_KEY, path);
     }
@@ -56,16 +37,6 @@ const RouteRestorer = () => {
     if (loading) return;
     if (restoreAttempted) return;
     restoreAttempted = true;
-
-    // Check if user came from admin login intent
-    const hasAdminIntent = localStorage.getItem("admin_login_intent") === "true";
-    if (hasAdminIntent && user) {
-      localStorage.removeItem("admin_login_intent");
-      console.log("[Auth] Admin intent detected, navigating to /admin");
-      navigate("/admin", { replace: true });
-      return;
-    }
-
     if (isExcludedRoute(location.pathname)) return;
 
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -80,7 +51,7 @@ const RouteRestorer = () => {
       navigate(saved, { replace: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, user]);
+  }, [loading]);
 
 
   return null;

@@ -13,7 +13,7 @@ import Checkout from "./pages/Checkout";
 import Auth from "./pages/Auth";
 import AdminLogin from "./pages/admin/AdminLogin";
 import AdminDashboard from "./pages/admin/AdminDashboard";
-import Financeiro from "./pages/admin/Financeiro";
+import FinanceiroPage from "./pages/admin/Financeiro";
 import StoreOwnerPanel from "./pages/StoreOwnerPanel";
 import DriverPanel from "./pages/DriverPanel";
 
@@ -27,15 +27,7 @@ import RouteRestorer from "./components/RouteRestorer";
 import SplashScreen from "./components/SplashScreen";
 import UpdatePrompt from "./components/UpdatePrompt";
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: 1,
-      refetchOnWindowFocus: false,
-      staleTime: 1000 * 60,
-    },
-  },
-});
+const queryClient = new QueryClient();
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -60,7 +52,7 @@ const App = () => (
               <Route path="/cadastro/lojista" element={<RegisterStoreOwner />} />
               <Route path="/admin/login" element={<AdminLogin />} />
               <Route path="/admin" element={<AdminDashboard />} />
-              <Route path="/admin/financeiro" element={<Financeiro />} />
+              <Route path="/admin/financeiro" element={<FinanceiroPage />} />
               <Route path="/lojista" element={<StoreOwnerPanel />} />
               <Route path="/entregador" element={<DriverPanel />} />
               <Route path="/pedido/:id/rastreio" element={<OrderTracking />} />

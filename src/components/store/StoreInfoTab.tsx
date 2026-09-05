@@ -10,8 +10,7 @@ import { toast } from "sonner";
 import { Store, Save, MapPin, Navigation, RotateCcw, Layers } from "lucide-react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { MAP_LAYERS } from "@/config/maps";
-import { reverseGeocode as mapboxReverseGeocode } from "@/services/mapbox";
+import { MAP_LAYERS, GOOGLE_MAPS_API_KEY } from "@/config/maps";
 
 import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
 import markerIcon from "leaflet/dist/images/marker-icon.png";
@@ -97,12 +96,32 @@ const StoreInfoTab = ({ restaurant, userId }: StoreInfoTabProps) => {
 
   const reverseGeocode = useCallback(async (lat: number, lng: number) => {
     try {
-      const parsed = await mapboxReverseGeocode(lat, lng);
-      if (parsed?.fullAddress) {
-        setForm(f => ({ ...f, address: parsed.fullAddress }));
+      if (GOOGLE_MAPS_API_KEY) {
+        const res = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GOOGLE_MAPS_API_KEY}&language=pt-BR`);
+        const data = await res.json();
+        if (data.status === "OK" && data.results?.[0]) {
+          setForm(f => ({ ...f, address: data.results[0].formatted_address }));
+          return;
+        }
+      }
+      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&zoom=18&accept-language=pt-BR`);
+      const data = await res.json();
+      if (data?.address) {
+        const a = data.address;
+        const parts: string[] = [];
+        const road = a.road || a.pedestrian || a.footway || a.street || "";
+        if (road) parts.push(a.house_number ? `${road}, ${a.house_number}` : road);
+        const neighborhood = a.suburb || a.neighbourhood || a.quarter || "";
+        if (neighborhood) parts.push(neighborhood);
+        const city = a.city || a.town || a.village || a.municipality || "";
+        if (city) parts.push(city);
+        if (a.state) parts.push(a.state);
+        if (parts.length > 0) {
+          setForm(f => ({ ...f, address: parts.join(", ") }));
+        }
       }
     } catch (err) {
-      console.warn("Reverse geocode error via Mapbox:", err);
+      console.error("Reverse geocode error:", err);
     }
   }, []);
 

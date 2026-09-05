@@ -41,8 +41,11 @@ export function sanitize(body: unknown): string {
 type Platform = "android_apk" | "web_pwa" | "ios" | string;
 
 /**
- * Builds a payload that is valid for the given platform group.
- * Android-only keys are never sent to web/PWA subscriptions (avoids INVALID_PAYLOAD).
+ * Payload otimizado para entrega garantida em segundo plano e tela desligada:
+ * - priority: 10 (Alta prioridade instantânea)
+ * - android_visibility: 1 (Exibição em tela de bloqueio com tela desligada)
+ * - content_available: true (Acorda processos em segundo plano)
+ * - som e vibração de alta penetração
  */
 export function buildPayload(opts: {
   appId: string;
@@ -62,16 +65,20 @@ export function buildPayload(opts: {
     headings: opts.headings,
     contents: opts.contents,
     data: opts.data,
-    priority: 10,
-    ttl: opts.ttl ?? 300,
+    priority: 10, // Máxima prioridade para entregar mesmo com tela desligada / background
+    ttl: opts.ttl ?? 86400, // 24 horas de janela de vida
+    content_available: true, // Acorda o app no Android/iOS em segundo plano
+    chrome_web_icon: "/pwa-192x192.png",
+    chrome_web_badge: "/pwa-192x192.png",
+    small_icon: "ic_stat_onesignal_default",
   };
 
   if (opts.url) base.url = opts.url;
 
   if (opts.platform === "android_apk") {
     base.android_channel_id = ANDROID_CHANNEL_ID;
-    base.android_visibility = 1;
-    base.android_sound = "entrega_nova";
+    base.android_visibility = 1; // 1 = PUBLIC (Visível na tela de bloqueio com tela desligada)
+    base.android_sound = "notification_sound";
     base.android_accent_color = "FFF97316";
     if (opts.buttonLabel) {
       base.buttons = [{ id: "ver_entrega", text: opts.buttonLabel }];

@@ -1,4 +1,6 @@
 import { motion, AnimatePresence } from "framer-motion";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -23,6 +25,18 @@ interface Props {
  */
 const DeliveryOverlay = ({ delivery, state, secondsLeft = 0, permissionWarning, onAccept, onReject, onRequestPermission }: Props) => {
   const visible = !!delivery || state === "loading" || state === "error";
+
+  const { data: config } = useQuery({
+    queryKey: ["delivery-config"],
+    queryFn: async () => {
+      const { data } = await supabase.from("delivery_config").select("app_fee_per_delivery").limit(1).maybeSingle();
+      return data;
+    },
+  });
+
+  const appFeePct = Number((config as any)?.app_fee_per_delivery ?? 2);
+  const grossVal = Number(delivery?.driver_fee || delivery?.credit_cost || 0);
+  const netVal = Math.max(0, grossVal * (1 - appFeePct / 100));
 
   return (
     <AnimatePresence>
@@ -119,11 +133,16 @@ const DeliveryOverlay = ({ delivery, state, secondsLeft = 0, permissionWarning, 
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2 rounded-md bg-muted/60 px-3 py-2">
-                      <DollarSign className="h-4 w-4 text-accent" />
-                      <span className="text-xs text-muted-foreground">Valor</span>
-                      <span className="ml-auto font-extrabold text-accent">
-                        R$ {Number(delivery.driver_fee || delivery.credit_cost || 0).toFixed(2)}
+                    <div className="flex items-center justify-between rounded-md bg-muted/60 px-3 py-2">
+                      <div className="flex items-center gap-2">
+                        <DollarSign className="h-4 w-4 text-green-600" />
+                        <div>
+                          <p className="text-xs font-semibold text-foreground">Ganho Líquido</p>
+                          <p className="text-[10px] text-muted-foreground">Comissão do app descontada ({appFeePct}%)</p>
+                        </div>
+                      </div>
+                      <span className="font-extrabold text-base text-green-600">
+                        R$ {netVal.toFixed(2)}
                       </span>
                     </div>
                   </>

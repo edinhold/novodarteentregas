@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.1"
+    PostgrestVersion: "14.5"
   }
   public: {
     Tables: {
@@ -170,6 +170,7 @@ export type Database = {
           created_at: string
           id: string
           is_used: boolean
+          restaurant_id: string | null
           used_at: string | null
           used_by: string | null
           value: number
@@ -180,6 +181,7 @@ export type Database = {
           created_at?: string
           id?: string
           is_used?: boolean
+          restaurant_id?: string | null
           used_at?: string | null
           used_by?: string | null
           value?: number
@@ -190,11 +192,27 @@ export type Database = {
           created_at?: string
           id?: string
           is_used?: boolean
+          restaurant_id?: string | null
           used_at?: string | null
           used_by?: string | null
           value?: number
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "credit_codes_restaurant_id_fkey"
+            columns: ["restaurant_id"]
+            isOneToOne: false
+            referencedRelation: "restaurants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "credit_codes_restaurant_id_fkey"
+            columns: ["restaurant_id"]
+            isOneToOne: false
+            referencedRelation: "restaurants_public"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       customer_deletion_logs: {
         Row: {
@@ -231,6 +249,8 @@ export type Database = {
           app_fee_per_delivery: number
           base_fee: number
           credit_cost_per_call: number
+          dynamic_fee_per_km: number | null
+          dynamic_pricing_enabled: boolean | null
           early_withdrawal_fee_percent: number
           fee_per_km: number
           id: string
@@ -248,6 +268,8 @@ export type Database = {
           app_fee_per_delivery?: number
           base_fee?: number
           credit_cost_per_call?: number
+          dynamic_fee_per_km?: number | null
+          dynamic_pricing_enabled?: boolean | null
           early_withdrawal_fee_percent?: number
           fee_per_km?: number
           id?: string
@@ -265,6 +287,8 @@ export type Database = {
           app_fee_per_delivery?: number
           base_fee?: number
           credit_cost_per_call?: number
+          dynamic_fee_per_km?: number | null
+          dynamic_pricing_enabled?: boolean | null
           early_withdrawal_fee_percent?: number
           fee_per_km?: number
           id?: string
@@ -337,53 +361,139 @@ export type Database = {
           },
         ]
       }
+      delivery_notification_dispatches: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          dispatch_version: number
+          drivers_found: number | null
+          error_code: string | null
+          error_message: string | null
+          external_ids_sent: string[] | null
+          id: string
+          idempotency_key: string
+          onesignal_notification_id: string | null
+          pedido_id: string
+          recipients: number | null
+          status: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          dispatch_version?: number
+          drivers_found?: number | null
+          error_code?: string | null
+          error_message?: string | null
+          external_ids_sent?: string[] | null
+          id?: string
+          idempotency_key: string
+          onesignal_notification_id?: string | null
+          pedido_id: string
+          recipients?: number | null
+          status?: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          dispatch_version?: number
+          drivers_found?: number | null
+          error_code?: string | null
+          error_message?: string | null
+          external_ids_sent?: string[] | null
+          id?: string
+          idempotency_key?: string
+          onesignal_notification_id?: string | null
+          pedido_id?: string
+          recipients?: number | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "delivery_notification_dispatches_pedido_id_fkey"
+            columns: ["pedido_id"]
+            isOneToOne: false
+            referencedRelation: "delivery_requests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       delivery_requests: {
         Row: {
+          accepted_at: string | null
           created_at: string
           credit_cost: number
           customer_name: string | null
           customer_phone: string | null
           delivery_address: string | null
+          delivery_lat: number | null
+          delivery_lng: number | null
+          delivery_price: number | null
+          distance_km: number | null
           driver_fee: number
           driver_id: string | null
+          geocode_confidence: string | null
+          geocode_source: string | null
           group_id: string | null
+          hidden_for_store: boolean | null
           id: string
           notes: string | null
           pickup_address: string | null
+          pickup_lat: number | null
+          pickup_lng: number | null
           restaurant_id: string | null
           status: string
           store_owner_id: string
           updated_at: string
         }
         Insert: {
+          accepted_at?: string | null
           created_at?: string
           credit_cost?: number
           customer_name?: string | null
           customer_phone?: string | null
           delivery_address?: string | null
+          delivery_lat?: number | null
+          delivery_lng?: number | null
+          delivery_price?: number | null
+          distance_km?: number | null
           driver_fee?: number
           driver_id?: string | null
+          geocode_confidence?: string | null
+          geocode_source?: string | null
           group_id?: string | null
+          hidden_for_store?: boolean | null
           id?: string
           notes?: string | null
           pickup_address?: string | null
+          pickup_lat?: number | null
+          pickup_lng?: number | null
           restaurant_id?: string | null
           status?: string
           store_owner_id: string
           updated_at?: string
         }
         Update: {
+          accepted_at?: string | null
           created_at?: string
           credit_cost?: number
           customer_name?: string | null
           customer_phone?: string | null
           delivery_address?: string | null
+          delivery_lat?: number | null
+          delivery_lng?: number | null
+          delivery_price?: number | null
+          distance_km?: number | null
           driver_fee?: number
           driver_id?: string | null
+          geocode_confidence?: string | null
+          geocode_source?: string | null
           group_id?: string | null
+          hidden_for_store?: boolean | null
           id?: string
           notes?: string | null
           pickup_address?: string | null
+          pickup_lat?: number | null
+          pickup_lng?: number | null
           restaurant_id?: string | null
           status?: string
           store_owner_id?: string
@@ -481,6 +591,54 @@ export type Database = {
           speed?: number | null
           updated_at?: string
           user_id?: string
+        }
+        Relationships: []
+      }
+      driver_push_devices: {
+        Row: {
+          active: boolean
+          created_at: string
+          driver_id: string
+          external_id: string
+          id: string
+          last_error: string | null
+          last_seen_at: string | null
+          onesignal_id: string | null
+          permission_status: string
+          platform: string
+          subscription_id: string | null
+          subscription_status: string
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          driver_id: string
+          external_id: string
+          id?: string
+          last_error?: string | null
+          last_seen_at?: string | null
+          onesignal_id?: string | null
+          permission_status?: string
+          platform: string
+          subscription_id?: string | null
+          subscription_status?: string
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          driver_id?: string
+          external_id?: string
+          id?: string
+          last_error?: string | null
+          last_seen_at?: string | null
+          onesignal_id?: string | null
+          permission_status?: string
+          platform?: string
+          subscription_id?: string | null
+          subscription_status?: string
+          updated_at?: string
         }
         Relationships: []
       }
@@ -635,43 +793,37 @@ export type Database = {
         Row: {
           created_at: string | null
           error_code: string | null
-          event_type: string
+          event_type: string | null
           id: string
           onesignal_notification_id: string | null
           pedido_id: string | null
           platform: string | null
-          recipients_found: number
-          recipients_requested: number
-          request_id: string | null
-          response_body_sanitized: string | null
+          recipients_count: number | null
+          response_body_sanitized: Json | null
           response_status: number | null
         }
         Insert: {
           created_at?: string | null
           error_code?: string | null
-          event_type: string
+          event_type?: string | null
           id?: string
           onesignal_notification_id?: string | null
           pedido_id?: string | null
           platform?: string | null
-          recipients_found?: number
-          recipients_requested?: number
-          request_id?: string | null
-          response_body_sanitized?: string | null
+          recipients_count?: number | null
+          response_body_sanitized?: Json | null
           response_status?: number | null
         }
         Update: {
           created_at?: string | null
           error_code?: string | null
-          event_type?: string
+          event_type?: string | null
           id?: string
           onesignal_notification_id?: string | null
           pedido_id?: string | null
           platform?: string | null
-          recipients_found?: number
-          recipients_requested?: number
-          request_id?: string | null
-          response_body_sanitized?: string | null
+          recipients_count?: number | null
+          response_body_sanitized?: Json | null
           response_status?: number | null
         }
         Relationships: []
@@ -684,11 +836,10 @@ export type Database = {
           event_type: string
           id: string
           last_error: string | null
-          next_attempt_at: string | null
           onesignal_notification_id: string | null
-          pedido_id: string | null
+          pedido_id: string
           processed_at: string | null
-          recipients_count: number
+          recipients_count: number | null
           status: string
         }
         Insert: {
@@ -698,11 +849,10 @@ export type Database = {
           event_type: string
           id?: string
           last_error?: string | null
-          next_attempt_at?: string | null
           onesignal_notification_id?: string | null
-          pedido_id?: string | null
+          pedido_id: string
           processed_at?: string | null
-          recipients_count?: number
+          recipients_count?: number | null
           status?: string
         }
         Update: {
@@ -712,11 +862,10 @@ export type Database = {
           event_type?: string
           id?: string
           last_error?: string | null
-          next_attempt_at?: string | null
           onesignal_notification_id?: string | null
-          pedido_id?: string | null
+          pedido_id?: string
           processed_at?: string | null
-          recipients_count?: number
+          recipients_count?: number | null
           status?: string
         }
         Relationships: []
@@ -901,6 +1050,8 @@ export type Database = {
           suspended_by: string | null
           suspended_until: string | null
           suspension_reason: string | null
+          terms_accepted: boolean
+          terms_accepted_at: string | null
           updated_at: string
           user_id: string
         }
@@ -917,6 +1068,8 @@ export type Database = {
           suspended_by?: string | null
           suspended_until?: string | null
           suspension_reason?: string | null
+          terms_accepted?: boolean
+          terms_accepted_at?: string | null
           updated_at?: string
           user_id: string
         }
@@ -933,60 +1086,161 @@ export type Database = {
           suspended_by?: string | null
           suspended_until?: string | null
           suspension_reason?: string | null
+          terms_accepted?: boolean
+          terms_accepted_at?: string | null
           updated_at?: string
           user_id?: string
         }
         Relationships: []
       }
+      push_notification_tests: {
+        Row: {
+          admin_id: string
+          confirmation_note: string | null
+          confirmation_status: string | null
+          confirmed_at: string | null
+          created_at: string
+          driver_id: string
+          error_code: string | null
+          error_message: string | null
+          external_id: string | null
+          id: string
+          message: string
+          onesignal_notification_id: string | null
+          platforms: Json | null
+          recipients: number | null
+          status: string
+          targeted_external_ids: number | null
+          title: string
+        }
+        Insert: {
+          admin_id: string
+          confirmation_note?: string | null
+          confirmation_status?: string | null
+          confirmed_at?: string | null
+          created_at?: string
+          driver_id: string
+          error_code?: string | null
+          error_message?: string | null
+          external_id?: string | null
+          id?: string
+          message: string
+          onesignal_notification_id?: string | null
+          platforms?: Json | null
+          recipients?: number | null
+          status: string
+          targeted_external_ids?: number | null
+          title: string
+        }
+        Update: {
+          admin_id?: string
+          confirmation_note?: string | null
+          confirmation_status?: string | null
+          confirmed_at?: string | null
+          created_at?: string
+          driver_id?: string
+          error_code?: string | null
+          error_message?: string | null
+          external_id?: string | null
+          id?: string
+          message?: string
+          onesignal_notification_id?: string | null
+          platforms?: Json | null
+          recipients?: number | null
+          status?: string
+          targeted_external_ids?: number | null
+          title?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "push_notification_tests_driver_id_fkey"
+            columns: ["driver_id"]
+            isOneToOne: false
+            referencedRelation: "assigned_driver_details"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "push_notification_tests_driver_id_fkey"
+            columns: ["driver_id"]
+            isOneToOne: false
+            referencedRelation: "drivers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       push_subscriptions: {
         Row: {
           active: boolean
           app_version: string | null
+          browser_name: string | null
           created_at: string | null
+          device_model: string | null
           device_name: string | null
+          device_type: string | null
           id: string
+          last_login_at: string | null
+          last_logout_at: string | null
           last_seen_at: string | null
           onesignal_external_id: string | null
+          onesignal_id: string | null
           onesignal_subscription_id: string
-          permission_status: string
+          operating_system: string | null
+          permission_status: string | null
           platform: string
           profile_type: string
+          push_token: string | null
           sdk_version: string | null
-          subscription_status: string
+          subscription_status: string | null
           updated_at: string | null
           user_id: string
         }
         Insert: {
           active?: boolean
           app_version?: string | null
+          browser_name?: string | null
           created_at?: string | null
+          device_model?: string | null
           device_name?: string | null
+          device_type?: string | null
           id?: string
+          last_login_at?: string | null
+          last_logout_at?: string | null
           last_seen_at?: string | null
           onesignal_external_id?: string | null
+          onesignal_id?: string | null
           onesignal_subscription_id: string
-          permission_status?: string
+          operating_system?: string | null
+          permission_status?: string | null
           platform: string
           profile_type?: string
+          push_token?: string | null
           sdk_version?: string | null
-          subscription_status?: string
+          subscription_status?: string | null
           updated_at?: string | null
           user_id: string
         }
         Update: {
           active?: boolean
           app_version?: string | null
+          browser_name?: string | null
           created_at?: string | null
+          device_model?: string | null
           device_name?: string | null
+          device_type?: string | null
           id?: string
+          last_login_at?: string | null
+          last_logout_at?: string | null
           last_seen_at?: string | null
           onesignal_external_id?: string | null
+          onesignal_id?: string | null
           onesignal_subscription_id?: string
-          permission_status?: string
+          operating_system?: string | null
+          permission_status?: string | null
           platform?: string
           profile_type?: string
+          push_token?: string | null
           sdk_version?: string | null
-          subscription_status?: string
+          subscription_status?: string | null
           updated_at?: string | null
           user_id?: string
         }
@@ -1001,6 +1255,7 @@ export type Database = {
           delivery_fee: number
           delivery_time: string
           distance: string
+          history_retention_days: number | null
           id: string
           image: string | null
           is_featured: boolean
@@ -1022,6 +1277,7 @@ export type Database = {
           delivery_fee?: number
           delivery_time?: string
           distance?: string
+          history_retention_days?: number | null
           id?: string
           image?: string | null
           is_featured?: boolean
@@ -1043,6 +1299,7 @@ export type Database = {
           delivery_fee?: number
           delivery_time?: string
           distance?: string
+          history_retention_days?: number | null
           id?: string
           image?: string | null
           is_featured?: boolean
@@ -1065,6 +1322,27 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      site_settings: {
+        Row: {
+          id: string
+          key: string
+          updated_at: string
+          value: Json
+        }
+        Insert: {
+          id?: string
+          key: string
+          updated_at?: string
+          value: Json
+        }
+        Update: {
+          id?: string
+          key?: string
+          updated_at?: string
+          value?: Json
+        }
+        Relationships: []
       }
       store_credits: {
         Row: {
@@ -1140,6 +1418,73 @@ export type Database = {
           },
         ]
       }
+      store_recharges: {
+        Row: {
+          admin_id: string | null
+          amount_paid: number
+          bonus_amount: number
+          created_at: string
+          credit_code_id: string | null
+          id: string
+          restaurant_id: string | null
+          source: string
+          status: string
+          store_owner_id: string
+          total_credited: number
+          updated_at: string
+        }
+        Insert: {
+          admin_id?: string | null
+          amount_paid?: number
+          bonus_amount?: number
+          created_at?: string
+          credit_code_id?: string | null
+          id?: string
+          restaurant_id?: string | null
+          source: string
+          status?: string
+          store_owner_id: string
+          total_credited?: number
+          updated_at?: string
+        }
+        Update: {
+          admin_id?: string | null
+          amount_paid?: number
+          bonus_amount?: number
+          created_at?: string
+          credit_code_id?: string | null
+          id?: string
+          restaurant_id?: string | null
+          source?: string
+          status?: string
+          store_owner_id?: string
+          total_credited?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "store_recharges_credit_code_id_fkey"
+            columns: ["credit_code_id"]
+            isOneToOne: false
+            referencedRelation: "credit_codes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "store_recharges_restaurant_id_fkey"
+            columns: ["restaurant_id"]
+            isOneToOne: false
+            referencedRelation: "restaurants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "store_recharges_restaurant_id_fkey"
+            columns: ["restaurant_id"]
+            isOneToOne: false
+            referencedRelation: "restaurants_public"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_roles: {
         Row: {
           id: string
@@ -1188,10 +1533,78 @@ export type Database = {
         }
         Relationships: []
       }
+      wallet_adjustments: {
+        Row: {
+          adjustment_type: string
+          admin_id: string
+          amount: number
+          created_at: string
+          driver_id: string
+          final_balance: number
+          id: string
+          internal_notes: string | null
+          is_reversed: boolean
+          previous_balance: number
+          reason: string
+          reversal_reason: string | null
+          reversed_at: string | null
+          reversed_by: string | null
+        }
+        Insert: {
+          adjustment_type: string
+          admin_id: string
+          amount: number
+          created_at?: string
+          driver_id: string
+          final_balance: number
+          id?: string
+          internal_notes?: string | null
+          is_reversed?: boolean
+          previous_balance: number
+          reason: string
+          reversal_reason?: string | null
+          reversed_at?: string | null
+          reversed_by?: string | null
+        }
+        Update: {
+          adjustment_type?: string
+          admin_id?: string
+          amount?: number
+          created_at?: string
+          driver_id?: string
+          final_balance?: number
+          id?: string
+          internal_notes?: string | null
+          is_reversed?: boolean
+          previous_balance?: number
+          reason?: string
+          reversal_reason?: string | null
+          reversed_at?: string | null
+          reversed_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wallet_adjustments_driver_id_fkey"
+            columns: ["driver_id"]
+            isOneToOne: false
+            referencedRelation: "assigned_driver_details"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wallet_adjustments_driver_id_fkey"
+            columns: ["driver_id"]
+            isOneToOne: false
+            referencedRelation: "drivers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       withdrawal_requests: {
         Row: {
           amount: number
           created_at: string
+          decided_by: string | null
+          decision_reason: string | null
           driver_id: string
           driver_user_id: string
           fee_amount: number
@@ -1206,6 +1619,8 @@ export type Database = {
         Insert: {
           amount: number
           created_at?: string
+          decided_by?: string | null
+          decision_reason?: string | null
           driver_id: string
           driver_user_id: string
           fee_amount?: number
@@ -1220,6 +1635,8 @@ export type Database = {
         Update: {
           amount?: number
           created_at?: string
+          decided_by?: string | null
+          decision_reason?: string | null
           driver_id?: string
           driver_user_id?: string
           fee_amount?: number
@@ -1369,7 +1786,26 @@ export type Database = {
     }
     Functions: {
       accept_delivery_group: { Args: { p_group_id: string }; Returns: boolean }
-      accept_delivery_request: { Args: { p_request_id: string }; Returns: Json }
+      accept_delivery_request:
+        | {
+            Args: { p_motorista_id: string; p_pedido_id: string }
+            Returns: Json
+          }
+        | { Args: { p_request_id: string }; Returns: Json }
+      aceitar_entrega_v1: {
+        Args: { p_motorista_id: string; p_pedido_id: string }
+        Returns: Json
+      }
+      admin_adjust_driver_wallet: {
+        Args: {
+          p_adjustment_type: string
+          p_amount: number
+          p_driver_id: string
+          p_internal_notes?: string
+          p_reason: string
+        }
+        Returns: string
+      }
       admin_cleanup_financials: {
         Args: {
           p_from?: string
@@ -1380,6 +1816,10 @@ export type Database = {
           p_reason?: string
           p_to?: string
         }
+        Returns: Json
+      }
+      admin_decide_withdrawal: {
+        Args: { p_decision: string; p_reason?: string; p_request_id: string }
         Returns: Json
       }
       admin_list_store_owners: {
@@ -1398,6 +1838,10 @@ export type Database = {
         }
         Returns: number
       }
+      admin_reverse_wallet_adjustment: {
+        Args: { p_adjustment_id: string; p_reversal_reason: string }
+        Returns: boolean
+      }
       admin_suspend_user: {
         Args: { p_reason: string; p_target_user_id: string; p_until: string }
         Returns: boolean
@@ -1415,9 +1859,28 @@ export type Database = {
         }
         Returns: Json
       }
+      cancel_delivery_group: { Args: { p_group_id: string }; Returns: boolean }
       cancel_delivery_request: {
         Args: { p_request_id: string }
         Returns: boolean
+      }
+      claim_push_subscription: {
+        Args: {
+          p_active?: boolean
+          p_browser_name?: string
+          p_device_model?: string
+          p_device_name?: string
+          p_onesignal_id?: string
+          p_operating_system?: string
+          p_permission_status?: string
+          p_platform?: string
+          p_profile_type?: string
+          p_push_token?: string
+          p_sdk_version?: string
+          p_subscription_id: string
+          p_subscription_status?: string
+        }
+        Returns: string
       }
       complete_delivery: { Args: { p_request_id: string }; Returns: string }
       complete_group_stop: { Args: { p_request_id: string }; Returns: boolean }
@@ -1443,11 +1906,12 @@ export type Database = {
         Returns: string
       }
       delete_all_chat_messages: { Args: never; Returns: undefined }
-      get_assigned_driver_info: {
+      get_delivery_driver_info: {
         Args: { p_request_id: string }
         Returns: {
           driver_code: string
           full_name: string
+          id: string
           phone: string
           photo_url: string
           user_id: string
@@ -1466,6 +1930,8 @@ export type Database = {
         Args: never
         Returns: {
           base_fee: number
+          dynamic_fee_per_km: number
+          dynamic_pricing_enabled: boolean
           early_withdrawal_fee_percent: number
           fee_per_km: number
           id: string
@@ -1520,6 +1986,18 @@ export type Database = {
         Returns: boolean
       }
       redeem_credit_code: { Args: { p_code: string }; Returns: boolean }
+      register_push_device: {
+        Args: {
+          p_browser?: string
+          p_external_id?: string
+          p_is_standalone?: boolean
+          p_opted_in?: boolean
+          p_permission?: string
+          p_platform?: string
+          p_subscription_id: string
+        }
+        Returns: string
+      }
       release_stale_directed_requests: { Args: never; Returns: number }
       request_withdrawal: { Args: never; Returns: boolean }
       set_default_favorite_driver: {
@@ -1544,12 +2022,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1573,11 +2051,11 @@ export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1598,11 +2076,11 @@ export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1623,11 +2101,11 @@ export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
     | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1640,11 +2118,11 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }

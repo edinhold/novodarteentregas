@@ -2,10 +2,19 @@ import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
 // Helper to access Supabase in server context
 function getSupabaseServer(authHeader?: string | null): SupabaseClient {
-  const url = process.env.VITE_SUPABASE_URL || "https://qhlunszfcpzsfjjugkus.supabase.co";
+  const rawUrl = process.env.VITE_SUPABASE_URL;
+  const url =
+    typeof rawUrl === "string" && rawUrl.trim().startsWith("http")
+      ? rawUrl.trim()
+      : "https://qhlunszfcpzsfjjugkus.supabase.co";
+
   // Prefer service role key if available, otherwise publishable key
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const anonKey = process.env.VITE_SUPABASE_PUBLISHABLE_KEY || "sb_publishable_xp0FiNgyQFvsdy9SXeGnSA_iUehC_FO";
+  const rawKey = process.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+  const anonKey =
+    typeof rawKey === "string" && rawKey.trim().length > 0
+      ? rawKey.trim()
+      : "sb_publishable_xp0FiNgyQFvsdy9SXeGnSA_iUehC_FO";
 
   const keyToUse = serviceKey || anonKey;
   const headers: Record<string, string> = {};
@@ -49,6 +58,31 @@ async function checkAdmin(supabase: SupabaseClient, userId: string): Promise<boo
 const ONESIGNAL_API = "https://api.onesignal.com/notifications?c=push";
 const ANDROID_CHANNEL_ID = "novas_entregas_v1";
 
+function getOneSignalConfig() {
+  let envAppId = "";
+  let envApiKey = "";
+  try {
+    // Attempt reading from .env to override stale container process.env
+    const fs = (globalThis as any).process?.getBuiltinModule
+      ? (globalThis as any).process.getBuiltinModule("fs")
+      : undefined;
+    if (fs && fs.existsSync && fs.existsSync(".env")) {
+      const content = fs.readFileSync(".env", "utf8");
+      const idMatch = content.match(/^ONESIGNAL_APP_ID=["']?([^"'\r\n]+)["']?/m)
+        || content.match(/^VITE_ONESIGNAL_APP_ID=["']?([^"'\r\n]+)["']?/m);
+      if (idMatch) envAppId = idMatch[1].trim();
+      const keyMatch = content.match(/^ONESIGNAL_APP_API_KEY=["']?([^"'\r\n]+)["']?/m);
+      if (keyMatch) envApiKey = keyMatch[1].trim();
+    }
+  } catch {
+    // fallback to process.env
+  }
+
+  const appId = (envAppId || process.env.VITE_ONESIGNAL_APP_ID || process.env.ONESIGNAL_APP_ID || "").trim();
+  const apiKey = (envApiKey || process.env.ONESIGNAL_APP_API_KEY || "").trim();
+  return { appId, apiKey };
+}
+
 function mask(value?: string | null): string {
   if (!value) return "";
   return value.length <= 8 ? "***" : `***${value.slice(-8)}`;
@@ -69,7 +103,7 @@ export async function handleEdgeFunction(
 
   // 1. push-config
   if (functionName === "push-config") {
-    const appId = (process.env.ONESIGNAL_APP_ID || "").trim();
+    const { appId } = getOneSignalConfig();
     return {
       status: 200,
       body: {
@@ -113,8 +147,7 @@ export async function handleEdgeFunction(
       };
     }
 
-    const appId = (process.env.ONESIGNAL_APP_ID || "").trim();
-    const apiKey = (process.env.ONESIGNAL_APP_API_KEY || "").trim();
+    const { appId, apiKey } = getOneSignalConfig();
     const cutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString();
 
     const { data: drivers } = await supabase
@@ -239,8 +272,7 @@ export async function handleEdgeFunction(
       };
     }
 
-    const appId = (process.env.ONESIGNAL_APP_ID || "").trim();
-    const apiKey = (process.env.ONESIGNAL_APP_API_KEY || "").trim();
+    const { appId, apiKey } = getOneSignalConfig();
 
     if (!appId || !apiKey) {
       return {
@@ -521,8 +553,7 @@ export async function handleEdgeFunction(
       };
     }
 
-    const appId = (process.env.ONESIGNAL_APP_ID || "").trim();
-    const apiKey = (process.env.ONESIGNAL_APP_API_KEY || "").trim();
+    const { appId, apiKey } = getOneSignalConfig();
 
     if (!appId || !apiKey) {
       return {

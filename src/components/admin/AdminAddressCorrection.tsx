@@ -7,10 +7,43 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { MapPin, Loader2, Crosshair } from "lucide-react";
-import { geocodeAddress, calculateRoute } from "@/services/mapbox";
 
 interface Props {
   request: any;
+}
+
+async function geocode(address: string): Promise<{ lat: number; lng: number } | null> {
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=br&q=${encodeURIComponent(address)}`;
+    const r = await fetch(url, { headers: { "Accept-Language": "pt-BR" } });
+    const j = await r.json();
+    if (Array.isArray(j) && j.length > 0) {
+      return { lat: parseFloat(j[0].lat), lng: parseFloat(j[0].lon) };
+    }
+  } catch (e) {
+    console.error("geocode error", e);
+  }
+  return null;
+}
+
+async function osrmDistanceKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
+  try {
+    const url = `https://router.project-osrm.org/route/v1/driving/${a.lng},${a.lat};${b.lng},${b.lat}?overview=false`;
+    const r = await fetch(url);
+    const j = await r.json();
+    const meters = j?.routes?.[0]?.distance;
+    if (typeof meters === "number") return meters / 1000;
+  } catch (e) {
+    console.error("OSRM error", e);
+  }
+  // fallback haversine
+  const R = 6371;
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+  const la1 = (a.lat * Math.PI) / 180;
+  const la2 = (b.lat * Math.PI) / 180;
+  const h = Math.sin(dLat / 2) ** 2 + Math.sin(dLng / 2) ** 2 * Math.cos(la1) * Math.cos(la2);
+  return 2 * R * Math.asin(Math.sqrt(h));
 }
 
 const AdminAddressCorrection = ({ request }: Props) => {
@@ -34,26 +67,14 @@ const AdminAddressCorrection = ({ request }: Props) => {
     }
     setCalculating(true);
     try {
-      const [pickupResult, deliveryResult] = await Promise.all([
-        geocodeAddress(pickup.trim()),
-        geocodeAddress(delivery.trim()),
-      ]);
-
-      if (!pickupResult?.coordinates || !deliveryResult?.coordinates) {
-        toast.error("Não foi possível localizar um dos endereços em Primavera do Leste - MT");
+      const [a, b] = await Promise.all([geocode(pickup), geocode(delivery)]);
+      if (!a || !b) {
+        toast.error("Não foi possível localizar um dos endereços no GPS");
         return;
       }
-
-      const route = await calculateRoute(
-        { lat: pickupResult.coordinates.latitude, lng: pickupResult.coordinates.longitude },
-        { lat: deliveryResult.coordinates.latitude, lng: deliveryResult.coordinates.longitude },
-        { profile: "driving" }
-      );
-
-      setDistanceKm(route.distanceKm);
-      toast.success(`Distância real por rota (Mapbox): ${route.distanceKm.toFixed(2)} km (ETA ~${Math.round(route.durationMin)} min)`);
-    } catch (err: any) {
-      toast.error(err?.userMessage || err?.message || "Erro ao calcular rota via Mapbox");
+      const km = await osrmDistanceKm(a, b);
+      setDistanceKm(km);
+      toast.success(`Distância GPS: ${km.toFixed(2)} km`);
     } finally {
       setCalculating(false);
     }

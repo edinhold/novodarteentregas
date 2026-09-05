@@ -27,19 +27,14 @@ export const useDriverLocations = () => {
   return useQuery({
     queryKey: ["driver_locations"],
     queryFn: async () => {
-      try {
-        // Only show drivers active in the last 10 minutes
-        const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-        const { data, error } = await supabase
-          .from("driver_locations")
-          .select("*")
-          .gte("updated_at", tenMinAgo);
-        if (error) return [];
-        return data ?? [];
-      } catch (err) {
-        console.warn("[useDriverLocations] Error fetching locations:", err);
-        return [];
-      }
+      // Only show drivers active in the last 10 minutes
+      const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      const { data, error } = await supabase
+        .from("driver_locations")
+        .select("*")
+        .gte("updated_at", tenMinAgo);
+      if (error) throw error;
+      return data;
     },
     refetchInterval: 15000, // fallback polling every 15s
   });

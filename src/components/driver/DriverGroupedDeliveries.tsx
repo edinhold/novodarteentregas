@@ -66,6 +66,17 @@ const DriverGroupedDeliveries = ({ userId, hasActiveSingleRequest }: Props) => {
     enabled: !!activeGroup,
   });
 
+  const { data: config } = useQuery({
+    queryKey: ["delivery-config"],
+    queryFn: async () => {
+      const { data } = await supabase.from("delivery_config").select("app_fee_per_delivery").limit(1).maybeSingle();
+      return data;
+    },
+  });
+
+  const appFeePct = Number((config as any)?.app_fee_per_delivery ?? 2);
+  const getNetFee = (gross: number) => Math.max(0, gross * (1 - appFeePct / 100));
+
   useEffect(() => {
     const ch = supabase
       .channel("driver-groups-realtime")
@@ -179,7 +190,7 @@ const DriverGroupedDeliveries = ({ userId, hasActiveSingleRequest }: Props) => {
                         {done ? <CheckCircle2 className="w-3 h-3" /> : <Package className="w-3 h-3" />}
                         Parada {idx + 1}
                       </Badge>
-                      <span className="text-sm font-semibold">R$ {Number(s.driver_fee || 0).toFixed(2)}</span>
+                      <span className="text-sm font-semibold text-green-600">R$ {getNetFee(Number(s.driver_fee || 0)).toFixed(2)} (líquido)</span>
                     </div>
                     <div className="text-sm space-y-0.5">
                       {s.customer_name && (
@@ -238,7 +249,10 @@ const DriverGroupedDeliveries = ({ userId, hasActiveSingleRequest }: Props) => {
                         {g.driver_id === userId && <span className="text-primary font-semibold">⭐ Direcionada</span>}
                       </p>
                     </div>
-                    <p className="text-sm font-bold text-primary whitespace-nowrap">R$ {Number(g.total_cost).toFixed(2)}</p>
+                    <div className="text-right">
+                      <p className="text-sm font-bold text-green-600 whitespace-nowrap">R$ {getNetFee(Number(g.total_cost || 0)).toFixed(2)}</p>
+                      <p className="text-[10px] text-muted-foreground font-medium">ganho líquido</p>
+                    </div>
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <Button variant="outline" size="sm" onClick={() => {

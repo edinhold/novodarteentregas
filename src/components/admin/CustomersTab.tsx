@@ -96,7 +96,11 @@ const CustomersTab = () => {
   };
   const toggleOne = (uid: string) => {
     const next = new Set(selected);
-    next.has(uid) ? next.delete(uid) : next.add(uid);
+    if (next.has(uid)) {
+      next.delete(uid);
+    } else {
+      next.add(uid);
+    }
     setSelected(next);
   };
 

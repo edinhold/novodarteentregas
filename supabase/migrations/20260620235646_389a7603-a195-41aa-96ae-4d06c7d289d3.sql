@@ -40,7 +40,7 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  v_url text := 'https://qhlunszfcpzsfjjugkus.supabase.co/functions/v1/send-delivery-push';
+  v_url text := 'https://xnmrbsqhhjtqmgixjalw.supabase.co/functions/v1/send-delivery-push';
   v_anon text := 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhubXJic3FoaGp0cW1naXhqYWx3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI2MzM3MDQsImV4cCI6MjA4ODIwOTcwNH0.MCZh1FNBp8oYd8iL22eAXOwotsME7XarP6FFvRfJxdI';
 BEGIN
   IF NEW.status = 'pending' THEN

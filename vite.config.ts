@@ -13,8 +13,9 @@ export default defineConfig(({ mode }) => ({
   server: {
     host: "0.0.0.0",
     port: 3000,
-    hmr: process.env.DISABLE_HMR !== "true",
-    watch: process.env.DISABLE_HMR === "true" ? null : {},
+    hmr: {
+      overlay: false,
+    },
   },
   plugins: [
     viteEdgePlugin(),
@@ -65,23 +66,5 @@ export default defineConfig(({ mode }) => ({
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },
-  },
-  define: {
-    "import.meta.env.VITE_SUPABASE_URL": JSON.stringify(
-      process.env.VITE_SUPABASE_URL &&
-      process.env.VITE_SUPABASE_URL.startsWith("http") &&
-      !process.env.VITE_SUPABASE_URL.includes("lxgnttjzhqbpmnrpkvjw") &&
-      !process.env.VITE_SUPABASE_URL.includes("xnmrbsqhhjtqmgixjalw")
-        ? process.env.VITE_SUPABASE_URL
-        : "https://qhlunszfcpzsfjjugkus.supabase.co"
-    ),
-    "import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY": JSON.stringify(
-      process.env.VITE_SUPABASE_PUBLISHABLE_KEY &&
-      !process.env.VITE_SUPABASE_PUBLISHABLE_KEY.includes("U-J_S8DnJK5K") &&
-      !process.env.VITE_SUPABASE_PUBLISHABLE_KEY.includes("MCZh1FNBp8oYd8iL") &&
-      process.env.VITE_SUPABASE_PUBLISHABLE_KEY.trim().length > 0
-        ? process.env.VITE_SUPABASE_PUBLISHABLE_KEY
-        : "sb_publishable_xp0FiNgyQFvsdy9SXeGnSA_iUehC_FO"
-    ),
   },
 }));

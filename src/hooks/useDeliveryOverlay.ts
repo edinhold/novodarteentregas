@@ -263,27 +263,34 @@ export function useDeliveryOverlay({ standby, timeoutMs = 30000, onAccepted }: O
 
           // Show OS-level notification so the driver is alerted even when the
           // tab is in background, screen is off, or another app is focused.
-          try {
-            if (
-              typeof window !== "undefined" &&
-              "Notification" in window &&
-              Notification.permission === "granted"
-            ) {
-              const n = new Notification("🚨 Nova entrega disponível!", {
-                body: `Frete: R$ ${Number(row.driver_fee ?? 0).toFixed(2)} · Toque para aceitar`,
-                tag: `delivery-${row.id}`,
-                requireInteraction: true,
-                icon: "/icon-192.png",
-                badge: "/icon-192.png",
-              } as NotificationOptions);
-              n.onclick = () => {
-                window.focus();
-                n.close();
-              };
+          void (async () => {
+            try {
+              if (
+                typeof window !== "undefined" &&
+                "Notification" in window &&
+                Notification.permission === "granted"
+              ) {
+                const { data: cfg } = await supabase.from("delivery_config").select("app_fee_per_delivery").limit(1).maybeSingle();
+                const appFeePct = Number((cfg as any)?.app_fee_per_delivery ?? 2);
+                const grossFee = Number(row.driver_fee ?? 0);
+                const netFee = Math.max(0, grossFee * (1 - appFeePct / 100));
+
+                const n = new Notification("🚨 Nova entrega disponível!", {
+                  body: `Ganho Líquido: R$ ${netFee.toFixed(2)} · Toque para aceitar`,
+                  tag: `delivery-${row.id}`,
+                  requireInteraction: true,
+                  icon: "/icon-192.png",
+                  badge: "/icon-192.png",
+                } as NotificationOptions);
+                n.onclick = () => {
+                  window.focus();
+                  n.close();
+                };
+              }
+            } catch (e) {
+              console.log("[DeliveryOverlay] Falha ao exibir notificação OS", e);
             }
-          } catch (e) {
-            console.log("[DeliveryOverlay] Falha ao exibir notificação OS", e);
-          }
+          })();
         }
       )
       .on(
