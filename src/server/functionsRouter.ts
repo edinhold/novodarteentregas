@@ -1705,7 +1705,7 @@ export async function handleEdgeFunction(
     };
   }
 
-  // 13. admin-reset-financial: Reset completo do módulo financeiro por administrador
+  // 13. admin-reset-financial: Reset do período financeiro por administrador (PRESERVANDO CARTEIRAS E SALDOS REAIS)
   if (functionName === "admin-reset-financial") {
     const caller = await getCaller(supabase, authHeader);
     if (!caller || !(await checkAdmin(supabase, caller.id))) {
@@ -1722,77 +1722,19 @@ export async function handleEdgeFunction(
 
     const resetTimestamp = new Date().toISOString();
 
-    let deletedCreditCodes = 0;
-    let deletedStoreRecharges = 0;
-    let resetStoreCredits = 0;
-    let deletedWithdrawals = 0;
-    let deletedDriverEarnings = 0;
-    let deletedWalletAdjustments = 0;
-
     try {
-      // 1. Delete rows from credit_codes
-      const { data: ccData, error: ccErr } = await supabase
-        .from("credit_codes")
-        .delete()
-        .neq("id", "00000000-0000-0000-0000-000000000000")
-        .select("id");
-      if (!ccErr && ccData) deletedCreditCodes = ccData.length;
+      // 1. Store financial reset timestamp in site_settings (Inicia novo período administrativo)
+      // NENHUM REGISTRO DE CARTEIRA OU SALDO REAL DE LOJA OU MOTORISTA É DELETADO OU ALTERADO
+      await supabase.from("site_settings").upsert(
+        {
+          key: "last_financial_reset_at",
+          value: { timestamp: resetTimestamp, admin_id: caller.id },
+          updated_at: resetTimestamp,
+        },
+        { onConflict: "key" }
+      );
 
-      // 2. Delete rows from store_recharges
-      const { data: srData, error: srErr } = await supabase
-        .from("store_recharges")
-        .delete()
-        .neq("id", "00000000-0000-0000-0000-000000000000")
-        .select("id");
-      if (!srErr && srData) deletedStoreRecharges = srData.length;
-
-      // 3. Reset store_credits balance = 0
-      const { data: scData, error: scErr } = await supabase
-        .from("store_credits")
-        .update({ balance: 0, updated_at: resetTimestamp })
-        .neq("balance", 0)
-        .select("id");
-      if (!scErr && scData) resetStoreCredits = scData.length;
-
-      // 4. Delete rows from withdrawal_requests
-      const { data: wthData, error: wthErr } = await supabase
-        .from("withdrawal_requests")
-        .delete()
-        .neq("id", "00000000-0000-0000-0000-000000000000")
-        .select("id");
-      if (!wthErr && wthData) deletedWithdrawals = wthData.length;
-
-      // 5. Delete rows from driver_earnings
-      const { data: deData, error: deErr } = await supabase
-        .from("driver_earnings")
-        .delete()
-        .neq("id", "00000000-0000-0000-0000-000000000000")
-        .select("id");
-      if (!deErr && deData) deletedDriverEarnings = deData.length;
-
-      // 6. Delete rows from wallet_adjustments
-      const { data: waData, error: waErr } = await supabase
-        .from("wallet_adjustments")
-        .delete()
-        .neq("id", "00000000-0000-0000-0000-000000000000")
-        .select("id");
-      if (!waErr && waData) deletedWalletAdjustments = waData.length;
-
-      // 7. Store financial reset timestamp in site_settings
-      try {
-        await supabase.from("site_settings").upsert(
-          {
-            key: "last_financial_reset_at",
-            value: { timestamp: resetTimestamp, admin_id: caller.id },
-            updated_at: resetTimestamp,
-          },
-          { onConflict: "key" }
-        );
-      } catch (eSet) {
-        console.warn("[admin-reset-financial] site_settings update warning:", eSet);
-      }
-
-      // Also update delivery_config updated_at
+      // 2. Atualizar delivery_config para que notificadores e clientes recarreguem configurações
       try {
         const { data: cfgList } = await supabase.from("delivery_config").select("id").limit(1);
         if (cfgList && cfgList.length > 0) {
@@ -1803,18 +1745,15 @@ export async function handleEdgeFunction(
         }
       } catch {}
 
-      // 8. Audit log recording
-      const totalFinancialRecords = deletedCreditCodes + deletedStoreRecharges + resetStoreCredits + deletedWalletAdjustments;
-      const totalDriverMovements = deletedWithdrawals + deletedDriverEarnings;
-
+      // 3. Log de auditoria (sem apagar saldos ou registros de carteira)
       try {
         await supabase.from("financial_cleanup_logs" as any).insert({
           admin_user_id: caller.id,
-          reason: `RESET_FINANCIAL_MODULE: Removidos ${totalFinancialRecords} registros financeiros e ${totalDriverMovements} movimentações de motoristas.`,
+          reason: "RESET_FINANCIAL_PERIOD: Período financeiro reiniciado. Os saldos das carteiras de lojistas e motoristas foram 100% preservados.",
           deleted_delivered_requests: 0,
           deleted_delivered_orders: 0,
-          deleted_earnings: deletedDriverEarnings,
-          deleted_withdrawals: deletedWithdrawals,
+          deleted_earnings: 0,
+          deleted_withdrawals: 0,
           created_at: resetTimestamp,
           from_date: null,
           to_date: resetTimestamp,
@@ -1827,17 +1766,12 @@ export async function handleEdgeFunction(
         status: 200,
         body: {
           success: true,
-          message: "Módulo financeiro reiniciado com sucesso! Todos os indicadores foram zerados para o novo período.",
+          message: "Período financeiro reiniciado com sucesso! Todos os indicadores administrativos foram zerados. Os saldos das carteiras das lojas e os valores a receber dos motoristas foram 100% preservados.",
           reset_at: resetTimestamp,
           counts: {
-            financial_records_removed: totalFinancialRecords,
-            driver_movements_removed: totalDriverMovements,
-            credit_codes: deletedCreditCodes,
-            store_recharges: deletedStoreRecharges,
-            store_credits: resetStoreCredits,
-            withdrawals: deletedWithdrawals,
-            driver_earnings: deletedDriverEarnings,
-            wallet_adjustments: deletedWalletAdjustments,
+            financial_records_removed: 0,
+            driver_movements_removed: 0,
+            wallets_preserved: true,
           },
           request_id: requestId,
         },

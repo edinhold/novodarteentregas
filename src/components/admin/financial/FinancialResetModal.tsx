@@ -113,7 +113,7 @@ export const FinancialResetModal: React.FC<FinancialResetModalProps> = ({
             Reiniciar Módulo Financeiro
           </DialogTitle>
           <DialogDescription className="text-xs text-foreground/90 font-medium pt-1">
-            Deseja realmente reiniciar o Financeiro? O Histórico Detalhado de Entradas Financeiras e as movimentações dos motoristas relacionadas a corridas, saques e antecipações serão apagados. Todos os indicadores financeiros serão zerados. Essa operação não poderá ser desfeita.
+            Deseja realmente reiniciar o Financeiro? Os indicadores e movimentações do período financeiro serão zerados. Os saldos das carteiras das lojas e os valores que os motoristas têm a receber NÃO serão alterados.
           </DialogDescription>
         </DialogHeader>
 
@@ -122,14 +122,14 @@ export const FinancialResetModal: React.FC<FinancialResetModalProps> = ({
           <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-3 text-xs space-y-2">
             <div className="flex items-start gap-2 font-bold text-destructive">
               <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-              <span>O QUE SERÁ ZERADO E O QUE SERÁ PRESERVADO:</span>
+              <span>SEPARAÇÃO ENTRE PERÍODO FINANCEIRO E CARTEIRAS:</span>
             </div>
             <ul className="list-disc list-inside space-y-1 text-muted-foreground text-[11px] pl-1">
               <li>
-                <strong className="text-foreground">Remover/Zerar:</strong> Histórico de Entradas, Movimentações dos Motoristas (corridas, saques, antecipações), Saldos de Créditos e Indicadores Financeiros.
+                <strong className="text-foreground">Zerar no Financeiro:</strong> Indicadores administrativos, Total de Recargas do período, Entradas, Comissão e Receita Operacional.
               </li>
               <li>
-                <strong className="text-emerald-600 dark:text-emerald-400">Preservar:</strong> Usuários, Lojas, Motoristas, Cadastros, Entregas Operacionais, Veículos, OneSignal, Mapbox e Configurações do Sistema.
+                <strong className="text-emerald-600 dark:text-emerald-400">Preservar 100% Intactos:</strong> Saldos de Créditos das Lojas, Valores a Receber dos Motoristas, Solicitações de Saques Pendentes, Usuários, Lojas e Motoristas.
               </li>
             </ul>
           </div>

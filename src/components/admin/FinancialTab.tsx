@@ -667,7 +667,7 @@ export const FinancialTab = () => {
     return map;
   }, [driverEarnings]);
 
-  // Função utilitária para calcular o saldo real disponível de um motorista
+  // Função utilitária para calcular o saldo real disponível de um motorista (ACUMULADO REAL DE CARTEIRA)
   const getDriverAvailableBalance = useCallback(
     (driverIdOrUserId: string | null | undefined): number => {
       if (!driverIdOrUserId) return 0;
@@ -676,9 +676,9 @@ export const FinancialTab = () => {
 
       const userOrIdList = [driverObj.id, driverObj.user_id];
 
-      // Total líquido de entregas efetuadas no período ativo
+      // Total líquido de entregas efetuadas acumulado (todos os períodos)
       const myRides = deliveryRequests.filter(
-        (r) => userOrIdList.includes(r.driver_id || "") && r.status === "delivered" && isWithinPeriod(r.created_at)
+        (r) => userOrIdList.includes(r.driver_id || "") && r.status === "delivered"
       );
 
       const netGenerated = myRides.reduce((sum, r) => {
@@ -687,27 +687,25 @@ export const FinancialTab = () => {
         return sum + Math.max(0, Number(r.driver_fee || 0) * (1 - appFeePercentConfig / 100));
       }, 0);
 
-      // Saques aprovados/pagos no período ativo
+      // Saques aprovados/pagos acumulados (todos os períodos)
       const myApprovedWithdrawals = withdrawals.filter(
         (w) =>
           (userOrIdList.includes(w.driver_id) || userOrIdList.includes(w.driver_user_id)) &&
-          w.status === "approved" &&
-          isWithinPeriod(w.created_at)
+          w.status === "approved"
       );
       const totalPaid = myApprovedWithdrawals.reduce((sum, w) => sum + Number(w.net_amount || 0), 0);
 
-      // Saques pendentes no período ativo
+      // Saques pendentes acumulados (todos os períodos)
       const myPendingWithdrawals = withdrawals.filter(
         (w) =>
           (userOrIdList.includes(w.driver_id) || userOrIdList.includes(w.driver_user_id)) &&
-          w.status === "pending" &&
-          isWithinPeriod(w.created_at)
+          w.status === "pending"
       );
       const totalPending = myPendingWithdrawals.reduce((sum, w) => sum + Number(w.amount || 0), 0);
 
       return Math.max(0, netGenerated - totalPaid - totalPending);
     },
-    [driverMap, deliveryRequests, earningsByDeliveryMap, appFeePercentConfig, withdrawals, isWithinPeriod]
+    [driverMap, deliveryRequests, earningsByDeliveryMap, appFeePercentConfig, withdrawals]
   );
 
   // 7. CÁLCULO DOS 10 INDICADORES FINANCEIROS (Formulas Oficiais)
@@ -815,12 +813,8 @@ export const FinancialTab = () => {
     const totalPaid = approvedWithdrawals.reduce((sum, w) => sum + Number(w.net_amount || 0), 0);
     const totalFeesPaid = approvedWithdrawals.reduce((sum, w) => sum + Number(w.fee_amount || 0), 0);
 
-    // Saldo disponível
-    const pendingWithdrawalsSum = myWithdrawals
-      .filter((w) => w.status === "pending")
-      .reduce((sum, w) => sum + Number(w.amount || 0), 0);
-
-    const availableBalance = Math.max(0, netGenerated - totalPaid - pendingWithdrawalsSum);
+    // Saldo disponível real acumulado da carteira do motorista
+    const availableBalance = getDriverAvailableBalance(detailDriverId);
 
     return {
       driver: driverObj,
@@ -835,7 +829,7 @@ export const FinancialTab = () => {
       totalFeesPaid,
       totalPaid,
     };
-  }, [detailDriverId, driverMap, deliveryRequests, earningsByDeliveryMap, appFeePercentConfig, withdrawals, isWithinPeriod]);
+  }, [detailDriverId, driverMap, deliveryRequests, earningsByDeliveryMap, appFeePercentConfig, withdrawals, isWithinPeriod, getDriverAvailableBalance]);
 
   // Lojista Selecionado para Detalhamento
   const selectedStoreData = useMemo(() => {
