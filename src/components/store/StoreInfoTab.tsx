@@ -11,6 +11,7 @@ import { Store, Save, MapPin, Navigation, RotateCcw, Layers } from "lucide-react
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { MAP_LAYERS, GOOGLE_MAPS_API_KEY } from "@/config/maps";
+import { getBestLocation } from "@/utils/geolocation";
 
 import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
 import markerIcon from "leaflet/dist/images/marker-icon.png";
@@ -200,27 +201,20 @@ const StoreInfoTab = ({ restaurant, userId }: StoreInfoTabProps) => {
     }
   }, [restaurant?.latitude, restaurant?.longitude]);
 
-  const handleUseGPS = () => {
-    if (!navigator.geolocation) {
-      toast.error("GPS não suportado neste navegador");
-      return;
-    }
+  const handleUseGPS = async () => {
     setGpsLoading(true);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const lat = pos.coords.latitude;
-        const lng = pos.coords.longitude;
-        updateMarkerPosition(lat, lng);
-        reverseGeocode(lat, lng);
-        setGpsLoading(false);
-        toast.success(`📍 Localização GPS obtida (precisão: ${Math.round(pos.coords.accuracy)}m)`);
-      },
-      (err) => {
-        setGpsLoading(false);
-        toast.error(err.code === 1 ? "Permissão GPS negada" : "Erro ao obter localização GPS");
-      },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
-    );
+    try {
+      const loc = await getBestLocation({ highAccuracyTimeoutMs: 6000, coarseTimeoutMs: 7000 });
+      const lat = loc.latitude;
+      const lng = loc.longitude;
+      updateMarkerPosition(lat, lng);
+      reverseGeocode(lat, lng);
+      setGpsLoading(false);
+      toast.success(`📍 Localização GPS obtida (precisão: ${Math.round(loc.accuracy)}m)`);
+    } catch (err: any) {
+      setGpsLoading(false);
+      toast.error(err?.code === 1 || err?.message?.toLowerCase().includes("denied") ? "Permissão GPS negada" : "Erro ao obter localização GPS");
+    }
   };
 
   const handleSave = async () => {

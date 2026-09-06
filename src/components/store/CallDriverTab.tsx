@@ -16,6 +16,7 @@ import { useDriverLocations } from "@/hooks/useDriverLocations";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { MAP_LAYERS, GOOGLE_MAPS_API_KEY } from "@/config/maps";
+import { getBestLocation } from "@/utils/geolocation";
 
 import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
 import markerIcon from "leaflet/dist/images/marker-icon.png";
@@ -357,12 +358,6 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
   const requestGPS = useCallback((opts?: { silent?: boolean }) => {
     const silent = opts?.silent === true;
 
-    if (typeof navigator === "undefined" || !navigator.geolocation) {
-      console.warn(`${GPS_LOG} geolocalização não suportada`);
-      setGpsStatus("unsupported");
-      setGpsMessage("Este dispositivo/navegador não suporta GPS. Digite o endereço manualmente.");
-      return;
-    }
     if (typeof navigator !== "undefined" && navigator.onLine === false) {
       setGpsStatus("error");
       setGpsMessage("Sem conexão com a internet.");
@@ -389,43 +384,41 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
       }
     };
 
-    // Trava de segurança: nunca deixa a tela carregando para sempre
+    // Trava de segurança: nunca deixa a tela carregando para sempre (12s)
     gpsTimerRef.current = setTimeout(() => {
       if (settled) return;
       finish();
-      console.warn(`${GPS_LOG} timeout de segurança (11s)`);
+      console.warn(`${GPS_LOG} timeout de segurança (12s)`);
       setGpsStatus("timeout");
       setGpsMessage("Não foi possível localizar sua posição.");
       if (!silent) toast.error("Não foi possível obter sua localização automaticamente.");
-    }, 11000);
+    }, 12000);
 
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
+    getBestLocation({ highAccuracyTimeoutMs: 6000, coarseTimeoutMs: 7000 })
+      .then((loc) => {
         if (settled) return;
         finish();
-        console.info(`${GPS_LOG} permissão concedida — resposta em ${Date.now() - startedAt}ms`);
-        applyPosition(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy ?? null, "getCurrentPosition");
-      },
-      (err) => {
+        console.info(`${GPS_LOG} localização obtida — resposta em ${Date.now() - startedAt}ms`);
+        applyPosition(loc.latitude, loc.longitude, loc.accuracy ?? null, "getCurrentPosition");
+      })
+      .catch((err: any) => {
         if (settled) return;
         finish();
-        console.warn(`${GPS_LOG} erro (${err.code}) após ${Date.now() - startedAt}ms: ${err.message}`);
-        if (err.code === err.PERMISSION_DENIED) {
+        console.warn(`${GPS_LOG} erro após ${Date.now() - startedAt}ms: ${err?.message}`);
+        if (err?.code === 1 || err?.message?.toLowerCase().includes("denied")) {
           setGpsStatus("denied");
           setGpsMessage("Permita o acesso à localização para preencher automaticamente.");
           if (!silent) toast.error("Permita o acesso à localização para preencher automaticamente.");
-        } else if (err.code === err.POSITION_UNAVAILABLE) {
+        } else if (err?.code === 2 || err?.message?.toLowerCase().includes("unavailable")) {
           setGpsStatus("error");
-          setGpsMessage("Ative o GPS do aparelho.");
-          if (!silent) toast.error("Ative o GPS do aparelho.");
+          setGpsMessage("Ative a localização/GPS do aparelho.");
+          if (!silent) toast.error("Ative a localização/GPS do aparelho.");
         } else {
           setGpsStatus("timeout");
           setGpsMessage("Não foi possível localizar sua posição.");
           if (!silent) toast.error("Não foi possível localizar sua posição.");
         }
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-    );
+      });
   }, [applyPosition]);
 
   // Inicialização única por carregamento da tela
@@ -535,26 +528,10 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
       toast.error(msg);
     };
 
-    if (typeof navigator === "undefined" || !navigator.geolocation) {
-      finishError(savedAddress
-        ? "Não foi possível obter a localização. O endereço salvo da loja foi mantido."
-        : "Não foi possível localizar automaticamente. Digite ou selecione o endereço da loja no mapa.");
-      return;
-    }
-
     try {
-      const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-        let done = false;
-        const timer = setTimeout(() => { if (!done) { done = true; reject({ code: 3 }); } }, 10000);
-        navigator.geolocation.getCurrentPosition(
-          (p) => { if (!done) { done = true; clearTimeout(timer); resolve(p); } },
-          (e) => { if (!done) { done = true; clearTimeout(timer); reject(e); } },
-          { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-        );
-      });
-
-      const lat = pos.coords.latitude;
-      const lng = pos.coords.longitude;
+      const loc = await getBestLocation({ highAccuracyTimeoutMs: 6000, coarseTimeoutMs: 7000 });
+      const lat = loc.latitude;
+      const lng = loc.longitude;
       if (!isFinite(lat) || !isFinite(lng)) {
         finishError("Não foi possível obter a localização. O endereço salvo da loja foi mantido.");
         return;

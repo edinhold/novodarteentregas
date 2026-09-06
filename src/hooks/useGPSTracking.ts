@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { startNoSleepLoop, stopNoSleepLoop } from "@/lib/notificationSound";
+import { getBestLocation, requestLocationPermission, watchBestLocation, LocationResult } from "@/utils/geolocation";
 
 interface GPSPosition {
   lat: number;
@@ -253,8 +254,13 @@ export const useGPSTracking = (options: GPSTrackingOptions = {}) => {
 
   // ---------- Process raw GPS reading ----------
   const processReading = useCallback(
-    (pos: GeolocationPosition) => {
-      const { latitude, longitude, accuracy: acc, heading: hdg, speed: spd } = pos.coords;
+    (pos: GeolocationPosition | LocationResult | { coords?: { latitude: number; longitude: number; accuracy: number; heading?: number | null; speed?: number | null }; latitude?: number; longitude?: number; accuracy?: number; heading?: number | null; speed?: number | null; timestamp?: number }) => {
+      const coords = "coords" in pos && pos.coords ? pos.coords : (pos as any);
+      const latitude = coords.latitude;
+      const longitude = coords.longitude;
+      const acc = coords.accuracy ?? 50;
+      const hdg = coords.heading ?? null;
+      const spd = coords.speed ?? null;
       const ts = pos.timestamp || Date.now();
 
       // 1. Validate coordinates
@@ -385,22 +391,27 @@ export const useGPSTracking = (options: GPSTrackingOptions = {}) => {
     }
   }, []);
 
+  // Store cleanup function for watchBestLocation
+  const unwatchRef = useRef<(() => void) | null>(null);
+
   // ---------- Start / Stop ----------
   const startTracking = useCallback((isRestart = false) => {
-    if (!navigator.geolocation) {
-      toast.error("GPS não suportado neste dispositivo");
-      return;
-    }
-
     // Request wake lock to keep GPS active
     requestWakeLock();
     startNoSleepLoop();
 
     // Clear any existing watch
-    if (watchIdRef.current !== null) {
+    if (unwatchRef.current) {
+      try { unwatchRef.current(); } catch {}
+      unwatchRef.current = null;
+    }
+    if (watchIdRef.current !== null && typeof navigator !== "undefined" && navigator.geolocation) {
       try { navigator.geolocation.clearWatch(watchIdRef.current); } catch {}
       watchIdRef.current = null;
     }
+
+    // Request permissions natively / web
+    requestLocationPermission();
 
     // Only reset state if this is NOT a silent restart/re-tracking attempt
     if (!isRestart) {
@@ -423,98 +434,76 @@ export const useGPSTracking = (options: GPSTrackingOptions = {}) => {
       } catch {}
     }
 
-    // 1) Quick warm-up: get a fast cached fix
-    navigator.geolocation.getCurrentPosition(
-      processReading,
-      () => {},
-      { enableHighAccuracy: false, maximumAge: 60_000, timeout: 5_000 }
-    );
+    // 1) Quick initial location fix with progressive fallback (never gets stuck searching)
+    getBestLocation({ highAccuracyTimeoutMs: 6000, coarseTimeoutMs: 8000 })
+      .then((loc) => {
+        processReading(loc);
+      })
+      .catch((err) => {
+        console.warn("[GPS] Initial getBestLocation warning:", err?.message);
+      });
 
-    const id = navigator.geolocation.watchPosition(
-      processReading,
-      (err) => {
-        const code = err.code;
+    // 2) Continuous watch with native & fallback support
+    unwatchRef.current = watchBestLocation(
+      (loc) => {
+        processReading(loc);
+      },
+      (err: any) => {
+        const code = err?.code ?? 0;
         lastErrorTsRef.current = Date.now();
 
-        if (code === err.PERMISSION_DENIED) {
+        if (code === 1 || err?.message?.toLowerCase().includes("denied")) {
           setErrorStatus("Permissão de localização negada.");
-          maybeToastError(code, "Permissão de localização negada.");
+          maybeToastError(1, "Permissão de localização negada.");
           setWatching(false);
           return;
-        } 
-        
-        // For other errors, only show in UI if prolonged
-        const sinceLastReading = Date.now() - lastReadingTsRef.current;
-        if (sinceLastReading > 15_000) {
-          if (code === err.POSITION_UNAVAILABLE) {
-            setErrorStatus("Buscando sinal GPS...");
-          } else if (code === err.TIMEOUT) {
-            setErrorStatus("Sinal GPS instável...");
-          } else {
-            setErrorStatus("Reconectando GPS...");
-          }
         }
 
-        // Silent restart watch after 3s
-        if (restartTimeoutRef.current) window.clearTimeout(restartTimeoutRef.current);
-        restartTimeoutRef.current = window.setTimeout(() => {
-          startTracking(true); // silent restart
-        }, 3000);
-      },
-      {
-        enableHighAccuracy: true,
-        maximumAge: 0,
-        timeout: 30_000, 
+        // Try soft recovery with getBestLocation
+        getBestLocation({ highAccuracyTimeoutMs: 5000, coarseTimeoutMs: 8000 })
+          .then((loc) => processReading(loc))
+          .catch(() => {
+            const sinceLastReading = Date.now() - lastReadingTsRef.current;
+            if (sinceLastReading > 20_000) {
+              setErrorStatus("Reconectando sinal GPS...");
+            }
+          });
       }
     );
 
-    watchIdRef.current = id;
     setWatching(true);
 
-    // 4) Background Heartbeat/Polling: secondary mechanism to watchPosition
-    // Some browsers stop watchPosition but allow interval-based getCurrentPosition
+    // 3) Background Heartbeat/Polling: secondary mechanism for background durability
     if (pollingIntervalRef.current) window.clearInterval(pollingIntervalRef.current);
     pollingIntervalRef.current = window.setInterval(() => {
-      if (document.visibilityState === 'hidden') {
-        // Even more critical when hidden
-        console.log("[GPS] Polling while in background...");
-      }
-      navigator.geolocation.getCurrentPosition(
-        processReading,
-        (err) => console.warn("[GPS] Polling error:", err.message),
-        { enableHighAccuracy: true, maximumAge: 0, timeout: 10_000 }
-      );
-    }, 15_000); // 15s polling interval as fallback
+      getBestLocation({ highAccuracyTimeoutMs: 5000, coarseTimeoutMs: 6000 })
+        .then((loc) => processReading(loc))
+        .catch((err) => console.warn("[GPS] Polling tick fallback:", err?.message));
+    }, 15_000);
 
-    // 3) Watchdog: Check status every 10s
+    // 4) Watchdog: Check status every 12s
     if (watchdogRef.current) window.clearInterval(watchdogRef.current);
     watchdogRef.current = window.setInterval(() => {
       requestWakeLock();
       
       const sinceLast = Date.now() - lastReadingTsRef.current;
-      
-      // If no reading in 15s, try a direct poke
-      if (sinceLast > 15_000) {
-        console.warn("[GPS] Watchdog: no readings for", sinceLast, "ms. Poking sensor.");
-        navigator.geolocation.getCurrentPosition(
-          processReading,
-          (err) => console.warn("[GPS] Heartbeat poke failed:", err.message),
-          { enableHighAccuracy: true, maximumAge: 0, timeout: 8_000 }
-        );
-        
-        // If no reading in 40s, force a restart
-        if (sinceLast > 40_000) {
-          console.warn("[GPS] Watchdog: critical delay. Silent restart.");
-          startTracking(true);
-        }
+      if (sinceLast > 20_000) {
+        console.warn("[GPS] Watchdog: no readings for", sinceLast, "ms. Poking location sensor.");
+        getBestLocation({ highAccuracyTimeoutMs: 4000, coarseTimeoutMs: 6000 })
+          .then((loc) => processReading(loc))
+          .catch((err) => console.warn("[GPS] Watchdog poke error:", err?.message));
       }
-    }, 10_000);
-  }, [processReading, maybeToastError, requestWakeLock, errorStatus]);
+    }, 12_000);
+  }, [processReading, maybeToastError, requestWakeLock]);
 
   const stopTracking = useCallback(() => {
     releaseWakeLock();
     stopNoSleepLoop();
-    if (watchIdRef.current !== null) {
+    if (unwatchRef.current) {
+      try { unwatchRef.current(); } catch {}
+      unwatchRef.current = null;
+    }
+    if (watchIdRef.current !== null && typeof navigator !== "undefined" && navigator.geolocation) {
       navigator.geolocation.clearWatch(watchIdRef.current);
       watchIdRef.current = null;
     }

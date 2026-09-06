@@ -187,7 +187,8 @@ export async function syncCurrentSubscription(userId?: string, profileType = "dr
       const OneSignal = window.OneSignal;
       subscriptionId = OneSignal?.User?.PushSubscription?.id ?? null;
       const p = OneSignal?.Notifications?.permission;
-      permission = p === true ? "granted" : Notification?.permission === "denied" ? "denied" : "default";
+      const nativePermission = typeof Notification !== "undefined" ? Notification?.permission : "default";
+      permission = p === true ? "granted" : nativePermission === "denied" ? "denied" : "default";
     }
   } catch (e) {
     console.warn("[push] sync error", e);

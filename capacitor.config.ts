@@ -8,6 +8,11 @@ const config: CapacitorConfig = {
     url: "https://duarteentregas.vercel.app",
     cleartext: true,
   },
+  android: {
+    allowMixedContent: true,
+    captureInput: true,
+    backgroundColor: "#ffffff",
+  },
   plugins: {
     SplashScreen: {
       launchShowDuration: 2000,

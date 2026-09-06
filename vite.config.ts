@@ -25,9 +25,13 @@ export default defineConfig(({ mode }) => ({
       registerType: "autoUpdate",
       includeAssets: ["favicon.ico", "favicon.png", "apple-touch-icon.png", "pwa-192x192.png", "pwa-512x512.png"],
       workbox: {
-        globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
+        cleanupOutdatedCaches: true,
+        clientsClaim: true,
+        skipWaiting: true,
+        globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2,jpeg}"],
         globIgnores: ["**/OneSignalSDKWorker.js"],
-        navigateFallbackDenylist: [/^\/~oauth/, /^\/OneSignalSDKWorker\.js$/],
+        navigateFallback: "/index.html",
+        navigateFallbackDenylist: [/^\/~oauth/, /^\/OneSignalSDKWorker\.js$/, /^\/api\//],
       },
 
 

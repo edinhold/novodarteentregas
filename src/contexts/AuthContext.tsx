@@ -147,9 +147,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     console.log("[Auth] Listener registrado");
 
     console.log("[Auth] Recuperando sessão");
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      apply(session, "getSession");
-    });
+    const sessionTimeout = setTimeout(() => {
+      if (!handled) {
+        console.warn("[Auth] getSession timeout (4s), forçando inicialização da aplicação...");
+        apply(null, "timeout");
+      }
+    }, 4000);
+
+    supabase.auth.getSession()
+      .then(({ data: { session } }) => {
+        clearTimeout(sessionTimeout);
+        apply(session, "getSession");
+      })
+      .catch((err) => {
+        clearTimeout(sessionTimeout);
+        console.error("[Auth] getSession error:", err);
+        apply(null, "error");
+      });
 
     return () => {
       subscription.unsubscribe();
