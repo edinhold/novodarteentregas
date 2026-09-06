@@ -56,66 +56,41 @@ export const FinancialResetModal: React.FC<FinancialResetModalProps> = ({
 
     setIsResetting(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-
-      // 1. If RPC admin_cleanup_financials exists, call it. Otherwise do structured table operations safely.
-      let rpcSuccess = false;
-      try {
-        const { error: rpcError } = await supabase.rpc("admin_cleanup_financials" as any);
-        if (!rpcError) {
-          rpcSuccess = true;
-        }
-      } catch (e) {
-        // Fallback to table queries if RPC isn't available
-        rpcSuccess = false;
-      }
-
-      if (!rpcSuccess) {
-        // Safe table-level reset without breaking operational schema
-        // a) Zero out store credits balances
-        const { error: creditsError } = await supabase
-          .from("store_credits")
-          .update({ balance: 0, updated_at: new Date().toISOString() })
-          .neq("balance", 0);
-        if (creditsError) console.warn("Aviso ao zerar store_credits:", creditsError);
-
-        // b) Clear withdrawal requests
-        const { error: withdrawalsError } = await supabase
-          .from("withdrawal_requests")
-          .delete()
-          .neq("id", "00000000-0000-0000-0000-000000000000");
-        if (withdrawalsError) console.warn("Aviso ao limpar withdrawal_requests:", withdrawalsError);
-
-        // c) Clear credit codes
-        const { error: codesError } = await supabase
-          .from("credit_codes")
-          .delete()
-          .neq("id", "00000000-0000-0000-0000-000000000000");
-        if (codesError) console.warn("Aviso ao limpar credit_codes:", codesError);
-      }
-
-      // 2. Insert audit log in financial_cleanup_logs
-      try {
-        await supabase.from("financial_cleanup_logs" as any).insert({
-          performed_by: user?.id || null,
-          cleanup_type: "RESET_FINANCIAL_MODULE",
+      // Execute transactional reset on backend via server edge function router
+      const { data, error } = await supabase.functions.invoke("admin-reset-financial", {
+        body: {
           backup_executed: backupExecuted,
-          notes: `Módulo financeiro reiniciado pelo administrador em ${new Date().toLocaleString("pt-BR")}.`,
-          created_at: new Date().toISOString(),
-        });
-      } catch (logErr) {
-        console.warn("Aviso ao registrar log de auditoria:", logErr);
+        },
+      });
+
+      if (error) throw error;
+      if (data && data.success === false) {
+        throw new Error(data.error || "Falha ao reiniciar módulo financeiro.");
       }
 
-      // 3. Invalidate query cache so UI refreshes cleanly
-      await queryClient.invalidateQueries({ queryKey: ["admin-financial-data"] });
-      await queryClient.invalidateQueries({ queryKey: ["store-credits"] });
-      await queryClient.invalidateQueries({ queryKey: ["my-credits"] });
-      await queryClient.invalidateQueries({ queryKey: ["financial-withdrawals"] });
-      await queryClient.invalidateQueries({ queryKey: ["credit-codes"] });
+      // Invalidate all financial-related queries across TanStack Query cache
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["admin-financial-data"] }),
+        queryClient.invalidateQueries({ queryKey: ["financial-credit-codes"] }),
+        queryClient.invalidateQueries({ queryKey: ["financial-store-credits"] }),
+        queryClient.invalidateQueries({ queryKey: ["financial-delivery-requests"] }),
+        queryClient.invalidateQueries({ queryKey: ["financial-driver-earnings"] }),
+        queryClient.invalidateQueries({ queryKey: ["financial-withdrawals"] }),
+        queryClient.invalidateQueries({ queryKey: ["financial-drivers"] }),
+        queryClient.invalidateQueries({ queryKey: ["financial-store-owners"] }),
+        queryClient.invalidateQueries({ queryKey: ["admin-stores-recharge-list"] }),
+        queryClient.invalidateQueries({ queryKey: ["financial-cleanup-logs"] }),
+        queryClient.invalidateQueries({ queryKey: ["delivery-config"] }),
+        queryClient.invalidateQueries({ queryKey: ["site-settings-financial-reset"] }),
+        queryClient.invalidateQueries({ queryKey: ["store-credits"] }),
+        queryClient.invalidateQueries({ queryKey: ["my-credits"] }),
+        queryClient.invalidateQueries({ queryKey: ["credit-codes"] }),
+        queryClient.invalidateQueries({ queryKey: ["admin-withdrawals"] }),
+        queryClient.invalidateQueries({ queryKey: ["my-withdrawals"] }),
+      ]);
 
-      toast.success("Módulo financeiro zerado e reiniciado com sucesso! Todos os dados operacionais foram preservados.");
-      
+      toast.success("Módulo financeiro reiniciado com sucesso! Todos os indicadores foram zerados e os dados operacionais foram mantidos.");
+
       setConfirmationInput("");
       onOpenChange(false);
       if (onResetSuccess) onResetSuccess();
@@ -137,8 +112,8 @@ export const FinancialResetModal: React.FC<FinancialResetModalProps> = ({
             <ShieldAlert className="w-5 h-5 text-destructive" />
             Reiniciar Módulo Financeiro
           </DialogTitle>
-          <DialogDescription className="text-xs">
-            Esta ação é irreversível e zerará todos os saldos de créditos, códigos e solicitações de saques.
+          <DialogDescription className="text-xs text-foreground/90 font-medium pt-1">
+            Deseja realmente reiniciar o Financeiro? O Histórico Detalhado de Entradas Financeiras e as movimentações dos motoristas relacionadas a corridas, saques e antecipações serão apagados. Todos os indicadores financeiros serão zerados. Essa operação não poderá ser desfeita.
           </DialogDescription>
         </DialogHeader>
 
@@ -147,14 +122,14 @@ export const FinancialResetModal: React.FC<FinancialResetModalProps> = ({
           <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-3 text-xs space-y-2">
             <div className="flex items-start gap-2 font-bold text-destructive">
               <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-              <span>O QUE SERÁ AFETADO E O QUE SERÁ MANTIDO:</span>
+              <span>O QUE SERÁ ZERADO E O QUE SERÁ PRESERVADO:</span>
             </div>
             <ul className="list-disc list-inside space-y-1 text-muted-foreground text-[11px] pl-1">
               <li>
-                <strong className="text-foreground">Zerar:</strong> Saldos de créditos das lojas, históricos de saques e códigos de créditos.
+                <strong className="text-foreground">Remover/Zerar:</strong> Histórico de Entradas, Movimentações dos Motoristas (corridas, saques, antecipações), Saldos de Créditos e Indicadores Financeiros.
               </li>
               <li>
-                <strong className="text-emerald-600 dark:text-emerald-400">Preservados:</strong> Lojas, Motoristas, Pedidos de entrega, Produtos, Usuários, Autenticação e Configurações da Plataforma.
+                <strong className="text-emerald-600 dark:text-emerald-400">Preservar:</strong> Usuários, Lojas, Motoristas, Cadastros, Entregas Operacionais, Veículos, OneSignal, Mapbox e Configurações do Sistema.
               </li>
             </ul>
           </div>

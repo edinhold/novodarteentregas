@@ -1705,6 +1705,157 @@ export async function handleEdgeFunction(
     };
   }
 
+  // 13. admin-reset-financial: Reset completo do módulo financeiro por administrador
+  if (functionName === "admin-reset-financial") {
+    const caller = await getCaller(supabase, authHeader);
+    if (!caller || !(await checkAdmin(supabase, caller.id))) {
+      return {
+        status: 200,
+        body: {
+          success: false,
+          code: "SEM_PERMISSAO",
+          error: "Apenas usuários com permissão de Administrador podem reiniciar o módulo financeiro.",
+          request_id: requestId,
+        },
+      };
+    }
+
+    const resetTimestamp = new Date().toISOString();
+
+    let deletedCreditCodes = 0;
+    let deletedStoreRecharges = 0;
+    let resetStoreCredits = 0;
+    let deletedWithdrawals = 0;
+    let deletedDriverEarnings = 0;
+    let deletedWalletAdjustments = 0;
+
+    try {
+      // 1. Delete rows from credit_codes
+      const { data: ccData, error: ccErr } = await supabase
+        .from("credit_codes")
+        .delete()
+        .neq("id", "00000000-0000-0000-0000-000000000000")
+        .select("id");
+      if (!ccErr && ccData) deletedCreditCodes = ccData.length;
+
+      // 2. Delete rows from store_recharges
+      const { data: srData, error: srErr } = await supabase
+        .from("store_recharges")
+        .delete()
+        .neq("id", "00000000-0000-0000-0000-000000000000")
+        .select("id");
+      if (!srErr && srData) deletedStoreRecharges = srData.length;
+
+      // 3. Reset store_credits balance = 0
+      const { data: scData, error: scErr } = await supabase
+        .from("store_credits")
+        .update({ balance: 0, updated_at: resetTimestamp })
+        .neq("balance", 0)
+        .select("id");
+      if (!scErr && scData) resetStoreCredits = scData.length;
+
+      // 4. Delete rows from withdrawal_requests
+      const { data: wthData, error: wthErr } = await supabase
+        .from("withdrawal_requests")
+        .delete()
+        .neq("id", "00000000-0000-0000-0000-000000000000")
+        .select("id");
+      if (!wthErr && wthData) deletedWithdrawals = wthData.length;
+
+      // 5. Delete rows from driver_earnings
+      const { data: deData, error: deErr } = await supabase
+        .from("driver_earnings")
+        .delete()
+        .neq("id", "00000000-0000-0000-0000-000000000000")
+        .select("id");
+      if (!deErr && deData) deletedDriverEarnings = deData.length;
+
+      // 6. Delete rows from wallet_adjustments
+      const { data: waData, error: waErr } = await supabase
+        .from("wallet_adjustments")
+        .delete()
+        .neq("id", "00000000-0000-0000-0000-000000000000")
+        .select("id");
+      if (!waErr && waData) deletedWalletAdjustments = waData.length;
+
+      // 7. Store financial reset timestamp in site_settings
+      try {
+        await supabase.from("site_settings").upsert(
+          {
+            key: "last_financial_reset_at",
+            value: { timestamp: resetTimestamp, admin_id: caller.id },
+            updated_at: resetTimestamp,
+          },
+          { onConflict: "key" }
+        );
+      } catch (eSet) {
+        console.warn("[admin-reset-financial] site_settings update warning:", eSet);
+      }
+
+      // Also update delivery_config updated_at
+      try {
+        const { data: cfgList } = await supabase.from("delivery_config").select("id").limit(1);
+        if (cfgList && cfgList.length > 0) {
+          await supabase
+            .from("delivery_config")
+            .update({ updated_at: resetTimestamp } as any)
+            .eq("id", cfgList[0].id);
+        }
+      } catch {}
+
+      // 8. Audit log recording
+      const totalFinancialRecords = deletedCreditCodes + deletedStoreRecharges + resetStoreCredits + deletedWalletAdjustments;
+      const totalDriverMovements = deletedWithdrawals + deletedDriverEarnings;
+
+      try {
+        await supabase.from("financial_cleanup_logs" as any).insert({
+          admin_user_id: caller.id,
+          reason: `RESET_FINANCIAL_MODULE: Removidos ${totalFinancialRecords} registros financeiros e ${totalDriverMovements} movimentações de motoristas.`,
+          deleted_delivered_requests: 0,
+          deleted_delivered_orders: 0,
+          deleted_earnings: deletedDriverEarnings,
+          deleted_withdrawals: deletedWithdrawals,
+          created_at: resetTimestamp,
+          from_date: null,
+          to_date: resetTimestamp,
+        });
+      } catch (auditErr) {
+        console.warn("[admin-reset-financial] Audit log warning:", auditErr);
+      }
+
+      return {
+        status: 200,
+        body: {
+          success: true,
+          message: "Módulo financeiro reiniciado com sucesso! Todos os indicadores foram zerados para o novo período.",
+          reset_at: resetTimestamp,
+          counts: {
+            financial_records_removed: totalFinancialRecords,
+            driver_movements_removed: totalDriverMovements,
+            credit_codes: deletedCreditCodes,
+            store_recharges: deletedStoreRecharges,
+            store_credits: resetStoreCredits,
+            withdrawals: deletedWithdrawals,
+            driver_earnings: deletedDriverEarnings,
+            wallet_adjustments: deletedWalletAdjustments,
+          },
+          request_id: requestId,
+        },
+      };
+    } catch (err: any) {
+      console.error("[admin-reset-financial] Erro inesperado:", err);
+      return {
+        status: 200,
+        body: {
+          success: false,
+          code: "ERRO_RESET_FINANCEIRO",
+          error: err?.message || "Erro interno ao executar o reset financeiro.",
+          request_id: requestId,
+        },
+      };
+    }
+  }
+
   // Default fallback for other functions
   return {
     status: 200,

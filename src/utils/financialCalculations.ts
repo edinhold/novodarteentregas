@@ -62,13 +62,20 @@ export const isWithinPeriod = (
   dateStr: string | null | undefined,
   period: FinancialPeriod,
   customStart?: string,
-  customEnd?: string
+  customEnd?: string,
+  lastResetTimestamp?: string | number | null
 ): boolean => {
   if (!dateStr) return false;
-  if (period === "all") return true;
 
   const date = new Date(dateStr);
   if (isNaN(date.getTime())) return false;
+
+  if (lastResetTimestamp) {
+    const rTime = typeof lastResetTimestamp === "number" ? lastResetTimestamp : new Date(lastResetTimestamp).getTime();
+    if (!isNaN(rTime) && date.getTime() <= rTime) return false;
+  }
+
+  if (period === "all") return true;
 
   const now = new Date();
 
@@ -135,6 +142,7 @@ interface CalculationInput {
   period: FinancialPeriod;
   customStart?: string;
   customEnd?: string;
+  lastResetTimestamp?: string | number | null;
 }
 
 export const calculateFinancials = ({
@@ -151,6 +159,7 @@ export const calculateFinancials = ({
   period,
   customStart,
   customEnd,
+  lastResetTimestamp,
 }: CalculationInput): {
   summary: FinancialSummary;
   transactions: UnifiedTransaction[];
@@ -222,7 +231,7 @@ export const calculateFinancials = ({
     
     // An operation is a valid entrada when it has been used/redeemed or was a direct admin recharge
     const isValidEntry = c.is_used === true;
-    const inPeriod = isWithinPeriod(dateStr, period, customStart, customEnd);
+    const inPeriod = isWithinPeriod(dateStr, period, customStart, customEnd, lastResetTimestamp);
 
     const val = Number(c.value || 0);
 
@@ -286,7 +295,7 @@ export const calculateFinancials = ({
   // 2. Process Delivery Requests (Consumo de créditos, comissão e ganhos de motoristas)
   deliveryRequests.forEach((req) => {
     const dateStr = req.updated_at || req.created_at;
-    const inPeriod = isWithinPeriod(dateStr, period, customStart, customEnd);
+    const inPeriod = isWithinPeriod(dateStr, period, customStart, customEnd, lastResetTimestamp);
     const isDelivered = req.status === "delivered";
 
     const grossVal = Number(req.credit_cost || 0);
@@ -432,7 +441,7 @@ export const calculateFinancials = ({
   // 3. Process Withdrawal Requests (Saídas de Caixa e Taxas de Antecipação)
   withdrawalRequests.forEach((w) => {
     const dateStr = w.created_at;
-    const inPeriod = isWithinPeriod(dateStr, period, customStart, customEnd);
+    const inPeriod = isWithinPeriod(dateStr, period, customStart, customEnd, lastResetTimestamp);
     const isApproved = w.status === "approved";
     const isPending = w.status === "pending";
 

@@ -467,6 +467,25 @@ export const FinancialTab = () => {
     return { start, end };
   }, [period, dateFrom, dateTo]);
 
+  // Query: site_settings for last_financial_reset_at
+  const { data: resetSetting } = useQuery({
+    queryKey: ["site-settings-financial-reset"],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("site_settings")
+        .select("value")
+        .eq("key", "last_financial_reset_at")
+        .maybeSingle();
+      return data?.value as { timestamp?: string } | null;
+    },
+  });
+
+  const lastResetTimestamp = useMemo(() => {
+    if (!resetSetting?.timestamp) return null;
+    const t = new Date(resetSetting.timestamp).getTime();
+    return isNaN(t) ? null : t;
+  }, [resetSetting]);
+
   // Função auxiliar de checagem de intervalo de data
   const isWithinPeriod = useCallback(
     (dateStr: string | null | undefined): boolean => {
@@ -474,11 +493,14 @@ export const FinancialTab = () => {
       const d = new Date(dateStr);
       if (isNaN(d.getTime())) return false;
 
+      // Desconsiderar movimentações anteriores ao último reset do financeiro
+      if (lastResetTimestamp && d.getTime() <= lastResetTimestamp) return false;
+
       if (dateBounds.start && d < dateBounds.start) return false;
       if (dateBounds.end && d > dateBounds.end) return false;
       return true;
     },
-    [dateBounds.start, dateBounds.end]
+    [dateBounds.start, dateBounds.end, lastResetTimestamp]
   );
 
   // Mapeamentos rápidos por ID
@@ -654,9 +676,9 @@ export const FinancialTab = () => {
 
       const userOrIdList = [driverObj.id, driverObj.user_id];
 
-      // Total líquido de entregas efetuadas
+      // Total líquido de entregas efetuadas no período ativo
       const myRides = deliveryRequests.filter(
-        (r) => userOrIdList.includes(r.driver_id || "") && r.status === "delivered"
+        (r) => userOrIdList.includes(r.driver_id || "") && r.status === "delivered" && isWithinPeriod(r.created_at)
       );
 
       const netGenerated = myRides.reduce((sum, r) => {
@@ -665,21 +687,27 @@ export const FinancialTab = () => {
         return sum + Math.max(0, Number(r.driver_fee || 0) * (1 - appFeePercentConfig / 100));
       }, 0);
 
-      // Saques aprovados/pagos
+      // Saques aprovados/pagos no período ativo
       const myApprovedWithdrawals = withdrawals.filter(
-        (w) => (userOrIdList.includes(w.driver_id) || userOrIdList.includes(w.driver_user_id)) && w.status === "approved"
+        (w) =>
+          (userOrIdList.includes(w.driver_id) || userOrIdList.includes(w.driver_user_id)) &&
+          w.status === "approved" &&
+          isWithinPeriod(w.created_at)
       );
       const totalPaid = myApprovedWithdrawals.reduce((sum, w) => sum + Number(w.net_amount || 0), 0);
 
-      // Saques pendentes
+      // Saques pendentes no período ativo
       const myPendingWithdrawals = withdrawals.filter(
-        (w) => (userOrIdList.includes(w.driver_id) || userOrIdList.includes(w.driver_user_id)) && w.status === "pending"
+        (w) =>
+          (userOrIdList.includes(w.driver_id) || userOrIdList.includes(w.driver_user_id)) &&
+          w.status === "pending" &&
+          isWithinPeriod(w.created_at)
       );
       const totalPending = myPendingWithdrawals.reduce((sum, w) => sum + Number(w.amount || 0), 0);
 
       return Math.max(0, netGenerated - totalPaid - totalPending);
     },
-    [driverMap, deliveryRequests, earningsByDeliveryMap, appFeePercentConfig, withdrawals]
+    [driverMap, deliveryRequests, earningsByDeliveryMap, appFeePercentConfig, withdrawals, isWithinPeriod]
   );
 
   // 7. CÁLCULO DOS 10 INDICADORES FINANCEIROS (Formulas Oficiais)
@@ -761,9 +789,9 @@ export const FinancialTab = () => {
 
     const driverUserOrId = [driverObj.id, driverObj.user_id];
 
-    // Corridas do motorista
+    // Corridas do motorista no período ativo
     const myRides = deliveryRequests.filter(
-      (r) => driverUserOrId.includes(r.driver_id || "") && r.status === "delivered"
+      (r) => driverUserOrId.includes(r.driver_id || "") && r.status === "delivered" && isWithinPeriod(r.created_at)
     );
     const grossTotal = myRides.reduce((sum, r) => sum + Number(r.driver_fee || 0), 0);
 
@@ -776,9 +804,11 @@ export const FinancialTab = () => {
 
     const historicCommission = Math.max(0, grossTotal - netGenerated);
 
-    // Saques do motorista
-    const myWithdrawals = withdrawals.filter((w) =>
-      driverUserOrId.includes(w.driver_id || "") || driverUserOrId.includes(w.driver_user_id || "")
+    // Saques do motorista no período ativo
+    const myWithdrawals = withdrawals.filter(
+      (w) =>
+        (driverUserOrId.includes(w.driver_id || "") || driverUserOrId.includes(w.driver_user_id || "")) &&
+        isWithinPeriod(w.created_at)
     );
     const approvedWithdrawals = myWithdrawals.filter((w) => w.status === "approved");
 
@@ -805,7 +835,7 @@ export const FinancialTab = () => {
       totalFeesPaid,
       totalPaid,
     };
-  }, [detailDriverId, driverMap, deliveryRequests, earningsByDeliveryMap, appFeePercentConfig, withdrawals]);
+  }, [detailDriverId, driverMap, deliveryRequests, earningsByDeliveryMap, appFeePercentConfig, withdrawals, isWithinPeriod]);
 
   // Lojista Selecionado para Detalhamento
   const selectedStoreData = useMemo(() => {
@@ -814,14 +844,19 @@ export const FinancialTab = () => {
     const rest = restaurants.find((r) => r.owner_id === detailStoreUserId);
     const creditRecord = storeCredits.find((sc) => sc.user_id === detailStoreUserId);
 
-    // Recargas do lojista
+    // Recargas do lojista no período ativo
     const myCodes = creditCodes.filter(
-      (c) => (c.used_by === detailStoreUserId || c.assigned_to_user_id === detailStoreUserId) && c.is_used
+      (c) =>
+        (c.used_by === detailStoreUserId || c.assigned_to_user_id === detailStoreUserId) &&
+        c.is_used &&
+        isWithinPeriod(c.used_at || c.created_at)
     );
     const totalRecargas = myCodes.reduce((sum, c) => sum + Number(c.value || 0), 0);
 
-    // Corridas realizadas pela loja
-    const myDeliveries = deliveryRequests.filter((r) => r.store_owner_id === detailStoreUserId);
+    // Corridas realizadas pela loja no período ativo
+    const myDeliveries = deliveryRequests.filter(
+      (r) => r.store_owner_id === detailStoreUserId && isWithinPeriod(r.created_at)
+    );
     const deliveredCount = myDeliveries.filter((r) => r.status === "delivered").length;
     const usedInDeliveries = myDeliveries
       .filter((r) => r.status === "delivered")
@@ -838,7 +873,7 @@ export const FinancialTab = () => {
       deliveredCount,
       currentBalance: creditRecord?.balance || 0,
     };
-  }, [detailStoreUserId, storeOwnerMap, restaurants, creditCodes, storeCredits, deliveryRequests]);
+  }, [detailStoreUserId, storeOwnerMap, restaurants, creditCodes, storeCredits, deliveryRequests, isWithinPeriod]);
 
   const loadingAny = loadingCodes || loadingCredits || loadingRequests || loadingEarnings || loadingWithdrawals;
 

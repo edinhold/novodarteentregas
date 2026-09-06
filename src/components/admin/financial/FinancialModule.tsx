@@ -157,6 +157,21 @@ export const FinancialModule: React.FC<FinancialModuleProps> = ({ standalone = f
     staleTime: 1000 * 30, // 30 seconds
   });
 
+  // Query: last_financial_reset_at from site_settings
+  const { data: resetSetting } = useQuery({
+    queryKey: ["site-settings-financial-reset"],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("site_settings")
+        .select("value")
+        .eq("key", "last_financial_reset_at")
+        .maybeSingle();
+      return data?.value as { timestamp?: string } | null;
+    },
+  });
+
+  const lastResetTimestamp = resetSetting?.timestamp ? resetSetting.timestamp : null;
+
   // Calculate Financials based on active period & filters
   const { summary, transactions, driverEarningsList } = useMemo(() => {
     if (!financialRaw) {
@@ -201,8 +216,9 @@ export const FinancialModule: React.FC<FinancialModuleProps> = ({ standalone = f
       period,
       customStart,
       customEnd,
+      lastResetTimestamp,
     });
-  }, [financialRaw, config, period, customStart, customEnd]);
+  }, [financialRaw, config, period, customStart, customEnd, lastResetTimestamp]);
 
   const handleRefresh = async () => {
     await Promise.all([refetchFinancialData(), refetchConfig()]);
