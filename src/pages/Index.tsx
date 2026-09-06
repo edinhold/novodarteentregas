@@ -100,6 +100,11 @@ const Index = () => {
   const { data: categories = [] } = useCategories();
   const { data: restaurants = [] } = useRestaurants();
 
+  const authenticatedStore = useMemo(
+    () => (user ? restaurants.find((r) => r.owner_id === user.id) : null),
+    [user, restaurants]
+  );
+
   const filtered = useMemo(() => {
     let list = restaurants;
     if (selectedCategory) {
@@ -122,7 +127,6 @@ const Index = () => {
     );
   }
 
-  const authenticatedStore = useMemo(() => (user ? restaurants.find((r) => r.owner_id === user.id) : null), [user, restaurants]);
   const currentHeaderLogo = authenticatedStore?.logo || logoDuarte;
 
   return (
