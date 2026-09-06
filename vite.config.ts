@@ -29,9 +29,8 @@ export default defineConfig(({ mode }) => ({
         clientsClaim: true,
         skipWaiting: true,
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2,jpeg}"],
-        globIgnores: ["**/OneSignalSDKWorker.js"],
         navigateFallback: "/index.html",
-        navigateFallbackDenylist: [/^\/~oauth/, /^\/OneSignalSDKWorker\.js$/, /^\/api\//],
+        navigateFallbackDenylist: [/^\/~oauth/, /^\/api\//],
       },
 
 

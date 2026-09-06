@@ -238,12 +238,10 @@ const PushTestTab = () => {
       <Card>
         <CardHeader className="flex-row items-center justify-between">
           <CardTitle className="text-base flex items-center gap-2">
-            Teste de Notificação Push (OneSignal)
-            {data?.config?.is_fallback && (
-              <Badge variant="outline" className="text-[10px] bg-amber-500/10 text-amber-600 border-amber-500/30">
-                <AlertCircle className="w-3 h-3 mr-1" /> Modo Diagnóstico DB
-              </Badge>
-            )}
+            Notificações Push (OneSignal Removido - Aguardando Nova Implantação)
+            <Badge variant="outline" className="text-[10px] bg-amber-500/10 text-amber-600 border-amber-500/30">
+              <AlertCircle className="w-3 h-3 mr-1" /> Limpeza Concluída
+            </Badge>
           </CardTitle>
           <Button size="sm" variant="outline" onClick={() => refetch()} disabled={isLoading}>
             <RefreshCw className={`w-4 h-4 mr-1 ${isLoading ? "animate-spin" : ""}`} /> Atualizar
