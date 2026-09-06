@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { reverseGeocode as reverseGeocodeMapbox } from "@/services/mapbox";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -128,29 +129,9 @@ const StoreInfoTab = ({ restaurant, userId }: StoreInfoTabProps) => {
 
   const reverseGeocode = useCallback(async (lat: number, lng: number) => {
     try {
-      if (GOOGLE_MAPS_API_KEY) {
-        const res = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GOOGLE_MAPS_API_KEY}&language=pt-BR`);
-        const data = await res.json();
-        if (data.status === "OK" && data.results?.[0]) {
-          setForm(f => ({ ...f, address: data.results[0].formatted_address }));
-          return;
-        }
-      }
-      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&zoom=18&accept-language=pt-BR`);
-      const data = await res.json();
-      if (data?.address) {
-        const a = data.address;
-        const parts: string[] = [];
-        const road = a.road || a.pedestrian || a.footway || a.street || "";
-        if (road) parts.push(a.house_number ? `${road}, ${a.house_number}` : road);
-        const neighborhood = a.suburb || a.neighbourhood || a.quarter || "";
-        if (neighborhood) parts.push(neighborhood);
-        const city = a.city || a.town || a.village || a.municipality || "";
-        if (city) parts.push(city);
-        if (a.state) parts.push(a.state);
-        if (parts.length > 0) {
-          setForm(f => ({ ...f, address: parts.join(", ") }));
-        }
+      const parsed = await reverseGeocodeMapbox(lat, lng);
+      if (parsed?.fullAddress) {
+        setForm((f) => ({ ...f, address: parsed.fullAddress }));
       }
     } catch (err) {
       console.error("Reverse geocode error:", err);

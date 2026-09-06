@@ -17,6 +17,13 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { MAP_LAYERS, GOOGLE_MAPS_API_KEY } from "@/config/maps";
 import { getBestLocation } from "@/utils/geolocation";
+import {
+  searchAddressSuggestions,
+  geocodeAddress as geocodeAddressMapbox,
+  reverseGeocode as reverseGeocodeMapbox,
+  calculateRoute,
+  MapboxParsedAddress,
+} from "@/services/mapbox";
 
 import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
 import markerIcon from "leaflet/dist/images/marker-icon.png";
@@ -73,29 +80,31 @@ const PROFILE_CONFIG: Record<RouteProfile, { label: string; icon: typeof Car; os
   walking: { label: "A pé", icon: Footprints, osrmProfile: "foot" },
 };
 
-// OSRM route fetcher — returns road distance (km), duration (min), and route geometry
+// Mapbox Directions v5 route fetcher — retorna distancia da rota (km), duracao (min) e geometria
 async function fetchOSRMRoute(
   fromLat: number, fromLng: number, toLat: number, toLng: number,
   profile: RouteProfile = "driving"
 ): Promise<{ distanceKm: number; durationMin: number; geometry: [number, number][] } | null> {
   try {
-    const osrmProfile = PROFILE_CONFIG[profile].osrmProfile;
-    const url = `https://router.project-osrm.org/route/v1/${osrmProfile}/${fromLng},${fromLat};${toLng},${toLat}?overview=full&geometries=geojson&alternatives=false`;
-    const res = await fetch(url);
-    const data = await res.json();
-    if (data.code === "Ok" && data.routes?.[0]) {
-      const route = data.routes[0];
-      const coords = route.geometry.coordinates.map((c: [number, number]) => [c[1], c[0]] as [number, number]);
-      return {
-        distanceKm: route.distance / 1000,
-        durationMin: route.duration / 60,
-        geometry: coords,
-      };
-    }
+    const res = await calculateRoute(
+      { lat: fromLat, lng: fromLng },
+      { lat: toLat, lng: toLng },
+      { profile }
+    );
+    return {
+      distanceKm: res.distanceKm,
+      durationMin: res.durationMin,
+      geometry: res.geometry,
+    };
   } catch (err) {
-    console.error("OSRM route error:", err);
+    console.warn("[MapboxRoute] erro ou fallback:", err);
+    const fallbackDist = haversineKm(fromLat, fromLng, toLat, toLng);
+    return {
+      distanceKm: fallbackDist,
+      durationMin: (fallbackDist / 25) * 60,
+      geometry: [],
+    };
   }
-  return null;
 }
 
 interface CallDriverTabProps {
@@ -293,29 +302,18 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
   }, []);
 
   const reverseGeocode = useCallback(async (lat: number, lng: number) => {
-    if (pickupManualRef.current) return; // não sobrescreve endereço digitado
+    if (pickupManualRef.current) return;
     try {
-      if (GOOGLE_MAPS_API_KEY) {
-        const res = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GOOGLE_MAPS_API_KEY}&language=pt-BR`);
-        const data = await res.json();
-        if (data.status === "OK" && data.results?.[0]) {
-          console.info("[GPS:coleta] endereço obtido via Google", data.results[0].formatted_address);
-          setCallForm(f => ({ ...f, pickup: data.results[0].formatted_address }));
-          return;
-        }
-      }
-      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&zoom=18&accept-language=pt-BR`);
-      const data = await res.json();
-      if (data) {
-        const formatted = formatAddress(data, true); // Include number for pickup address
-        console.info("[GPS:coleta] endereço obtido via Nominatim", formatted);
-        setCallForm(f => (f.pickup ? f : { ...f, pickup: formatted }));
+      const parsed = await reverseGeocodeMapbox(lat, lng);
+      if (parsed?.fullAddress) {
+        console.info("[GPS:coleta] endereço obtido via Mapbox", parsed.fullAddress);
+        setCallForm(f => (f.pickup ? f : { ...f, pickup: parsed.fullAddress }));
       }
     } catch (err) {
       console.error("[GPS:coleta] erro no reverse geocoding:", err);
       setGpsMessage("Erro ao carregar o mapa. Tente novamente.");
     }
-  }, [formatAddress]);
+  }, []);
 
   // ---------------------------------------------------------------------
   // GPS do endereço de coleta — implementação robusta
@@ -482,22 +480,13 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
 
   const reverseGeocodeAddress = useCallback(async (lat: number, lng: number): Promise<string | null> => {
     try {
-      if (GOOGLE_MAPS_API_KEY) {
-        const res = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GOOGLE_MAPS_API_KEY}&language=pt-BR`);
-        const data = await res.json();
-        if (data.status === "OK" && data.results?.[0]?.formatted_address) {
-          return data.results[0].formatted_address as string;
-        }
-      }
-      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&zoom=18&accept-language=pt-BR`);
-      const data = await res.json();
-      const formatted = formatAddress(data, true);
-      return formatted && formatted.trim().length > 0 ? formatted : null;
+      const parsed = await reverseGeocodeMapbox(lat, lng);
+      return parsed?.fullAddress || null;
     } catch (e) {
       console.error(`${GPS_LOG} reverse geocoding falhou`, e);
       return null;
     }
-  }, [formatAddress]);
+  }, []);
 
   const handlePickupGpsClick = useCallback(async () => {
     if (pickupGpsBusyRef.current) {
@@ -588,31 +577,24 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
 
   // Geocodifica o endereço digitado manualmente e atualiza o marcador
   const geocodePickupAddress = useCallback(async (address: string) => {
-    if (!address || address.trim().length < 5) return;
+    if (!address || address.trim().length < 3) return;
     try {
-      const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=br&addressdetails=1&q=${encodeURIComponent(address)}`;
-      const res = await fetch(url, { headers: { "Accept-Language": "pt-BR" } });
-      const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) {
-        const lat = parseFloat(data[0].lat);
-        const lng = parseFloat(data[0].lon);
-        console.info(`${GPS_LOG} endereço manual geocodificado`, { lat, lng });
-        setStoreLatLng([lat, lng]);
+      const parsed = await geocodeAddressMapbox(address);
+      if (parsed?.coordinates) {
+        console.info(`${GPS_LOG} endereço manual geocodificado`, parsed.coordinates);
+        setStoreLatLng([parsed.coordinates.latitude, parsed.coordinates.longitude]);
         setGpsStatus("granted");
         setGpsAccuracy(null);
         setGpsMessage(null);
-      } else {
-        console.warn(`${GPS_LOG} endereço manual não localizado`);
       }
     } catch (e) {
-      console.error(`${GPS_LOG} erro ao geocodificar endereço manual`, e);
-      setGpsMessage("Erro ao carregar o mapa. Tente novamente.");
+      console.warn(`${GPS_LOG} endereço manual não localizado`, e);
     }
   }, []);
 
   const geocodeDeliveryAddress = useCallback((address: string) => {
     if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
-    if (address.trim().length < 5) {
+    if (address.trim().length < 3) {
       setAddressSuggestions([]);
       setShowSuggestions(false);
       return;
@@ -621,82 +603,51 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
     searchTimeoutRef.current = setTimeout(async () => {
       setSearchingAddress(true);
       try {
-        if (GOOGLE_MAPS_API_KEY) {
-          let googleUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${GOOGLE_MAPS_API_KEY}&language=pt-BR&components=country:BR`;
-          if (storeLat && storeLng) {
-            googleUrl += `&location=${storeLat},${storeLng}&radius=50000`;
-          }
-          const res = await fetch(googleUrl);
-          const data = await res.json();
-          if (data.status === "OK" && data.results?.length > 0) {
-            const mapped = data.results.map((r: any) => ({
-              display_name: r.formatted_address,
-              lat: r.geometry.location.lat.toString(),
-              lon: r.geometry.location.lng.toString(),
-              address: r.address_components
-            }));
-            setAddressSuggestions(mapped);
-            setShowSuggestions(true);
-            setSearchingAddress(false);
-            return;
-          }
-        }
+        const suggestions = await searchAddressSuggestions(address, {
+          userNumber: callForm.delivery_number,
+          limit: 5,
+        });
 
-        // Nominatim: acrescenta cidade/UF quando o usuário só digitou rua/bairro
-        const hasCity = /primavera do leste|\bmt\b|mato grosso/i.test(address);
-        const query = hasCity ? address : `${address}, Primavera do Leste, MT`;
-        let searchUrl = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=5&countrycodes=br&addressdetails=1&accept-language=pt-BR`;
-
-        if (storeLat && storeLng) {
-          const delta = 0.25;
-          searchUrl += `&viewbox=${storeLng - delta},${storeLat - delta},${storeLng + delta},${storeLat + delta}&bounded=1`;
-        }
-        
-        const res = await fetch(searchUrl);
-        const data = await res.json();
-        if (data && data.length > 0) {
-          if (storeLat && storeLng) {
-            data.sort((a: any, b: any) => {
-              const da = haversineKm(storeLat, storeLng, parseFloat(a.lat), parseFloat(a.lon));
-              const db = haversineKm(storeLat, storeLng, parseFloat(b.lat), parseFloat(b.lon));
-              return da - db;
-            });
-          }
-          setAddressSuggestions(data);
+        if (suggestions.length > 0) {
+          const mapped = suggestions.map((s) => ({
+            display_name: s.fullAddress,
+            lat: s.coordinates.latitude.toString(),
+            lon: s.coordinates.longitude.toString(),
+            parsed: s,
+          }));
+          setAddressSuggestions(mapped);
           setShowSuggestions(true);
         } else {
           setAddressSuggestions([]);
           setShowSuggestions(false);
-          toast.info("Endereço não encontrado. Toque no mapa para marcar a localização manualmente.", { duration: 5000 });
+          toast.info("Não foi possível localizar este endereço com precisão. Confira rua, número, bairro e cidade.", { duration: 5000 });
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error("Geocode error:", err);
+        setAddressSuggestions([]);
+        setShowSuggestions(false);
+        const userMsg = err?.userMessage || "Erro ao consultar serviço de mapa. Confira os dados.";
+        toast.error(userMsg, { duration: 4000 });
       } finally {
         setSearchingAddress(false);
       }
-    }, 800);
-  }, [storeLat, storeLng]);
+    }, 350);
+  }, [callForm.delivery_number]);
 
   const selectSuggestion = useCallback((item: any) => {
-    const lat = parseFloat(item.lat);
-    const lng = parseFloat(item.lon);
-    setDeliveryLatLng([lat, lng]);
+    const parsed: MapboxParsedAddress | undefined = item.parsed;
+    const lat = parsed ? parsed.coordinates.latitude : parseFloat(item.lat);
+    const lng = parsed ? parsed.coordinates.longitude : parseFloat(item.lon);
     
-    // Extract number if present
-    let houseNumber = "";
-    if (item.address) {
-      if (Array.isArray(item.address)) {
-        houseNumber = item.address.find((c: any) => c.types.includes("street_number"))?.long_name || "";
-      } else {
-        houseNumber = item.address.house_number || "";
-      }
-    }
+    setDeliveryLatLng([lat, lng]);
 
-    const formatted = formatAddress(item, false); // Format without number
-    setCallForm(f => ({ 
-      ...f, 
+    const houseNumber = parsed?.number || item.address?.house_number || callForm.delivery_number || "";
+    const formatted = parsed?.fullAddress || item.display_name || "";
+
+    setCallForm(f => ({
+      ...f,
       delivery: formatted,
-      delivery_number: houseNumber 
+      delivery_number: houseNumber,
     }));
     
     setAddressSuggestions([]);
@@ -707,7 +658,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
       const bounds = L.latLngBounds([[storeLat, storeLng], [lat, lng]]);
       mapRef.current.fitBounds(bounds, { padding: [40, 40] });
     }
-  }, [storeLat, storeLng, formatAddress]);
+  }, [storeLat, storeLng, callForm.delivery_number]);
 
   // Close suggestions on click outside
   useEffect(() => {
@@ -764,16 +715,17 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
             }
           }
 
-          const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&zoom=18&accept-language=pt-BR`);
-          const data = await res.json();
-          if (data) {
-            const formatted = formatAddress(data, false);
-            const streetNumber = data.address?.house_number || "";
-            setCallForm(f => ({ 
-              ...f, 
-              delivery: formatted,
-              delivery_number: streetNumber 
-            }));
+          try {
+            const parsed = await reverseGeocodeMapbox(lat, lng);
+            if (parsed?.fullAddress) {
+              setCallForm(f => ({
+                ...f,
+                delivery: parsed.fullAddress,
+                delivery_number: parsed.number || f.delivery_number,
+              }));
+            }
+          } catch (err) {
+            console.error("Map click geocode error:", err);
           }
         } catch (err) {
           console.error("Map click geocode error:", err);
@@ -861,13 +813,18 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
           try {
 
 
-            // Fallback to Nominatim
-            const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${pos.lat}&lon=${pos.lng}&format=json&addressdetails=1&zoom=18&accept-language=pt-BR`);
-            const data = await res.json();
-            if (data) {
-              const formatted = formatAddress(data);
-              setCallForm(f => ({ ...f, delivery: formatted }));
+          try {
+            const parsed = await reverseGeocodeMapbox(pos.lat, pos.lng);
+            if (parsed?.fullAddress) {
+              setCallForm(f => ({
+                ...f,
+                delivery: parsed.fullAddress,
+                delivery_number: parsed.number || f.delivery_number,
+              }));
             }
+          } catch (err) {
+            console.error("Marker drag geocode error:", err);
+          }
           } catch (err) {
             console.error("Marker drag geocode error:", err);
           }

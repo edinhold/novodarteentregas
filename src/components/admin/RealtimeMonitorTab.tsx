@@ -39,14 +39,14 @@ const iconBusy = svgIcon("#ef4444", 32);
 const iconStore = svgIcon("#f59e0b", 28);
 const iconDest = svgIcon("#a855f7", 26);
 
+import { geocodeAddress } from "@/services/mapbox";
+
 async function geocode(address: string): Promise<{ lat: number; lng: number } | null> {
   try {
-    const res = await fetch(
-      `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(address + ", Primavera do Leste, MT")}`,
-      { headers: { Accept: "application/json" } }
-    );
-    const data = await res.json();
-    if (data?.[0]) return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+    const parsed = await geocodeAddress(address);
+    if (parsed?.coordinates) {
+      return { lat: parsed.coordinates.latitude, lng: parsed.coordinates.longitude };
+    }
   } catch {}
   return null;
 }

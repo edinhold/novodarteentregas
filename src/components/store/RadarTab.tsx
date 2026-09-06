@@ -55,14 +55,14 @@ function formatDistance(m: number) {
   return `${(m / 1000).toFixed(2)} km`;
 }
 
+import { geocodeAddress } from "@/services/mapbox";
+
 async function geocode(address: string): Promise<{ lat: number; lng: number } | null> {
   try {
-    const res = await fetch(
-      `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(address)}`,
-      { headers: { Accept: "application/json" } }
-    );
-    const data = await res.json();
-    if (data?.[0]) return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+    const parsed = await geocodeAddress(address);
+    if (parsed?.coordinates) {
+      return { lat: parsed.coordinates.latitude, lng: parsed.coordinates.longitude };
+    }
   } catch (e) {
     console.error("[RadarTab] geocode error", e);
   }

@@ -36,14 +36,14 @@ interface Props {
   userId: string;
 }
 
-// Geocode via Nominatim
+import { geocodeAddress } from "@/services/mapbox";
+
+// Geocode via Mapbox v6
 async function geocode(address: string): Promise<{ lat: number; lng: number } | null> {
   try {
-    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(address)}`;
-    const res = await fetch(url, { headers: { "Accept-Language": "pt-BR" } });
-    const json = await res.json();
-    if (Array.isArray(json) && json[0]) {
-      return { lat: parseFloat(json[0].lat), lng: parseFloat(json[0].lon) };
+    const parsed = await geocodeAddress(address);
+    if (parsed?.coordinates) {
+      return { lat: parsed.coordinates.latitude, lng: parsed.coordinates.longitude };
     }
   } catch (_) {}
   return null;

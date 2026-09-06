@@ -12,13 +12,13 @@ interface Props {
   request: any;
 }
 
+import { geocodeAddress, calculateRoute } from "@/services/mapbox";
+
 async function geocode(address: string): Promise<{ lat: number; lng: number } | null> {
   try {
-    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=br&q=${encodeURIComponent(address)}`;
-    const r = await fetch(url, { headers: { "Accept-Language": "pt-BR" } });
-    const j = await r.json();
-    if (Array.isArray(j) && j.length > 0) {
-      return { lat: parseFloat(j[0].lat), lng: parseFloat(j[0].lon) };
+    const parsed = await geocodeAddress(address);
+    if (parsed?.coordinates) {
+      return { lat: parsed.coordinates.latitude, lng: parsed.coordinates.longitude };
     }
   } catch (e) {
     console.error("geocode error", e);
@@ -28,13 +28,10 @@ async function geocode(address: string): Promise<{ lat: number; lng: number } | 
 
 async function osrmDistanceKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
   try {
-    const url = `https://router.project-osrm.org/route/v1/driving/${a.lng},${a.lat};${b.lng},${b.lat}?overview=false`;
-    const r = await fetch(url);
-    const j = await r.json();
-    const meters = j?.routes?.[0]?.distance;
-    if (typeof meters === "number") return meters / 1000;
+    const route = await calculateRoute({ lat: a.lat, lng: a.lng }, { lat: b.lat, lng: b.lng });
+    return route.distanceKm;
   } catch (e) {
-    console.error("OSRM error", e);
+    console.error("Mapbox Route error", e);
   }
   // fallback haversine
   const R = 6371;

@@ -1,6 +1,6 @@
 /**
  * Serviço oficial unificado da Mapbox API (Geocoding v6, Directions v5, Matrix v5).
- * Cumpre integralmente os requisitos de validação para Primavera do Leste - MT - Brasil.
+ * Cumpre integralmente os requisitos para Primavera do Leste - MT - Brasil.
  */
 
 import {
@@ -53,7 +53,7 @@ export interface MapboxParsedAddress {
   neighborhood: string;
   /** Cidade validada */
   city: string;
-  /** Estado (ex: "Mato Grosso" ou "MT") */
+  /** Estado ("Mato Grosso") */
   state: string;
   /** Sigla do estado ("MT") */
   stateCode: string;
@@ -61,12 +61,12 @@ export interface MapboxParsedAddress {
   country: string;
   /** CEP / Postcode */
   postalCode: string;
-  /** Coordenadas no padrão interno da aplicação { latitude, longitude } */
+  /** Coordenadas internas { latitude, longitude } */
   coordinates: {
     latitude: number;
     longitude: number;
   };
-  /** Coordenadas no padrão Mapbox [longitude, latitude] */
+  /** Coordenadas Mapbox [longitude, latitude] */
   lngLat: [number, number];
   /** Identificador oficial da feição na Mapbox */
   mapboxId: string;
@@ -74,7 +74,7 @@ export interface MapboxParsedAddress {
   featureType: string;
   /** Confiança da correspondência */
   confidence?: string;
-  /** Indica se pertence estritamente a Primavera do Leste - MT */
+  /** Indica se pertence comprovadamente a Primavera do Leste - MT */
   isValidPrimavera: boolean;
 }
 
@@ -94,7 +94,6 @@ export interface MapboxRouteResult {
   profile: RouteProfile;
 }
 
-/** Interface de estrutura interna da feição retornada pelo Geocoding v6 */
 interface MapboxGeocodeFeature {
   id: string;
   type: "Feature";
@@ -157,8 +156,12 @@ interface MapboxGeocodeResponse {
  */
 export function isValidCoordinate(latitude: number, longitude: number): boolean {
   return (
+    typeof latitude === "number" &&
+    typeof longitude === "number" &&
     Number.isFinite(latitude) &&
     Number.isFinite(longitude) &&
+    !isNaN(latitude) &&
+    !isNaN(longitude) &&
     latitude >= -90 &&
     latitude <= 90 &&
     longitude >= -180 &&
@@ -168,7 +171,7 @@ export function isValidCoordinate(latitude: number, longitude: number): boolean 
 }
 
 /**
- * Valida se as coordenadas estão dentro da área geográfica de Primavera do Leste - MT
+ * Valida se as coordenadas estão dentro da área de Primavera do Leste - MT
  */
 export function isWithinPrimaveraBounds(lat: number, lng: number): boolean {
   if (!isValidCoordinate(lat, lng)) return false;
@@ -181,11 +184,10 @@ export function isWithinPrimaveraBounds(lat: number, lng: number): boolean {
 }
 
 /**
- * Extrai número do imóvel a partir de uma string digitada pelo usuário
+ * Extrai número do imóvel a partir de uma string de endereço
  */
 export function extractHouseNumber(text: string): string {
   if (!text) return "";
-  // Exemplos: "Rua X, 123", "Av. Y, nº 450", "Rua Z, casa 12", "Rua X 1234"
   const patterns = [
     /(?:,|n[ºo°]?|número|num|casa|lote|apto|qd\.?\s*\d+\s*lt\.?)\s*[:.]?\s*(\d{1,6}[a-zA-Z]?)\b/i,
     /,\s*(\d{1,6}[a-zA-Z]?)\b/,
@@ -211,7 +213,7 @@ export function validatePrimaveraFeature(feature: MapboxGeocodeFeature): {
   const [lng, lat] = feature.geometry.coordinates;
 
   if (!isValidCoordinate(lat, lng)) {
-    return { valid: false, reason: "Coordenadas retornadas inválidas." };
+    return { valid: false, reason: "Coordenadas retornadas pela Mapbox são inválidas." };
   }
 
   const context = feature.properties.context || {};
@@ -227,12 +229,12 @@ export function validatePrimaveraFeature(feature: MapboxGeocodeFeature): {
   // 1. País deve ser Brasil
   const isBrazil =
     countryCode === "BR" ||
-    countryName === "brasil" ||
-    countryName === "brazil" ||
+    countryName.includes("brasil") ||
+    countryName.includes("brazil") ||
     fullAddress.includes("brasil");
 
   if (!isBrazil) {
-    return { valid: false, reason: "Endereço fora do Brasil." };
+    return { valid: false, reason: "Endereço localizado fora do Brasil." };
   }
 
   // 2. Estado deve ser Mato Grosso (MT)
@@ -245,7 +247,7 @@ export function validatePrimaveraFeature(feature: MapboxGeocodeFeature): {
     /\bmt\b/.test(placeFormatted);
 
   if (!isMatoGrosso) {
-    return { valid: false, reason: "Endereço fora de Mato Grosso (MT)." };
+    return { valid: false, reason: "Endereço localizado fora de Mato Grosso (MT)." };
   }
 
   // 3. Município deve ser Primavera do Leste
@@ -254,13 +256,12 @@ export function validatePrimaveraFeature(feature: MapboxGeocodeFeature): {
     fullAddress.includes("primavera do leste") ||
     placeFormatted.includes("primavera do leste");
 
-  // 4. Se o nome não foi explícito no contexto, valida os limites geográficos estritos
   const withinBounds = isWithinPrimaveraBounds(lat, lng);
 
   if (!isPrimaveraName && !withinBounds) {
     return {
       valid: false,
-      reason: `Município incorreto: ${context.place?.name || "desconhecido"}. Esperado: Primavera do Leste - MT.`,
+      reason: `O endereço encontrado pertence a outro município (${context.place?.name || "outro município"}). Apenas Primavera do Leste - MT é aceito.`,
     };
   }
 
@@ -277,14 +278,12 @@ export function parseMapboxFeature(
   const [lng, lat] = feature.geometry.coordinates;
   const context = feature.properties.context || {};
 
-  // Extrai rua / logradouro
   let street =
     context.address?.street_name ||
     context.street?.name ||
     feature.properties.name ||
     "";
 
-  // Extrai número: prioriza resposta da Mapbox, depois o número digitado pelo usuário
   const houseNumber =
     context.address?.address_number ||
     (context.address?.name && /^\d+$/.test(context.address.name)
@@ -293,25 +292,21 @@ export function parseMapboxFeature(
     userTypedNumber ||
     "";
 
-  // Se a rua veio com o número junto (ex: "Rua Piracicaba 123") e temos o número separado
   if (houseNumber && street.endsWith(` ${houseNumber}`)) {
     street = street.substring(0, street.length - houseNumber.length - 1).trim();
   }
 
-  // Extrai bairro
   const neighborhood =
     context.neighborhood?.name ||
     feature.properties.name_preferred ||
     "";
 
-  // Extrai cidade, estado, CEP
   const city = context.place?.name || PRIMAVERA_DO_LESTE.CITY_NAME;
   const state = context.region?.name || PRIMAVERA_DO_LESTE.STATE_NAME;
   const stateCode = context.region?.region_code || PRIMAVERA_DO_LESTE.STATE_CODE;
   const country = context.country?.name || PRIMAVERA_DO_LESTE.COUNTRY_NAME;
   const postalCode = context.postcode?.name || "";
 
-  // Monta endereço formatado completo
   const addressParts: string[] = [];
   if (street) {
     addressParts.push(houseNumber ? `${street}, ${houseNumber}` : street);
@@ -372,7 +367,6 @@ function buildPrimaveraQuery(rawInput: string): string {
 
 /**
  * 1. AUTOCOMPLETE & BUSCA DE SUGESTÕES (Mapbox Geocoding v6 Forward)
- * Preserva o número digitado, restringe a Primavera do Leste/MT e evita race condition via AbortSignal.
  */
 export async function searchAddressSuggestions(
   query: string,
@@ -399,20 +393,16 @@ export async function searchAddressSuggestions(
   url.searchParams.set("country", "br");
   url.searchParams.set("language", "pt");
   url.searchParams.set("limit", limit.toString());
-  // Proximidade no centro de Primavera do Leste
   url.searchParams.set(
     "proximity",
     `${PRIMAVERA_DO_LESTE.CENTER_LNG_LAT[0]},${PRIMAVERA_DO_LESTE.CENTER_LNG_LAT[1]}`
   );
-  // Bounding box cobrindo todo o município de Primavera do Leste
-  url.searchParams.set("bbox", PRIMAVERA_DO_LESTE.BBOX.join(","));
-  url.searchParams.set("types", "address,street,neighborhood,place");
 
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), MAPBOX_REQUEST_TIMEOUT_MS);
-
     const activeSignal = options.signal || controller.signal;
+
     const response = await fetch(url.toString(), {
       signal: activeSignal,
       headers: { Accept: "application/json" },
@@ -423,19 +413,19 @@ export async function searchAddressSuggestions(
     if (response.status === 401 || response.status === 403) {
       throw new MapboxServiceError(
         "AUTH_ERROR",
-        "Chave de acesso da Mapbox inválida ou não autorizada."
+        "Chave de acesso da Mapbox inválida ou não autorizada. Verifique as configurações."
       );
     }
     if (response.status === 429) {
       throw new MapboxServiceError(
         "RATE_LIMIT",
-        "Limite de requisições da Mapbox atingido. Aguarde alguns instantes."
+        "Limite de requisições atinga na Mapbox. Aguarde alguns instantes."
       );
     }
     if (!response.ok) {
       throw new MapboxServiceError(
         "MAPBOX_API_ERROR",
-        `Erro na resposta da Mapbox (${response.status}): ${response.statusText}`
+        `Erro no serviço de mapas Mapbox (${response.status})`
       );
     }
 
@@ -444,7 +434,6 @@ export async function searchAddressSuggestions(
       return [];
     }
 
-    // Processa e filtra resultados estritamente válidos para Primavera do Leste
     const parsedList: MapboxParsedAddress[] = [];
     for (const feature of data.features) {
       const parsed = parseMapboxFeature(feature, detectedNumber);
@@ -456,7 +445,6 @@ export async function searchAddressSuggestions(
     return parsedList;
   } catch (error: any) {
     if (error?.name === "AbortError") {
-      // Requisição cancelada por digitação mais recente (evita race condition)
       return [];
     }
     if (error instanceof MapboxServiceError) {
@@ -464,7 +452,7 @@ export async function searchAddressSuggestions(
     }
     throw new MapboxServiceError(
       "NETWORK_ERROR",
-      "Falha de conexão com o serviço da Mapbox.",
+      "Falha ao conectar com o serviço da Mapbox.",
       error
     );
   }
@@ -472,7 +460,6 @@ export async function searchAddressSuggestions(
 
 /**
  * 2. GEOCODIFICAÇÃO DIRETA (Forward Geocoding v6)
- * Localiza coordenadas exatas a partir do endereço completo.
  */
 export async function geocodeAddress(
   address: string,
@@ -485,7 +472,7 @@ export async function geocodeAddress(
   if (!trimmed) {
     throw new MapboxServiceError(
       "ADDRESS_NOT_FOUND",
-      "Nenhum endereço fornecido para geocodificação."
+      "Nenhum endereço foi fornecido para localização."
     );
   }
 
@@ -499,7 +486,7 @@ export async function geocodeAddress(
   if (suggestions.length === 0) {
     throw new MapboxServiceError(
       "ADDRESS_NOT_FOUND",
-      "Nenhum endereço correspondente foi encontrado em Primavera do Leste - MT."
+      "Não foi possível localizar este endereço em Primavera do Leste - MT. Confira a rua, o número e o bairro."
     );
   }
 
@@ -516,7 +503,6 @@ export async function geocodeAddress(
 
 /**
  * 3. GEOCODIFICAÇÃO REVERSA (Reverse Geocoding v6)
- * Obtém o endereço formatado a partir das coordenadas [lat, lng].
  */
 export async function reverseGeocode(
   latitude: number,
@@ -533,7 +519,6 @@ export async function reverseGeocode(
   }
 
   const url = new URL(MAPBOX_GEOCODE_REVERSE_URL);
-  // Atenção estrita: Mapbox exige longitude e latitude
   url.searchParams.set("longitude", longitude.toString());
   url.searchParams.set("latitude", latitude.toString());
   url.searchParams.set("access_token", token);
@@ -544,8 +529,8 @@ export async function reverseGeocode(
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), MAPBOX_REQUEST_TIMEOUT_MS);
-
     const activeSignal = options.signal || controller.signal;
+
     const response = await fetch(url.toString(), {
       signal: activeSignal,
       headers: { Accept: "application/json" },
@@ -568,7 +553,7 @@ export async function reverseGeocode(
     if (!response.ok) {
       throw new MapboxServiceError(
         "MAPBOX_API_ERROR",
-        `Erro na geocodificação reversa (${response.status}): ${response.statusText}`
+        `Erro na geocodificação reversa (${response.status})`
       );
     }
 
@@ -581,14 +566,12 @@ export async function reverseGeocode(
     }
 
     const bestFeature = data.features[0];
-    const parsed = parseMapboxFeature(bestFeature);
-
-    return parsed;
+    return parseMapboxFeature(bestFeature);
   } catch (error: any) {
     if (error?.name === "AbortError") {
       throw new MapboxServiceError(
         "NETWORK_ERROR",
-        "Requisição de geocodificação reversa cancelada."
+        "Geocodificação reversa cancelada."
       );
     }
     if (error instanceof MapboxServiceError) {
@@ -604,11 +587,6 @@ export async function reverseGeocode(
 
 /**
  * 4. CÁLCULO DE ROTA OFICIAL (Mapbox Directions API v5)
- *
- * Recebe origem { lat, lng } e destino { lat, lng }.
- * Envia estritamente coordenadas [longitude, latitude].
- * Retorna distância real da rota em metros e converte UMA ÚNICA VEZ para quilômetros.
- * Retorna geometria pronta para Leaflet [lat, lng][].
  */
 export async function calculateRoute(
   origin: { lat: number; lng: number },
@@ -643,7 +621,7 @@ export async function calculateRoute(
 
   // ORDEM ESTRITA MAPBOX: {origem_lng},{origem_lat};{destino_lng},{destino_lat}
   const coordinatesParam = `${origin.lng},${origin.lat};${destination.lng},${destination.lat}`;
-  const url = new URL(`${MAPBOX_DIRECTIONS_URL}/${mapboxProfile}/${coordinatesParam}`);
+  const url = new URL(`${MAPBOX_DIRECTIONS_URL}/mapbox/${mapboxProfile}/${coordinatesParam}`);
   url.searchParams.set("access_token", token);
   url.searchParams.set("geometries", "geojson");
   url.searchParams.set("overview", "full");
@@ -653,8 +631,8 @@ export async function calculateRoute(
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), MAPBOX_REQUEST_TIMEOUT_MS);
-
     const activeSignal = options.signal || controller.signal;
+
     const response = await fetch(url.toString(), {
       signal: activeSignal,
       headers: { Accept: "application/json" },
@@ -665,19 +643,19 @@ export async function calculateRoute(
     if (response.status === 401 || response.status === 403) {
       throw new MapboxServiceError(
         "AUTH_ERROR",
-        "Chave de acesso da Mapbox inválida ou não autorizada para rotas."
+        "Chave de acesso da Mapbox não autorizada para serviço de rotas."
       );
     }
     if (response.status === 429) {
       throw new MapboxServiceError(
         "RATE_LIMIT",
-        "Limite de requisições de rota atingido na Mapbox."
+        "Limite de requisições de rota atingido."
       );
     }
     if (!response.ok) {
       throw new MapboxServiceError(
         "MAPBOX_API_ERROR",
-        `Erro no cálculo de rota (${response.status}): ${response.statusText}`
+        `Erro no cálculo de rota (${response.status})`
       );
     }
 
@@ -685,7 +663,7 @@ export async function calculateRoute(
     if (data.code === "NoRoute" || !data.routes || data.routes.length === 0) {
       throw new MapboxServiceError(
         "ROUTE_NOT_FOUND",
-        "Não foi possível encontrar uma rota transitável entre o ponto de coleta e o de entrega."
+        "Não foi possível encontrar uma rota transitável entre os dois pontos."
       );
     }
 
@@ -700,11 +678,10 @@ export async function calculateRoute(
 
     // CONVERSÃO ÚNICA DE METROS PARA QUILÔMETROS
     const distanceKm = distanceMeters / 1000;
-
     const durationSeconds = Number(route.duration) || 0;
     const durationMin = durationSeconds / 60;
 
-    // Converte geometria [lng, lat] para o formato Leaflet [lat, lng]
+    // Converte geometria Mapbox [lng, lat] para formato Leaflet [lat, lng]
     const leafletGeometry: [number, number][] = Array.isArray(route.geometry?.coordinates)
       ? route.geometry.coordinates.map(([lon, lat]: [number, number]) => [lat, lon])
       : [];
@@ -721,7 +698,7 @@ export async function calculateRoute(
     if (error?.name === "AbortError") {
       throw new MapboxServiceError(
         "NETWORK_ERROR",
-        "Cálculo de rota cancelado por nova solicitação."
+        "Cálculo de rota cancelado."
       );
     }
     if (error instanceof MapboxServiceError) {
@@ -729,7 +706,7 @@ export async function calculateRoute(
     }
     throw new MapboxServiceError(
       "NETWORK_ERROR",
-      "Falha de rede ao consultar a API de rotas da Mapbox.",
+      "Falha de conexão com a API de rotas da Mapbox.",
       error
     );
   }
@@ -737,7 +714,6 @@ export async function calculateRoute(
 
 /**
  * 5. CÁLCULO DE MATRIZ DE DISTÂNCIAS (Mapbox Matrix API v5)
- * Opcional, para múltiplos pontos ou agrupamento de rotas.
  */
 export async function calculateDistanceMatrix(
   origins: { lat: number; lng: number }[],
@@ -777,7 +753,6 @@ export async function calculateDistanceMatrix(
   const distancesMeters: number[][] = data.distances || [];
   const durationsSec: number[][] = data.durations || [];
 
-  // Conversão única de metros para quilômetros
   const distancesKm = distancesMeters.map((row) =>
     row.map((meters) => (meters != null ? meters / 1000 : 0))
   );
