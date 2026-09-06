@@ -1459,6 +1459,232 @@ export async function handleEdgeFunction(
     };
   }
 
+  // 9. admin-impersonate: Permite que o admin acesse o painel do lojista
+  if (functionName === "admin-impersonate") {
+    const caller = await getCaller(supabase, authHeader);
+    if (!caller) {
+      return {
+        status: 200,
+        body: {
+          success: false,
+          code: "NAO_AUTENTICADO",
+          error: "Sessão expirada. Entre novamente.",
+          request_id: requestId,
+        },
+      };
+    }
+
+    const isAdmin = await checkAdmin(supabase, caller.id);
+    if (!isAdmin) {
+      return {
+        status: 200,
+        body: {
+          success: false,
+          code: "SEM_PERMISSAO",
+          error: "Apenas administradores podem acessar o painel de lojistas.",
+          request_id: requestId,
+        },
+      };
+    }
+
+    const targetUserId = reqBody?.target_user_id || reqBody?.store_owner_id || reqBody?.user_id;
+    if (!targetUserId) {
+      return {
+        status: 200,
+        body: {
+          success: false,
+          code: "PARAMETRO_AUSENTE",
+          error: "ID do lojista não informado.",
+          request_id: requestId,
+        },
+      };
+    }
+
+    let targetEmail = "";
+    try {
+      const { data: userData } = await supabase.auth.admin.getUserById(targetUserId);
+      if (userData?.user?.email) {
+        targetEmail = userData.user.email;
+      }
+    } catch (e: any) {
+      console.warn("[admin-impersonate] Aviso ao buscar usuário por ID:", e?.message);
+    }
+
+    if (!targetEmail) {
+      const { data: prof } = await supabase
+        .from("profiles")
+        .select("email")
+        .eq("user_id", targetUserId)
+        .maybeSingle();
+      targetEmail = prof?.email || "";
+    }
+
+    if (!targetEmail) {
+      const { data: rest } = await supabase
+        .from("restaurants")
+        .select("owner_id")
+        .eq("owner_id", targetUserId)
+        .maybeSingle();
+
+      if (rest?.owner_id) {
+        const { data: profRest } = await supabase
+          .from("profiles")
+          .select("email")
+          .eq("user_id", rest.owner_id)
+          .maybeSingle();
+        targetEmail = profRest?.email || "";
+      }
+    }
+
+    if (!targetEmail) {
+      return {
+        status: 200,
+        body: {
+          success: false,
+          code: "USUARIO_NAO_ENCONTRADO",
+          error: "Não foi possível localizar o e-mail cadastrado deste lojista.",
+          request_id: requestId,
+        },
+      };
+    }
+
+    // Gerar magiclink token para login automático no painel da loja
+    const { data: linkData, error: linkErr } = await supabase.auth.admin.generateLink({
+      type: "magiclink",
+      email: targetEmail,
+    });
+
+    if (linkErr || !linkData?.properties?.hashed_token) {
+      return {
+        status: 200,
+        body: {
+          success: false,
+          code: "ERRO_GERAR_TOKEN",
+          error: `Falha ao gerar credencial temporária para a loja: ${linkErr?.message || "Erro interno"}`,
+          request_id: requestId,
+        },
+      };
+    }
+
+    return {
+      status: 200,
+      body: {
+        success: true,
+        email: targetEmail,
+        token_hash: linkData.properties.hashed_token,
+        request_id: requestId,
+      },
+    };
+  }
+
+  // 10. delete-user: Exclusão de usuário por administradores
+  if (functionName === "delete-user") {
+    const caller = await getCaller(supabase, authHeader);
+    if (!caller || !(await checkAdmin(supabase, caller.id))) {
+      return {
+        status: 200,
+        body: { success: false, code: "SEM_PERMISSAO", error: "Apenas administradores podem excluir usuários.", request_id: requestId },
+      };
+    }
+
+    const targetUserId = reqBody?.user_id || reqBody?.target_user_id;
+    if (!targetUserId) {
+      return {
+        status: 200,
+        body: { success: false, code: "PARAMETRO_AUSENTE", error: "user_id não informado.", request_id: requestId },
+      };
+    }
+
+    try {
+      await supabase.auth.admin.deleteUser(targetUserId);
+    } catch (e: any) {
+      console.warn("[delete-user] Aviso ao excluir no auth:", e?.message);
+    }
+
+    await supabase.from("user_roles").delete().eq("user_id", targetUserId);
+    await supabase.from("profiles").delete().eq("user_id", targetUserId);
+    await supabase.from("restaurants").delete().eq("owner_id", targetUserId);
+    await supabase.from("drivers").delete().eq("user_id", targetUserId);
+
+    return {
+      status: 200,
+      body: { success: true, message: "Usuário removido com sucesso.", request_id: requestId },
+    };
+  }
+
+  // 11. assign-admin-role: Atribuição de permissão admin
+  if (functionName === "assign-admin-role") {
+    const caller = await getCaller(supabase, authHeader);
+    if (!caller || !(await checkAdmin(supabase, caller.id))) {
+      return {
+        status: 200,
+        body: { success: false, code: "SEM_PERMISSAO", error: "Apenas administradores.", request_id: requestId },
+      };
+    }
+
+    const targetUserId = reqBody?.user_id || reqBody?.target_user_id;
+    if (!targetUserId) {
+      return {
+        status: 200,
+        body: { success: false, code: "PARAMETRO_AUSENTE", error: "user_id não informado.", request_id: requestId },
+      };
+    }
+
+    const { error: roleErr } = await supabase.from("user_roles").upsert(
+      { user_id: targetUserId, role: "admin" },
+      { onConflict: "user_id,role" }
+    );
+
+    if (roleErr) {
+      return {
+        status: 200,
+        body: { success: false, error: roleErr.message, request_id: requestId },
+      };
+    }
+
+    return {
+      status: 200,
+      body: { success: true, message: "Cargo de admin atribuído com sucesso.", request_id: requestId },
+    };
+  }
+
+  // 12. admin-reset-user-password / admin-reset-passwords: Redefinição de senha por admin
+  if (functionName === "admin-reset-user-password" || functionName === "admin-reset-passwords") {
+    const caller = await getCaller(supabase, authHeader);
+    if (!caller || !(await checkAdmin(supabase, caller.id))) {
+      return {
+        status: 200,
+        body: { success: false, code: "SEM_PERMISSAO", error: "Apenas administradores.", request_id: requestId },
+      };
+    }
+
+    const targetUserId = reqBody?.user_id || reqBody?.target_user_id;
+    const newPassword = reqBody?.new_password || reqBody?.password;
+
+    if (!targetUserId || !newPassword) {
+      return {
+        status: 200,
+        body: { success: false, code: "PARAMETRO_AUSENTE", error: "Usuário e nova senha são obrigatórios.", request_id: requestId },
+      };
+    }
+
+    const { error: updateErr } = await supabase.auth.admin.updateUserById(targetUserId, {
+      password: newPassword,
+    });
+
+    if (updateErr) {
+      return {
+        status: 200,
+        body: { success: false, error: updateErr.message, request_id: requestId },
+      };
+    }
+
+    return {
+      status: 200,
+      body: { success: true, message: "Senha redefinida com sucesso.", request_id: requestId },
+    };
+  }
+
   // Default fallback for other functions
   return {
     status: 200,
