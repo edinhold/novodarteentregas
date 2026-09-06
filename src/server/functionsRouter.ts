@@ -726,8 +726,9 @@ export async function handleEdgeFunction(
 
       // 2. Executar aceite atômico via RPC accept_delivery_request (proteção concorrencial FOR UPDATE)
       const { data: rpcData, error: rpcError } = await supabase.rpc("accept_delivery_request", {
-        p_motorista_id: motoristaId,
+        p_request_id: pedidoId,
         p_pedido_id: pedidoId,
+        p_motorista_id: motoristaId,
       });
 
       if (rpcError) {
