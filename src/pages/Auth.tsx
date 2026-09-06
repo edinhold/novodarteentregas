@@ -22,14 +22,33 @@ const Auth = () => {
     e.preventDefault();
     setLoading(true);
 
+    const cleanEmail = email.trim();
+
     try {
       if (isLogin) {
-        const { data: loginData, error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
+        const { data: loginData, error } = await supabase.auth.signInWithPassword({
+          email: cleanEmail,
+          password,
+        });
+
+        if (error) {
+          const msg = error.message || "";
+          if (/invalid login credentials|invalid credentials/i.test(msg)) {
+            throw new Error("E-mail ou senha incorretos. Por favor, verifique seus dados.");
+          }
+          if (/email not confirmed/i.test(msg)) {
+            throw new Error("Por favor, confirme seu e-mail antes de fazer login.");
+          }
+          if (/invalid email/i.test(msg)) {
+            throw new Error("Informe um endereço de e-mail válido.");
+          }
+          throw error;
+        }
+
         toast.success("Login realizado com sucesso!");
         
         // Check user role and redirect accordingly
-        if (loginData.user) {
+        if (loginData?.user) {
           const uid = loginData.user.id;
           const { data: roles } = await supabase.from("user_roles").select("role").eq("user_id", uid);
           const userRoles = roles?.map(r => r.role) || [];
@@ -57,18 +76,15 @@ const Auth = () => {
           }
 
           localStorage.setItem("lastRoute", targetPath);
-          // Marca o redirect como já efetuado para esta sessão, evitando um
-          // segundo redirect automático na home (loop de navegação).
           try { sessionStorage.setItem("authRedirectDone", uid); } catch {}
-          console.log("[Auth] Redirect:", targetPath);
+          console.log("[Auth] Redirect de login:", targetPath);
           navigate(targetPath, { replace: true });
-
         } else {
           navigate("/");
         }
       } else {
         const { error } = await supabase.auth.signUp({
-          email,
+          email: cleanEmail,
           password,
           options: {
             data: { full_name: fullName },
@@ -80,7 +96,7 @@ const Auth = () => {
         navigate("/");
       }
     } catch (error: any) {
-      toast.error(error.message || "Erro na autenticação");
+      toast.error(error.message || "Erro na autenticação. Verifique seu e-mail e senha.");
     } finally {
       setLoading(false);
     }
