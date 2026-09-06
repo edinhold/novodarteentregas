@@ -1082,23 +1082,51 @@ const DriverPanel = () => {
                   {withdrawals.length > 0 && (
                     <Card>
                       <CardHeader className="pb-2">
-                        <CardTitle className="text-base">Histórico de Saques</CardTitle>
+                        <CardTitle className="text-base flex items-center justify-between">
+                          <span>Histórico de Saques e Antecipações</span>
+                          <Badge variant="outline" className="text-xs">{withdrawals.length}</Badge>
+                        </CardTitle>
                       </CardHeader>
                       <CardContent>
-                        <div className="space-y-2">
-                          {withdrawals.map((w: any) => (
-                            <div key={w.id} className="p-3 rounded-lg border bg-muted/20 flex justify-between items-center">
-                              <div>
-                                <p className="text-sm font-bold">R$ {Number(w.net_amount).toFixed(2)}</p>
-                                <p className="text-[10px] text-muted-foreground">
-                                  {new Date(w.created_at).toLocaleDateString("pt-BR")} • Taxa: {w.fee_percent}%
-                                </p>
+                        <div className="space-y-2.5">
+                          {withdrawals.map((w: any) => {
+                            const reqAmt = Number(w.amount || 0);
+                            const feeAmt = Number(w.fee_amount || 0);
+                            const netAmt = Number(w.net_amount || (reqAmt - feeAmt));
+                            const feePercentStr = Number(w.fee_percent || 0) > 0 ? `${w.fee_percent}%` : "R$ 1,00 (dia oficial)";
+
+                            return (
+                              <div key={w.id} className="p-3 rounded-lg border bg-muted/20 space-y-2">
+                                <div className="flex justify-between items-start gap-2">
+                                  <div>
+                                    <p className="text-[11px] text-muted-foreground font-medium">
+                                      Data: {new Date(w.created_at).toLocaleDateString("pt-BR")} às {new Date(w.created_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                                    </p>
+                                    <p className="text-xs font-semibold text-foreground mt-0.5">
+                                      Valor Solicitado: <span className="font-mono">R$ {reqAmt.toFixed(2)}</span>
+                                    </p>
+                                  </div>
+                                  <Badge 
+                                    variant={w.status === "approved" ? "default" : w.status === "rejected" ? "destructive" : "secondary"} 
+                                    className="text-[10px] shrink-0"
+                                  >
+                                    {w.status === "approved" ? "✅ Aprovado" : w.status === "rejected" ? "❌ Rejeitado" : "⏳ Pendente"}
+                                  </Badge>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-2 text-xs border-t pt-2 mt-1">
+                                  <div>
+                                    <span className="text-muted-foreground block text-[10px]">Taxa / Desconto ({feePercentStr}):</span>
+                                    <span className="font-semibold text-destructive font-mono">- R$ {feeAmt.toFixed(2)}</span>
+                                  </div>
+                                  <div className="text-right">
+                                    <span className="text-muted-foreground block text-[10px]">Valor Líquido a Receber:</span>
+                                    <span className="font-bold text-primary font-mono text-sm">R$ {netAmt.toFixed(2)}</span>
+                                  </div>
+                                </div>
                               </div>
-                              <Badge variant={w.status === "approved" ? "default" : w.status === "rejected" ? "destructive" : "secondary"} className="text-[10px]">
-                                {w.status === "approved" ? "Aprovado" : w.status === "rejected" ? "Rejeitado" : "Pendente"}
-                              </Badge>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       </CardContent>
                     </Card>

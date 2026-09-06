@@ -62,6 +62,10 @@ export const PendingWithdrawalsSection: React.FC<PendingWithdrawalsSectionProps>
 
       queryClient.invalidateQueries({ queryKey: ["admin-withdrawals"] });
       queryClient.invalidateQueries({ queryKey: ["admin-financial-data"] });
+      queryClient.invalidateQueries({ queryKey: ["financial-withdrawals"] });
+      queryClient.invalidateQueries({ queryKey: ["financial-driver-earnings"] });
+      queryClient.invalidateQueries({ queryKey: ["my-withdrawals"] });
+      queryClient.invalidateQueries({ queryKey: ["my-earnings"] });
       if (onRefresh) onRefresh();
     } catch (err: any) {
       toast.error(err.message || "Erro ao processar saque");
