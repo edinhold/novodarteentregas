@@ -2,6 +2,7 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 import { brokeredPreviewStorage } from './previewAuthStorage';
+import { handleEdgeFunction } from '@/server/functionsRouter';
 
 const rawUrl = import.meta.env.VITE_SUPABASE_URL;
 const rawKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
@@ -27,7 +28,7 @@ export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABL
   }
 });
 
-// Proxy supabase.functions.invoke to backend /functions/v1/* endpoint
+// Proxy supabase.functions.invoke to backend /functions/v1/* endpoint or in-browser fallback
 const originalInvoke = supabase.functions.invoke.bind(supabase.functions);
 supabase.functions.invoke = async function (functionName: string, options?: any) {
   try {
@@ -46,16 +47,31 @@ supabase.functions.invoke = async function (functionName: string, options?: any)
       const data = await res.json().catch(() => null);
       return { data, error: null };
     }
-    const errData = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
-    return { data: null, error: errData };
-  } catch {
+  } catch (fetchErr) {
+    console.warn(`[EdgeFunction:${functionName}] HTTP fetch indisponível, executando fallback local.`, fetchErr);
+  }
+
+  // Robust fallback: Execute local functionsRouter without raw Edge Function failure
+  try {
+    const session = (await supabase.auth.getSession()).data?.session;
+    const authHeader = session?.access_token ? `Bearer ${session.access_token}` : undefined;
+    const result = await handleEdgeFunction(functionName, options?.body || {}, authHeader);
+    
+    if (result.status >= 200 && result.status < 300) {
+      return { data: result.body, error: null };
+    }
+    return {
+      data: null,
+      error: { message: result.body?.error || result.body?.message || `HTTP ${result.status}` },
+    };
+  } catch (routerErr: any) {
+    console.warn(`[EdgeFunction:${functionName}] Erro no roteador local, chamando SDK original:`, routerErr);
     try {
       return await originalInvoke(functionName, options);
     } catch (invokeErr: any) {
-      console.warn(`[EdgeFunction:${functionName}] Erro de conexão/invocação:`, invokeErr?.message || invokeErr);
       return {
         data: null,
-        error: invokeErr || { message: "Failed to send a request to the Edge Function" },
+        error: { message: invokeErr?.message || "Falha ao enviar requisição." },
       };
     }
   }
