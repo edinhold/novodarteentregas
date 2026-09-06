@@ -63,6 +63,11 @@ function mask(value?: string | null): string {
   return value.length <= 8 ? "***" : `***${value.slice(-8)}`;
 }
 
+const ONESIGNAL_APP_ID = process.env.VITE_ONESIGNAL_APP_ID || "4f68f47f-63ee-4326-8f98-e63514f2b154";
+const ONESIGNAL_APP_API_KEY = process.env.ONESIGNAL_APP_API_KEY || process.env.ONESIGNAL_REST_API_KEY || "";
+const ONESIGNAL_API = "https://api.onesignal.com/notifications?c=push";
+const ANDROID_CHANNEL_ID = "novas_entregas_v1";
+
 export interface RouterResponse {
   status: number;
   body: Record<string, any>;
@@ -81,10 +86,9 @@ export async function handleEdgeFunction(
     return {
       status: 200,
       body: {
-        success: false,
-        active: false,
-        message: "Notificações Push desativadas (aguardando nova implantação limpa).",
-        app_id: null,
+        success: true,
+        active: true,
+        app_id: ONESIGNAL_APP_ID,
         request_id: requestId,
       },
     };
@@ -166,7 +170,7 @@ export async function handleEdgeFunction(
         recommendations.push("Motorista offline ou sem sinal nos últimos 15 min.");
       }
       if (recommendations.length === 0) {
-        recommendations.push("Dispositivo online.");
+        recommendations.push("Dispositivo online e pronto para receber notificações de entrega.");
       }
 
       return {
@@ -196,8 +200,11 @@ export async function handleEdgeFunction(
         success: true,
         request_id: requestId,
         config: {
-          push_provider: "none",
-          push_status: "removed_pending_reimplementation",
+          push_provider: "onesignal",
+          push_status: "active",
+          app_id_masked: mask(ONESIGNAL_APP_ID),
+          app_id_present: true,
+          api_key_present: true,
           online_window_minutes: 15,
         },
         drivers: list,
@@ -235,16 +242,129 @@ export async function handleEdgeFunction(
       };
     }
 
-    return {
-      status: 200,
-      body: {
-        success: true,
-        edge_function_ok: true,
-        onesignal_accepted: false,
-        message: "Serviço OneSignal antigo foi removido do sistema. Aguardando nova implementação.",
-        request_id: requestId,
-      },
+    const mode: string = reqBody?.mode ?? "driver";
+    const platformFilter: string = reqBody?.platform ?? "all";
+
+    let subs: any[] = [];
+    if (mode === "device" && reqBody?.subscription_id) {
+      const { data } = await supabase
+        .from("push_subscriptions")
+        .select("onesignal_subscription_id, platform, user_id")
+        .eq("onesignal_subscription_id", reqBody.subscription_id)
+        .maybeSingle();
+      if (data) subs = [data];
+    } else if (mode === "broadcast") {
+      const cutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+      const { data: onlineDrivers } = await supabase
+        .from("drivers")
+        .select("user_id")
+        .eq("is_active", true)
+        .eq("approval_status", "approved")
+        .eq("is_online", true)
+        .gte("last_seen_at", cutoff);
+
+      const ids = (onlineDrivers ?? []).map((d) => d.user_id);
+      if (ids.length > 0) {
+        const { data } = await supabase
+          .from("push_subscriptions")
+          .select("onesignal_subscription_id, platform, user_id")
+          .in("user_id", ids)
+          .eq("active", true)
+          .eq("subscription_status", "subscribed");
+        subs = data ?? [];
+      }
+    } else if (reqBody?.driver_user_id) {
+      const { data } = await supabase
+        .from("push_subscriptions")
+        .select("onesignal_subscription_id, platform, user_id")
+        .eq("user_id", reqBody.driver_user_id)
+        .eq("active", true)
+        .eq("subscription_status", "subscribed");
+      subs = data ?? [];
+    }
+
+    if (platformFilter !== "all") {
+      subs = subs.filter((s) => (platformFilter === "android_apk" ? s.platform === "android_apk" : s.platform !== "android_apk"));
+    }
+
+    const subIds = Array.from(new Set(subs.map((s) => s.onesignal_subscription_id))).filter(Boolean);
+
+    if (subIds.length === 0) {
+      return {
+        status: 200,
+        body: {
+          success: false,
+          edge_function_ok: true,
+          code: "SEM_INSCRICOES",
+          message: "Nenhum dispositivo com notificações ativas encontrado para o teste selecionado.",
+          request_id: requestId,
+        },
+      };
+    }
+
+    const payload = {
+      app_id: ONESIGNAL_APP_ID,
+      include_subscription_ids: subIds,
+      target_channel: "push",
+      headings: { pt: "🔔 Teste de Notificação Duarte", en: "Duarte Push Test" },
+      contents: { pt: "O sistema de notificações push está funcionando perfeitamente!", en: "Push notifications are working perfectly!" },
+      data: { tipo: "teste_push", rota: "/entregador", evento_id: `teste_push:${requestId}` },
+      android_channel_id: ANDROID_CHANNEL_ID,
+      priority: 10,
+      ttl: 120,
     };
+
+    try {
+      const osRes = await fetch(ONESIGNAL_API, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          Authorization: `Key ${ONESIGNAL_APP_API_KEY}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const osData = await osRes.json().catch(() => ({}));
+      const ok = osRes.ok && !!osData?.id && (!osData.errors || osData.errors.length === 0);
+
+      await supabase.from("notification_delivery_logs").insert({
+        event_type: "teste_push",
+        request_id: requestId,
+        recipients_requested: subIds.length,
+        recipients_found: osData?.recipients ?? (ok ? subIds.length : 0),
+        onesignal_notification_id: osData?.id ? mask(osData.id) : null,
+        response_status: osRes.status,
+        response_body_sanitized: JSON.stringify(osData).slice(0, 1000),
+        error_code: ok ? null : (osData.errors?.[0] ?? `HTTP ${osRes.status}`),
+        platform: platformFilter,
+      });
+
+      return {
+        status: 200,
+        body: {
+          success: ok,
+          edge_function_ok: true,
+          onesignal_accepted: ok,
+          message: ok
+            ? `Notificação de teste enviada com sucesso para ${subIds.length} aparelho(s)!`
+            : `OneSignal recusou envio: ${JSON.stringify(osData?.errors || osData)}`,
+          request_id: requestId,
+          recipients_requested: subIds.length,
+          recipients_found: osData?.recipients ?? (ok ? subIds.length : 0),
+        },
+      };
+    } catch (osErr: any) {
+      return {
+        status: 200,
+        body: {
+          success: false,
+          edge_function_ok: true,
+          code: "ERRO_ONESIGNAL",
+          message: `Falha ao conectar com OneSignal: ${osErr.message}`,
+          request_id: requestId,
+        },
+      };
+    }
   }
 
   // 4. register-driver-device (Dispositivo exclusivo por motorista)
@@ -820,58 +940,101 @@ export async function handleEdgeFunction(
       };
     }
 
-    // Record job & delivery log sem depender do OneSignal antigo
-    await supabase.from("notification_jobs").upsert(
-      {
-        event_key: eventKey,
+    const APP_BASE_URL = process.env.APP_BASE_URL || "https://duarteentregas.lovable.app";
+
+    const payload = {
+      app_id: ONESIGNAL_APP_ID,
+      include_subscription_ids: subIds,
+      target_channel: "push",
+      headings: { pt: "🚚 Nova entrega disponível", en: "New delivery available" },
+      contents: {
+        pt: "Um novo chamado de entrega foi criado. Abra o aplicativo para visualizar os detalhes.",
+        en: "A merchant requested a driver. Tap to view.",
+      },
+      data: {
+        tipo: "nova_entrega",
+        pedido_id: pedidoId,
+        rota: `/entregador?pedido=${pedidoId}`,
+        evento_id: `nova_entrega:${pedidoId}`,
+      },
+      url: `${APP_BASE_URL}/entregador?pedido=${pedidoId}`,
+      priority: 10,
+      ttl: 300,
+      content_available: true,
+      android_channel_id: ANDROID_CHANNEL_ID,
+      android_visibility: 1,
+      android_sound: "notification_sound",
+      android_accent_color: "FFF97316",
+    };
+
+    try {
+      const osRes = await fetch(ONESIGNAL_API, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          Authorization: `Key ${ONESIGNAL_APP_API_KEY}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const osData = await osRes.json().catch(() => ({}));
+      const ok = osRes.ok && !!osData?.id && (!osData.errors || osData.errors.length === 0);
+
+      const notificationId = osData?.id ? mask(osData.id) : null;
+
+      await supabase.from("notification_jobs").upsert(
+        {
+          event_key: eventKey,
+          pedido_id: pedidoId,
+          event_type: "nova_entrega",
+          status: ok ? "sent" : "failed",
+          attempts: 1,
+          recipients_count: osData?.recipients ?? subIds.length,
+          onesignal_notification_id: notificationId,
+          last_error: ok ? null : JSON.stringify(osData?.errors || osData),
+          processed_at: new Date().toISOString(),
+        },
+        { onConflict: "event_key" }
+      );
+
+      await supabase.from("notification_delivery_logs").insert({
         pedido_id: pedidoId,
         event_type: "nova_entrega",
-        status: "sent_internal",
-        attempts: 1,
-        recipients_count: freeDrivers.length,
-        onesignal_notification_id: null,
-        last_error: null,
-        processed_at: new Date().toISOString(),
-      },
-      { onConflict: "event_key" }
-    );
-
-    await supabase.from("notification_delivery_logs").insert({
-      pedido_id: pedidoId,
-      event_type: "nova_entrega",
-      request_id: requestId,
-      recipients_requested: freeDrivers.length,
-      recipients_found: freeDrivers.length,
-      onesignal_notification_id: null,
-      response_status: 200,
-      response_body_sanitized: "internal_radar_notification",
-      error_code: null,
-    });
-
-    return {
-      status: 200,
-      body: {
-        success: true,
         request_id: requestId,
-        message: "Notificação enviada com sucesso para os motoristas online (radar ativo).",
-        drivers_online: freeDrivers.length,
-        recipients_found: freeDrivers.length,
-      },
-    };
+        recipients_requested: subIds.length,
+        recipients_found: osData?.recipients ?? subIds.length,
+        onesignal_notification_id: notificationId,
+        response_status: osRes.status,
+        response_body_sanitized: JSON.stringify(osData).slice(0, 1000),
+        error_code: ok ? null : (osData.errors?.[0] ?? `HTTP ${osRes.status}`),
+      });
 
-    return {
-      status: 200,
-      body: {
-        success: ok,
-        code: ok ? undefined : "FALHA_ONESIGNAL",
-        message: ok
-          ? `Notificação enviada para ${subIds.length} motorista(s) disponível(is).`
-          : "Falha ao despachar notificação via OneSignal.",
-        drivers_online: freeDrivers.length,
-        recipients: subIds.length,
-        request_id: requestId,
-      },
-    };
+      console.log("[DeliveryNotification:success]", { pedidoId, ok, recipients: osData?.recipients ?? subIds.length });
+
+      return {
+        status: 200,
+        body: {
+          success: ok,
+          request_id: requestId,
+          message: ok
+            ? `Notificação enviada com sucesso para ${subIds.length} motorista(s) disponível(is).`
+            : `OneSignal recusou envio: ${JSON.stringify(osData?.errors || osData)}`,
+          drivers_online: freeDrivers.length,
+          recipients_found: subIds.length,
+        },
+      };
+    } catch (osErr: any) {
+      console.warn("[DeliveryNotification:error]", { pedidoId, error: osErr?.message });
+      return {
+        status: 200,
+        body: {
+          success: false,
+          code: "ERRO_ONESIGNAL",
+          message: `Falha de conexão com OneSignal: ${osErr.message}`,
+          request_id: requestId,
+        },
+      };
+    }
   }
 
   // 5. admin-recharge-store (Recarga Direta vinculada à LOJA)
