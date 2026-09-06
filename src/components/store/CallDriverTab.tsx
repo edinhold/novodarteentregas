@@ -720,71 +720,84 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Initialize map
+  // Initialize map safely
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
+    if ((containerRef.current as any)._leaflet_id) return;
 
-    const center: [number, number] = storeLat && storeLng
-      ? [storeLat, storeLng]
-      : [-15.5454, -54.2958];
+    try {
+      const center: [number, number] = storeLat && storeLng
+        ? [storeLat, storeLng]
+        : [-15.5454, -54.2958];
 
-    const map = L.map(containerRef.current).setView(center, 14);
-    mapRef.current = map;
-    
-    tileLayerRef.current = L.tileLayer(MAP_LAYERS[mapType].url, {
-      attribution: MAP_LAYERS[mapType].attribution,
-      maxZoom: mapType === "satellite" ? 18 : 19,
-    }).addTo(map);
-
-    map.on("click", async (e: L.LeafletMouseEvent) => {
-      const { lat, lng } = e.latlng;
-      setDeliveryLatLng([lat, lng]);
-      setManualDistanceEnabled(false);
+      const map = L.map(containerRef.current).setView(center, 14);
+      mapRef.current = map;
       
-      try {
-        if (GOOGLE_MAPS_API_KEY) {
-          const res = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GOOGLE_MAPS_API_KEY}&language=pt-BR`);
+      tileLayerRef.current = L.tileLayer(MAP_LAYERS[mapType].url, {
+        attribution: MAP_LAYERS[mapType].attribution,
+        maxZoom: String(mapType).includes("satellite") || String(mapType).includes("google") ? 20 : 19,
+      }).addTo(map);
+
+      map.on("click", async (e: L.LeafletMouseEvent) => {
+        const { lat, lng } = e.latlng;
+        setDeliveryLatLng([lat, lng]);
+        setManualDistanceEnabled(false);
+        
+        try {
+          if (GOOGLE_MAPS_API_KEY) {
+            const res = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GOOGLE_MAPS_API_KEY}&language=pt-BR`);
+            const data = await res.json();
+            if (data.status === "OK" && data.results?.[0]) {
+              const first = data.results[0];
+              const comps = first.address_components;
+              const streetNumber = comps?.find((c: any) => c.types.includes("street_number"))?.long_name || "";
+              
+              const itemForFormat = { ...first, address: comps };
+              const formatted = formatAddress(itemForFormat, false);
+              
+              setCallForm(f => ({ 
+                ...f, 
+                delivery: formatted,
+                delivery_number: streetNumber 
+              }));
+              return;
+            }
+          }
+
+          const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&zoom=18&accept-language=pt-BR`);
           const data = await res.json();
-          if (data.status === "OK" && data.results?.[0]) {
-            const first = data.results[0];
-            const comps = first.address_components;
-            const streetNumber = comps.find((c: any) => c.types.includes("street_number"))?.long_name || "";
-            
-            // Format without number for the main field
-            const itemForFormat = { ...first, address: comps };
-            const formatted = formatAddress(itemForFormat, false);
-            
+          if (data) {
+            const formatted = formatAddress(data, false);
+            const streetNumber = data.address?.house_number || "";
             setCallForm(f => ({ 
               ...f, 
               delivery: formatted,
               delivery_number: streetNumber 
             }));
-            return;
           }
+        } catch (err) {
+          console.error("Map click geocode error:", err);
         }
-
-        // Fallback to Nominatim
-        const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&zoom=18&accept-language=pt-BR`);
-        const data = await res.json();
-        if (data) {
-          const formatted = formatAddress(data, false);
-          const streetNumber = data.address?.house_number || "";
-          setCallForm(f => ({ 
-            ...f, 
-            delivery: formatted,
-            delivery_number: streetNumber 
-          }));
-        }
-      } catch (err) {
-        console.error("Map click geocode error:", err);
-      }
-    });
+      });
+    } catch (err) {
+      console.error("[CallDriverTab] Map init error:", err);
+    }
 
     return () => {
-      map.remove();
-      mapRef.current = null;
+      try {
+        if (mapRef.current) {
+          mapRef.current.remove();
+          mapRef.current = null;
+        }
+        tileLayerRef.current = null;
+        if (containerRef.current) {
+          delete (containerRef.current as any)._leaflet_id;
+        }
+      } catch (err) {
+        console.error("[CallDriverTab] Map cleanup error:", err);
+      }
     };
-  }, []);
+  }, [storeLat, storeLng, mapType, formatAddress]);
 
   // Update tile layer if mapType changed
   useEffect(() => {

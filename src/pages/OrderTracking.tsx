@@ -175,17 +175,23 @@ const OrderTracking = () => {
         : [-15.78, -47.93];
 
     if (!mapRef.current) {
-      const map = L.map(containerRef.current).setView(center, 15);
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-      }).addTo(map);
-      mapRef.current = map;
+      if ((containerRef.current as any)._leaflet_id) return;
+      try {
+        const map = L.map(containerRef.current).setView(center, 15);
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+        }).addTo(map);
+        mapRef.current = map;
 
-      // Restaurant marker
-      if (restaurant?.latitude && restaurant?.longitude) {
-        L.marker([restaurant.latitude, restaurant.longitude], { icon: destIcon })
-          .addTo(map)
-          .bindPopup(`<b>${restaurant.name}</b>`);
+        // Restaurant marker
+        if (restaurant?.latitude && restaurant?.longitude) {
+          L.marker([restaurant.latitude, restaurant.longitude], { icon: destIcon })
+            .addTo(map)
+            .bindPopup(`<b>${restaurant.name}</b>`);
+        }
+      } catch (err) {
+        console.error("[OrderTracking] Map init error:", err);
+        return;
       }
     }
 
@@ -223,11 +229,18 @@ const OrderTracking = () => {
   // Cleanup
   useEffect(() => {
     return () => {
-      if (mapRef.current) {
-        mapRef.current.remove();
-        mapRef.current = null;
-        driverMarkerRef.current = null;
-        accuracyCircleRef.current = null;
+      try {
+        if (mapRef.current) {
+          mapRef.current.remove();
+          mapRef.current = null;
+          driverMarkerRef.current = null;
+          accuracyCircleRef.current = null;
+        }
+        if (containerRef.current) {
+          delete (containerRef.current as any)._leaflet_id;
+        }
+      } catch (err) {
+        console.error("[OrderTracking] Map cleanup error:", err);
       }
     };
   }, []);

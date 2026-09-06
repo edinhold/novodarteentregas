@@ -36,17 +36,29 @@ const GlobalDriverMapContent = () => {
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
+    if ((containerRef.current as any)._leaflet_id) return;
 
-    mapRef.current = L.map(containerRef.current).setView([-15.5454, -54.2958], 4);
-    
-    L.tileLayer(MAP_LAYERS[mapType].url, {
-      attribution: MAP_LAYERS[mapType].attribution,
-    }).addTo(mapRef.current);
+    try {
+      mapRef.current = L.map(containerRef.current).setView([-15.5454, -54.2958], 4);
+      
+      L.tileLayer(MAP_LAYERS[mapType].url, {
+        attribution: MAP_LAYERS[mapType].attribution,
+      }).addTo(mapRef.current);
+    } catch (err) {
+      console.error("[GlobalDriverMap] Map init error:", err);
+    }
 
     return () => {
-      if (mapRef.current) {
-        mapRef.current.remove();
-        mapRef.current = null;
+      try {
+        if (mapRef.current) {
+          mapRef.current.remove();
+          mapRef.current = null;
+        }
+        if (containerRef.current) {
+          delete (containerRef.current as any)._leaflet_id;
+        }
+      } catch (err) {
+        console.error("[GlobalDriverMap] Map cleanup error:", err);
       }
     };
   }, []);

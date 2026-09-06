@@ -5,12 +5,20 @@ export const useCategories = () =>
   useQuery({
     queryKey: ["categories"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("categories")
-        .select("*")
-        .order("sort_order");
-      if (error) throw error;
-      return data;
+      try {
+        const { data, error } = await supabase
+          .from("categories")
+          .select("*")
+          .order("sort_order");
+        if (error) {
+          console.error("[useCategories] error:", error);
+          return [];
+        }
+        return data ?? [];
+      } catch (err) {
+        console.error("[useCategories] exception:", err);
+        return [];
+      }
     },
   });
 
@@ -21,12 +29,20 @@ export const useRestaurants = () =>
   useQuery({
     queryKey: ["restaurants"],
     queryFn: async () => {
-      const { data, error } = await (supabase as any)
-        .from("restaurants_public")
-        .select(RESTAURANT_PUBLIC_COLUMNS)
-        .order("name");
-      if (error) throw error;
-      return (data ?? []).map((r: any) => ({ ...r, owner_id: r.owner_id ?? "" }));
+      try {
+        const { data, error } = await (supabase as any)
+          .from("restaurants_public")
+          .select(RESTAURANT_PUBLIC_COLUMNS)
+          .order("name");
+        if (error) {
+          console.error("[useRestaurants] error:", error);
+          return [];
+        }
+        return (data ?? []).map((r: any) => ({ ...r, owner_id: r.owner_id ?? "" }));
+      } catch (err) {
+        console.error("[useRestaurants] exception:", err);
+        return [];
+      }
     },
   });
 
@@ -34,13 +50,22 @@ export const useRestaurant = (id: string) =>
   useQuery({
     queryKey: ["restaurant", id],
     queryFn: async () => {
-      const { data, error } = await (supabase as any)
-        .from("restaurants_public")
-        .select(RESTAURANT_PUBLIC_COLUMNS)
-        .eq("id", id)
-        .single();
-      if (error) throw error;
-      return { ...(data as any), owner_id: (data as any)?.owner_id ?? "" };
+      if (!id) return null;
+      try {
+        const { data, error } = await (supabase as any)
+          .from("restaurants_public")
+          .select(RESTAURANT_PUBLIC_COLUMNS)
+          .eq("id", id)
+          .maybeSingle();
+        if (error) {
+          console.error("[useRestaurant] error:", error);
+          return null;
+        }
+        return data ? { ...(data as any), owner_id: (data as any)?.owner_id ?? "" } : null;
+      } catch (err) {
+        console.error("[useRestaurant] exception:", err);
+        return null;
+      }
     },
     enabled: !!id,
   });
@@ -49,14 +74,23 @@ export const useProducts = (restaurantId: string) =>
   useQuery({
     queryKey: ["products", restaurantId],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("products")
-        .select("*")
-        .eq("restaurant_id", restaurantId)
-        .eq("is_available", true)
-        .order("sort_order");
-      if (error) throw error;
-      return data;
+      if (!restaurantId) return [];
+      try {
+        const { data, error } = await supabase
+          .from("products")
+          .select("*")
+          .eq("restaurant_id", restaurantId)
+          .eq("is_available", true)
+          .order("sort_order");
+        if (error) {
+          console.error("[useProducts] error:", error);
+          return [];
+        }
+        return data ?? [];
+      } catch (err) {
+        console.error("[useProducts] exception:", err);
+        return [];
+      }
     },
     enabled: !!restaurantId,
   });

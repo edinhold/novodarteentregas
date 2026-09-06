@@ -190,22 +190,35 @@ const RestaurantMap = ({ restaurants }: RestaurantMapProps) => {
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
+    if ((containerRef.current as any)._leaflet_id) return;
 
-    const map = L.map(containerRef.current).setView(center, DEFAULT_ZOOM);
-    mapRef.current = map;
+    try {
+      const map = L.map(containerRef.current).setView(center, DEFAULT_ZOOM);
+      mapRef.current = map;
 
-    L.tileLayer(MAP_LAYERS.streets.url, {
-      attribution: MAP_LAYERS.streets.attribution,
-    }).addTo(map);
+      L.tileLayer(MAP_LAYERS.streets.url, {
+        attribution: MAP_LAYERS.streets.attribution,
+      }).addTo(map);
 
-    requestAnimationFrame(() => {
-      // Map may already be removed when the component unmounts before this frame
-      if ((map as any)._container && (map as any)._mapPane) map.invalidateSize();
-    });
+      requestAnimationFrame(() => {
+        if ((map as any)._container && (map as any)._mapPane) map.invalidateSize();
+      });
+    } catch (err) {
+      console.error("[RestaurantMap] Map init error:", err);
+    }
 
     return () => {
-      map.remove();
-      mapRef.current = null;
+      try {
+        if (mapRef.current) {
+          mapRef.current.remove();
+          mapRef.current = null;
+        }
+        if (containerRef.current) {
+          delete (containerRef.current as any)._leaflet_id;
+        }
+      } catch (err) {
+        console.error("[RestaurantMap] Map cleanup error:", err);
+      }
     };
   }, []);
 

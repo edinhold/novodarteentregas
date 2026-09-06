@@ -243,22 +243,37 @@ const RadarTabContent = ({ restaurant, userId }: Props) => {
     return null;
   }, [assignedDriver, activeDelivery, restaurant, destCoords]);
 
-  // Init map
+  // Init map safely
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
-    const center: [number, number] =
-      restaurant?.latitude && restaurant?.longitude
-        ? [restaurant.latitude, restaurant.longitude]
-        : [-15.5454, -54.2958];
-    mapRef.current = L.map(containerRef.current).setView(center, 13);
-    L.tileLayer(MAP_LAYERS[mapType].url, { attribution: MAP_LAYERS[mapType].attribution }).addTo(
-      mapRef.current
-    );
+    if ((containerRef.current as any)._leaflet_id) return;
+
+    try {
+      const center: [number, number] =
+        restaurant?.latitude && restaurant?.longitude
+          ? [restaurant.latitude, restaurant.longitude]
+          : [-15.5454, -54.2958];
+      mapRef.current = L.map(containerRef.current).setView(center, 13);
+      L.tileLayer(MAP_LAYERS[mapType].url, { attribution: MAP_LAYERS[mapType].attribution }).addTo(
+        mapRef.current
+      );
+    } catch (err) {
+      console.error("[RadarTab] Map init error:", err);
+    }
+
     return () => {
-      mapRef.current?.remove();
-      mapRef.current = null;
+      try {
+        if (mapRef.current) {
+          mapRef.current.remove();
+          mapRef.current = null;
+        }
+        if (containerRef.current) {
+          delete (containerRef.current as any)._leaflet_id;
+        }
+      } catch (err) {
+        console.error("[RadarTab] Map cleanup error:", err);
+      }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Tile layer change

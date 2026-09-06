@@ -126,19 +126,25 @@ const DriverGPS = ({ activeRequest, pendingRequests = [], onAcceptRequest, track
     if (!mapContainerRef.current) return;
 
     if (!mapRef.current) {
-      const center: [number, number] = driverPosition
-        ? [driverPosition.lat, driverPosition.lng]
-        : requestMarkers.length > 0
-          ? [requestMarkers[0].lat, requestMarkers[0].lng]
-          : [DEFAULT_CENTER.lat, DEFAULT_CENTER.lng];
+      if ((mapContainerRef.current as any)._leaflet_id) return;
+      try {
+        const center: [number, number] = driverPosition
+          ? [driverPosition.lat, driverPosition.lng]
+          : requestMarkers.length > 0
+            ? [requestMarkers[0].lat, requestMarkers[0].lng]
+            : [DEFAULT_CENTER.lat, DEFAULT_CENTER.lng];
 
-      const map = L.map(mapContainerRef.current).setView(center, 15);
-      tileLayerRef.current = L.tileLayer(MAP_LAYERS[mapType].url, {
-        attribution: MAP_LAYERS[mapType].attribution,
-        maxZoom: mapType.includes("satellite") || mapType.includes("google") ? 20 : 19,
-      }).addTo(map);
-      map.on("dragstart", () => setAutoFollow(false));
-      mapRef.current = map;
+        const map = L.map(mapContainerRef.current).setView(center, 15);
+        tileLayerRef.current = L.tileLayer(MAP_LAYERS[mapType].url, {
+          attribution: MAP_LAYERS[mapType].attribution,
+          maxZoom: mapType.includes("satellite") || mapType.includes("google") ? 20 : 19,
+        }).addTo(map);
+        map.on("dragstart", () => setAutoFollow(false));
+        mapRef.current = map;
+      } catch (err) {
+        console.error("[DriverGPS] Map init error:", err);
+        return;
+      }
     }
 
     const map = mapRef.current;
@@ -221,13 +227,20 @@ const DriverGPS = ({ activeRequest, pendingRequests = [], onAcceptRequest, track
   // Cleanup
   useEffect(() => {
     return () => {
-      if (mapRef.current) {
-        mapRef.current.remove();
-        mapRef.current = null;
-        driverMarkerRef.current = null;
-        accuracyCircleRef.current = null;
-        destMarkerRef.current = null;
-        routeLineRef.current = null;
+      try {
+        if (mapRef.current) {
+          mapRef.current.remove();
+          mapRef.current = null;
+          driverMarkerRef.current = null;
+          accuracyCircleRef.current = null;
+          destMarkerRef.current = null;
+          routeLineRef.current = null;
+        }
+        if (mapContainerRef.current) {
+          delete (mapContainerRef.current as any)._leaflet_id;
+        }
+      } catch (err) {
+        console.error("[DriverGPS] Map cleanup error:", err);
       }
     };
   }, []);
