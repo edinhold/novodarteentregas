@@ -16,7 +16,7 @@ import { useDriverLocations } from "@/hooks/useDriverLocations";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { MAP_LAYERS, GOOGLE_MAPS_API_KEY } from "@/config/maps";
-import { getBestLocation } from "@/utils/geolocation";
+import { getBestLocation, isValidCoordinate } from "@/utils/geolocation";
 import {
   searchAddressSuggestions,
   geocodeAddress as geocodeAddressMapbox,
@@ -344,11 +344,16 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
   };
 
   const applyPosition = useCallback((lat: number, lng: number, acc: number | null, source: string) => {
+    if (!isValidCoordinate(lat, lng)) {
+      console.warn(`${GPS_LOG} coordenadas inválidas ignoradas (${source})`, { lat, lng });
+      return;
+    }
     console.info(`${GPS_LOG} coordenadas aplicadas (${source})`, { lat, lng, acc });
     setGpsAccuracy(acc);
     setStoreLatLng([lat, lng]);
     setGpsStatus("granted");
     setGpsMessage(null);
+    setPickupGpsState("success");
     writeGpsCache(lat, lng, acc);
     if (!pickupManualRef.current) reverseGeocode(lat, lng);
   }, [reverseGeocode]);
@@ -361,14 +366,10 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
       setGpsMessage("Sem conexão com a internet.");
       return;
     }
-    if (gpsRequestingRef.current) {
-      console.info(`${GPS_LOG} pedido ignorado — já existe uma requisição em andamento`);
-      return;
-    }
 
     gpsRequestingRef.current = true;
     setGpsStatus("requesting");
-    setGpsMessage(null);
+    setGpsMessage("Obtendo sua localização...");
     const startedAt = Date.now();
     console.info(`${GPS_LOG} solicitando posição...`);
 
@@ -382,20 +383,23 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
       }
     };
 
-    // Trava de segurança: nunca deixa a tela carregando para sempre (12s)
+    // Trava de segurança: nunca deixa a tela carregando para sempre (15s)
     gpsTimerRef.current = setTimeout(() => {
       if (settled) return;
       finish();
-      console.warn(`${GPS_LOG} timeout de segurança (12s)`);
+      console.warn(`${GPS_LOG} timeout de segurança (15s)`);
       setGpsStatus("timeout");
-      setGpsMessage("Não foi possível localizar sua posição.");
-      if (!silent) toast.error("Não foi possível obter sua localização automaticamente.");
-    }, 12000);
+      setGpsMessage("Não foi possível obter sua localização. Verifique se a localização/GPS está ativada.");
+      if (!silent) toast.error("Não foi possível obter sua localização. Verifique se a localização/GPS está ativada.");
+    }, 15000);
 
     getBestLocation({ highAccuracyTimeoutMs: 6000, coarseTimeoutMs: 7000 })
       .then((loc) => {
         if (settled) return;
         finish();
+        if (!isValidCoordinate(loc.latitude, loc.longitude)) {
+          throw new Error("Coordenadas obtidas são inválidas.");
+        }
         console.info(`${GPS_LOG} localização obtida — resposta em ${Date.now() - startedAt}ms`);
         applyPosition(loc.latitude, loc.longitude, loc.accuracy ?? null, "getCurrentPosition");
       })
@@ -403,18 +407,15 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
         if (settled) return;
         finish();
         console.warn(`${GPS_LOG} erro após ${Date.now() - startedAt}ms: ${err?.message}`);
-        if (err?.code === 1 || err?.message?.toLowerCase().includes("denied")) {
+        const isDenied = err?.code === 1 || err?.message?.toLowerCase().includes("denied");
+        if (isDenied) {
           setGpsStatus("denied");
-          setGpsMessage("Permita o acesso à localização para preencher automaticamente.");
-          if (!silent) toast.error("Permita o acesso à localização para preencher automaticamente.");
-        } else if (err?.code === 2 || err?.message?.toLowerCase().includes("unavailable")) {
-          setGpsStatus("error");
-          setGpsMessage("Ative a localização/GPS do aparelho.");
-          if (!silent) toast.error("Ative a localização/GPS do aparelho.");
+          setGpsMessage("Não foi possível obter sua localização. Verifique se a localização/GPS está ativada e permita o acesso à localização.");
+          if (!silent) toast.error("Não foi possível obter sua localização. Verifique se a localização/GPS está ativada e permita o acesso à localização.");
         } else {
           setGpsStatus("timeout");
-          setGpsMessage("Não foi possível localizar sua posição.");
-          if (!silent) toast.error("Não foi possível localizar sua posição.");
+          setGpsMessage("Não foi possível obter sua localização. Verifique se o GPS está ativado e tente novamente.");
+          if (!silent) toast.error("Não foi possível obter sua localização. Verifique se o GPS está ativado e tente novamente.");
         }
       });
   }, [applyPosition]);
@@ -424,7 +425,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
     if (gpsInitRef.current) return;
 
     // 1) Coordenadas já cadastradas da loja têm prioridade
-    if (restaurant?.latitude && restaurant?.longitude) {
+    if (restaurant?.latitude && restaurant?.longitude && isValidCoordinate(restaurant.latitude, restaurant.longitude)) {
       gpsInitRef.current = true;
       console.info(`${GPS_LOG} usando coordenadas cadastradas da loja`);
       setStoreLatLng([restaurant.latitude, restaurant.longitude]);
@@ -442,7 +443,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
 
     // 2) Cache da sessão evita novo pedido ao GPS
     const cached = readGpsCache();
-    if (cached) {
+    if (cached && isValidCoordinate(cached.lat, cached.lng)) {
       console.info(`${GPS_LOG} usando cache da sessão`);
       applyPosition(cached.lat, cached.lng, cached.acc, "cache");
       return;
@@ -489,14 +490,14 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
   }, []);
 
   const handlePickupGpsClick = useCallback(async () => {
+    // Permite nova busca ao clicar novamente
     if (pickupGpsBusyRef.current) {
-      console.info(`${GPS_LOG} clique ignorado — busca em andamento`);
-      return;
+      console.info(`${GPS_LOG} reiniciando busca de GPS por solicitação do usuário`);
     }
     pickupGpsBusyRef.current = true;
     setPickupGpsState("loading");
     setGpsStatus("requesting");
-    setGpsMessage("Localizando endereço da loja...");
+    setGpsMessage("Obtendo sua localização...");
 
     const savedAddress = (restaurant?.address || callForm.pickup || "").trim();
     const savedNumber = extractNumber(savedAddress);
@@ -521,36 +522,41 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
       const loc = await getBestLocation({ highAccuracyTimeoutMs: 6000, coarseTimeoutMs: 7000 });
       const lat = loc.latitude;
       const lng = loc.longitude;
-      if (!isFinite(lat) || !isFinite(lng)) {
-        finishError("Não foi possível obter a localização. O endereço salvo da loja foi mantido.");
+      if (!isValidCoordinate(lat, lng)) {
+        finishError("Não foi possível obter sua localização. Verifique se o GPS está ativado e tente novamente.");
         return;
       }
 
-      const geocoded = await reverseGeocodeAddress(lat, lng);
-
-      // Endereço oficial da loja tem prioridade; GPS só atualiza coordenadas.
-      let finalAddress = savedAddress;
-      if (!finalAddress) {
-        finalAddress = geocoded || "";
-      } else if (geocoded && savedNumber && !extractNumber(geocoded)) {
-        // mantém número/complemento já informados
-        finalAddress = savedAddress;
-      }
-
-      if (!finalAddress) {
-        finishError("Não foi possível localizar automaticamente. Digite ou selecione o endereço da loja no mapa.");
-        return;
-      }
-
+      // Aplica coordenadas do GPS imediatamente no mapa e estado
       pickupManualRef.current = false;
-      setCallForm((f) => ({ ...f, pickup: finalAddress }));
       setStoreLatLng([lat, lng]);
-      setGpsAccuracy(pos.coords.accuracy ?? null);
+      setGpsAccuracy(loc.accuracy ?? null);
       setGpsStatus("granted");
       setGpsMessage(null);
       setPickupGpsState("success");
-      writeGpsCache(lat, lng, pos.coords.accuracy ?? null);
+      writeGpsCache(lat, lng, loc.accuracy ?? null);
 
+      // Tenta a conversão para endereço via Mapbox
+      let geocoded: string | null = null;
+      try {
+        geocoded = await reverseGeocodeAddress(lat, lng);
+      } catch (geocodeErr) {
+        console.warn(`${GPS_LOG} falha no reverse geocoding da Mapbox, mantendo coordenadas GPS`, geocodeErr);
+      }
+
+      // Define o endereço final mantendo dados salvos caso o reverseGeocode falhe
+      let finalAddress = savedAddress;
+      if (geocoded) {
+        if (!finalAddress || (savedNumber && !extractNumber(geocoded))) {
+          finalAddress = geocoded;
+        }
+      }
+
+      if (finalAddress) {
+        setCallForm((f) => ({ ...f, pickup: finalAddress }));
+      }
+
+      // Salva coordenadas da loja no banco se a loja existir
       if (restaurant?.id) {
         const payload: any = { latitude: lat, longitude: lng };
         if (!restaurant.address && geocoded) payload.address = finalAddress;
@@ -558,15 +564,13 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
         if (error) console.warn(`${GPS_LOG} não foi possível salvar coordenadas`, error.message);
       }
 
-      toast.success("Endereço de coleta atualizado com sucesso.");
+      toast.success("Localização obtida com sucesso!");
     } catch (err: any) {
-      const code = err?.code;
-      if (code === 1) {
-        finishError("Permita o acesso à localização para atualizar o endereço da loja.");
-      } else if (savedAddress) {
-        finishError("Não foi possível obter a localização. O endereço salvo da loja foi mantido.");
+      const isDenied = err?.code === 1 || err?.message?.toLowerCase().includes("denied");
+      if (isDenied) {
+        finishError("Não foi possível obter sua localização. Verifique se a localização/GPS está ativada e permita o acesso à localização.");
       } else {
-        finishError("Não foi possível localizar automaticamente. Digite ou selecione o endereço da loja no mapa.");
+        finishError("Não foi possível obter sua localização. Verifique se a localização/GPS está ativada e tente novamente.");
       }
       return;
     } finally {

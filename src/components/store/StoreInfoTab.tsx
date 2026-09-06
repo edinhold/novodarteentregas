@@ -27,7 +27,7 @@ import {
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { MAP_LAYERS, GOOGLE_MAPS_API_KEY } from "@/config/maps";
-import { getBestLocation } from "@/utils/geolocation";
+import { getBestLocation, isValidCoordinate } from "@/utils/geolocation";
 import MapErrorBoundary from "@/components/MapErrorBoundary";
 
 import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
@@ -232,13 +232,22 @@ const StoreInfoTab = ({ restaurant, userId }: StoreInfoTabProps) => {
       const loc = await getBestLocation({ highAccuracyTimeoutMs: 6000, coarseTimeoutMs: 7000 });
       const lat = loc.latitude;
       const lng = loc.longitude;
+      if (!isValidCoordinate(lat, lng)) {
+        toast.error("Não foi possível obter sua localização. Verifique se o GPS está ativado e tente novamente.");
+        return;
+      }
       updateMarkerPosition(lat, lng);
-      reverseGeocode(lat, lng);
-      setGpsLoading(false);
+      try {
+        await reverseGeocode(lat, lng);
+      } catch (geocodeErr) {
+        console.warn("[StoreInfoTab] Reverse geocoding falhou, mantendo coordenadas GPS", geocodeErr);
+      }
       toast.success(`📍 Localização GPS obtida (precisão: ${Math.round(loc.accuracy)}m)`);
     } catch (err: any) {
+      const isDenied = err?.code === 1 || err?.message?.toLowerCase().includes("denied");
+      toast.error(isDenied ? "Não foi possível obter sua localização. Verifique se a localização/GPS está ativada e permita o acesso à localização." : "Não foi possível obter sua localização. Verifique se a localização/GPS está ativada e tente novamente.");
+    } finally {
       setGpsLoading(false);
-      toast.error(err?.code === 1 || err?.message?.toLowerCase().includes("denied") ? "Permissão GPS negada" : "Erro ao obter localização GPS");
     }
   };
 

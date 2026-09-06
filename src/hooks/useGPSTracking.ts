@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { startNoSleepLoop, stopNoSleepLoop } from "@/lib/notificationSound";
-import { getBestLocation, requestLocationPermission, watchBestLocation, LocationResult } from "@/utils/geolocation";
+import { getBestLocation, requestLocationPermission, watchBestLocation, isValidCoordinate, LocationResult } from "@/utils/geolocation";
 
 interface GPSPosition {
   lat: number;
@@ -40,8 +40,7 @@ const haversineM = (lat1: number, lng1: number, lat2: number, lng2: number) => {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 };
 
-const isValidCoord = (lat: number, lng: number): boolean =>
-  lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180 && lat !== 0 && lng !== 0;
+const isValidCoord = (lat: number, lng: number): boolean => isValidCoordinate(lat, lng);
 
 export const useGPSTracking = (options: GPSTrackingOptions = {}) => {
   const {
