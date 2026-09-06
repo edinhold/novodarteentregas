@@ -1,8 +1,6 @@
 import { notifyAvailableDrivers } from "@/lib/push";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
-
-import { DriverPhoto } from "@/components/DriverPhoto";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -190,38 +188,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
     },
   });
 
-  // Driver info shown once a driver accepts the active request
-  const assignedDriverId = activeRequest?.driver_id || null;
-  const activeStatus = activeRequest?.status;
-  const showDriverInfo = !!activeRequest && !!assignedDriverId && ["accepted", "picked_up", "delivering", "in_transit", "delivered"].includes(activeStatus);
-  const { data: assignedDriver } = useQuery({
-    queryKey: ["assigned-driver-info", activeRequest?.id, assignedDriverId],
-    queryFn: async () => {
-      if (!activeRequest?.id || !assignedDriverId) return null;
-      try {
-        const { data, error } = await (supabase as any).rpc("get_assigned_driver_info", { p_request_id: activeRequest.id });
-        if (!error && data) {
-          const item = Array.isArray(data) ? data[0] : data;
-          if (item && item.full_name) return item;
-        }
-      } catch {
-        /* fallback to direct query below */
-      }
-
-      // Direct fallback to drivers table if RPC fails or is missing
-      const { data: drv } = await supabase
-        .from("drivers")
-        .select("id, user_id, full_name, photo_url, vehicle_plate, vehicle_type, phone")
-        .or(`id.eq.${assignedDriverId},user_id.eq.${assignedDriverId}`)
-        .maybeSingle();
-
-      return drv || null;
-    },
-    enabled: showDriverInfo,
-  });
-
-  // Use ADMIN config strictly — no defaults. Cost is null until config loads,
-  // ensuring the value shown always matches exactly what admin configured.
+  // Delivery config loaded for price calculations
   const configLoaded = !!deliveryConfig;
   const baseFee = Number((deliveryConfig as any)?.base_fee ?? 0);
   const feePerKm = Number((deliveryConfig as any)?.fee_per_km ?? 0);
@@ -1140,77 +1107,6 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
         </Card>
       )}
 
-      {/* Active Delivery — Cancel banner */}
-      {activeRequest && ["pending", "accepted", "picked_up"].includes(activeRequest.status) && (
-        <Card className="border-destructive/40 bg-destructive/5">
-          <CardContent className="p-3 flex items-center gap-3">
-            <Truck className="w-5 h-5 text-destructive shrink-0" />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold truncate">
-                Entrega em andamento #{activeRequest.id.slice(0, 8)}
-              </p>
-              <p className="text-[11px] text-muted-foreground truncate">
-                Status: {statusLabels[activeRequest.status] || activeRequest.status} • {activeRequest.delivery_address}
-              </p>
-            </div>
-            <Button
-              size="sm"
-              variant="destructive"
-              onClick={() => handleCancelRequest(activeRequest.id)}
-              className="shrink-0"
-            >
-              <XCircle className="w-4 h-4 mr-1" /> Cancelar
-            </Button>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Assigned Driver Info — shown after a driver accepts */}
-      {showDriverInfo && assignedDriver && (
-        <Card className="border-primary/40 bg-primary/5">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Truck className="w-4 h-4 text-primary" /> Entregador a caminho
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="flex items-center gap-3">
-            <DriverPhoto
-              photoUrl={assignedDriver.photo_url}
-              driverId={assignedDriver.user_id}
-              alt={assignedDriver.full_name || "Entregador"}
-              className="w-16 h-16 rounded-full border-2 border-primary shrink-0"
-            />
-            <div className="flex-1 min-w-0 space-y-0.5">
-              <p className="font-semibold truncate">{assignedDriver.full_name || "Entregador"}</p>
-              {assignedDriver.phone && (
-                <a
-                  href={`tel:${assignedDriver.phone.replace(/\D/g, "")}`}
-                  className="text-sm text-primary hover:underline block truncate"
-                >
-                  📞 {assignedDriver.phone}
-                </a>
-              )}
-              <p className="text-xs text-muted-foreground truncate">
-                🛵 {assignedDriver.vehicle_type || "Veículo não informado"}
-                {assignedDriver.vehicle_plate ? ` • ${assignedDriver.vehicle_plate}` : ""}
-              </p>
-            </div>
-            {assignedDriver.phone && (
-              <a
-                href={`https://wa.me/55${assignedDriver.phone.replace(/\D/g, "")}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="shrink-0"
-              >
-                <Button size="sm" variant="outline" className="gap-1">
-                  💬 WhatsApp
-                </Button>
-              </a>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
       {/* Map */}
       <Card>
         <CardHeader className="pb-2">
@@ -1588,8 +1484,8 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
         </CardContent>
       </Card>
 
-      {/* Chat with driver */}
-      {activeRequest && (
+      {/* Chat with driver - only after driver accepted */}
+      {activeRequest && activeRequest.status !== "pending" && (
         <ChatWidget
           deliveryRequestId={activeRequest.id}
           currentUserId={user.id}

@@ -1362,6 +1362,102 @@ export async function handleEdgeFunction(
     };
   }
 
+  // 8. get-assigned-driver: Retorna dados reais do motorista que aceitou a corrida
+  if (functionName === "get-assigned-driver") {
+    const targetRequestId = (reqBody?.request_id || reqBody?.pedido_id) as string | undefined;
+    const providedDriverId = (reqBody?.driver_id || reqBody?.motorista_id) as string | undefined;
+
+    let targetDriverId = providedDriverId;
+    if (targetRequestId && !targetDriverId) {
+      const { data: reqData } = await supabase
+        .from("delivery_requests")
+        .select("driver_id, status")
+        .eq("id", targetRequestId)
+        .maybeSingle();
+      targetDriverId = reqData?.driver_id || undefined;
+    }
+
+    if (!targetDriverId) {
+      return {
+        status: 200,
+        body: {
+          success: true,
+          driver: null,
+          message: "Nenhum motorista vinculado a esta corrida ainda.",
+          request_id: requestId,
+          delivery_request_id: targetRequestId || null,
+        },
+      };
+    }
+
+    // Consulta na tabela drivers
+    const { data: driverData, error: driverErr } = await supabase
+      .from("drivers")
+      .select("id, user_id, full_name, phone, photo_url, driver_code, vehicle_plate, vehicle_type")
+      .or(`user_id.eq.${targetDriverId},id.eq.${targetDriverId}`)
+      .maybeSingle();
+
+    if (!driverErr && driverData?.full_name) {
+      return {
+        status: 200,
+        body: {
+          success: true,
+          driver: {
+            id: driverData.id,
+            user_id: driverData.user_id,
+            full_name: driverData.full_name,
+            phone: driverData.phone || "",
+            photo_url: driverData.photo_url || null,
+            driver_code: driverData.driver_code || `MOT-${driverData.id.slice(0, 5).toUpperCase()}`,
+            vehicle_plate: driverData.vehicle_plate || null,
+            vehicle_type: driverData.vehicle_type || "Moto",
+          },
+          request_id: requestId,
+          delivery_request_id: targetRequestId || null,
+        },
+      };
+    }
+
+    // Fallback na tabela profiles
+    const { data: profileData } = await supabase
+      .from("profiles")
+      .select("id, full_name, phone, avatar_url")
+      .eq("id", targetDriverId)
+      .maybeSingle();
+
+    if (profileData?.full_name) {
+      return {
+        status: 200,
+        body: {
+          success: true,
+          driver: {
+            id: profileData.id,
+            user_id: profileData.id,
+            full_name: profileData.full_name,
+            phone: profileData.phone || "",
+            photo_url: profileData.avatar_url || null,
+            driver_code: `MOT-${profileData.id.slice(0, 5).toUpperCase()}`,
+            vehicle_plate: null,
+            vehicle_type: "Moto",
+          },
+          request_id: requestId,
+          delivery_request_id: targetRequestId || null,
+        },
+      };
+    }
+
+    return {
+      status: 200,
+      body: {
+        success: false,
+        driver: null,
+        message: "Motorista não encontrado no cadastro.",
+        request_id: requestId,
+        delivery_request_id: targetRequestId || null,
+      },
+    };
+  }
+
   // Default fallback for other functions
   return {
     status: 200,

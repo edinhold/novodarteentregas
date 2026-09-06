@@ -20,6 +20,7 @@ import AppSidebar from "@/components/AppSidebar";
 import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/sidebar";
 import { useIsMobile } from "@/hooks/use-mobile";
 import AdminSupportPanel from "@/components/AdminSupportPanel";
+import AssignedDriverCard, { ActiveDeliveryRequest } from "@/components/store/AssignedDriverCard";
 
 const StoreOwnerPanel = () => {
   const { user, loading } = useAuth();
@@ -52,27 +53,56 @@ const StoreOwnerPanel = () => {
     enabled: !!user,
   });
 
-  const { data: requests = [] } = useQuery({
+  const { data: requests = [] } = useQuery<ActiveDeliveryRequest[]>({
     queryKey: ["my-delivery-requests", user?.id],
     queryFn: async () => {
-      const { data, error } = await supabase.from("delivery_requests").select("*").eq("store_owner_id", user!.id).order("created_at", { ascending: false }).limit(20);
+      const { data, error } = await supabase
+        .from("delivery_requests")
+        .select("*")
+        .eq("store_owner_id", user!.id)
+        .order("created_at", { ascending: false })
+        .limit(20);
       if (error) throw error;
-      return data;
+      return (data || []) as ActiveDeliveryRequest[];
     },
     enabled: !!user,
   });
 
-  const activeRequest = requests.find((r: any) => ["accepted", "picked_up"].includes(r.status));
+  const activeRequest = requests.find((r) =>
+    ["pending", "accepted", "picked_up", "in_transit", "delivering"].includes(r.status)
+  ) || null;
 
   const { data: chatMessages = [] } = useQuery({
     queryKey: ["chat-messages", activeRequest?.id],
     queryFn: async () => {
-      const { data, error } = await supabase.from("chat_messages").select("*").eq("delivery_request_id", activeRequest!.id).order("created_at");
+      const { data, error } = await supabase
+        .from("chat_messages")
+        .select("*")
+        .eq("delivery_request_id", activeRequest!.id)
+        .order("created_at");
       if (error) throw error;
       return data;
     },
     enabled: !!activeRequest,
   });
+
+  const handleCancelActiveRequest = async (requestId: string) => {
+    if (!confirm("Cancelar esta corrida? Os créditos descontados serão devolvidos à sua loja.")) return;
+    try {
+      const { data, error } = await (supabase as unknown as {
+        rpc: (fn: string, params: Record<string, unknown>) => Promise<{ data: unknown; error: { message: string } | null }>;
+      }).rpc("cancel_delivery_request", { p_request_id: requestId });
+      if (error) throw error;
+      if (!data) throw new Error("Não foi possível cancelar a corrida");
+      toast.success("Corrida cancelada. Créditos devolvidos!");
+      queryClient.invalidateQueries({ queryKey: ["my-delivery-requests", user?.id] });
+      queryClient.invalidateQueries({ queryKey: ["my-credits", user?.id] });
+      queryClient.invalidateQueries({ queryKey: ["assigned-driver-info"] });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Erro ao cancelar corrida";
+      toast.error(msg);
+    }
+  };
 
   useEffect(() => {
     if ("Notification" in window && Notification.permission === "default") {
@@ -83,19 +113,29 @@ const StoreOwnerPanel = () => {
   useEffect(() => {
     if (!user) return;
     const channel = supabase.channel("store-owner-realtime")
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "delivery_requests", filter: `store_owner_id=eq.${user.id}` }, (payload: any) => {
-        queryClient.invalidateQueries({ queryKey: ["my-delivery-requests", user.id] });
-        queryClient.invalidateQueries({ queryKey: ["assigned-driver-info"] });
-        if (payload.new?.status === "accepted" && payload.old?.status === "pending") {
-          toast.success("🎉 Um entregador aceitou sua entrega!", { duration: 8000 });
-          if ("Notification" in window && Notification.permission === "granted") {
-            new Notification("Entrega Aceita!", { body: "Um entregador aceitou seu pedido de entrega.", icon: "/favicon.ico" });
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "delivery_requests", filter: `store_owner_id=eq.${user.id}` },
+        (payload: { eventType: string; new?: Record<string, unknown>; old?: Record<string, unknown> }) => {
+          queryClient.invalidateQueries({ queryKey: ["my-delivery-requests", user.id] });
+          queryClient.invalidateQueries({ queryKey: ["assigned-driver-info"] });
+
+          if (payload.eventType === "UPDATE") {
+            const newStatus = payload.new?.status as string | undefined;
+            const oldStatus = payload.old?.status as string | undefined;
+
+            if (newStatus === "accepted" && oldStatus === "pending") {
+              toast.success("🎉 Um entregador aceitou sua entrega!", { duration: 8000 });
+              if ("Notification" in window && Notification.permission === "granted") {
+                new Notification("Entrega Aceita!", { body: "Um entregador aceitou seu pedido de entrega.", icon: "/favicon.ico" });
+              }
+            }
+            if (newStatus === "picked_up") toast.info("📦 Entregador coletou o pedido!");
+            if (newStatus === "delivered") toast.success("✅ Entrega concluída!");
           }
         }
-        if (payload.new?.status === "picked_up") toast.info("📦 Entregador coletou o pedido!");
-        if (payload.new?.status === "delivered") toast.success("✅ Entrega concluída!");
-      })
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_messages" }, (payload: any) => {
+      )
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_messages" }, (payload: { new?: { sender_id?: string; message?: string } }) => {
         if (activeRequest) {
           queryClient.invalidateQueries({ queryKey: ["chat-messages", activeRequest.id] });
           if (payload.new?.sender_id !== user.id) {
@@ -108,7 +148,7 @@ const StoreOwnerPanel = () => {
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [user, activeRequest?.id]);
+  }, [user, activeRequest, queryClient]);
 
   if (loading || !user) {
     return (
@@ -133,7 +173,14 @@ const StoreOwnerPanel = () => {
             <ThemeToggle />
           </header>
 
-          <main className="p-4 max-w-4xl mx-auto w-full">
+          <main className="p-4 max-w-4xl mx-auto w-full space-y-4">
+            {activeRequest && (
+              <AssignedDriverCard
+                activeRequest={activeRequest}
+                onCancelRequest={handleCancelActiveRequest}
+              />
+            )}
+
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
               {isMobile && (
                 <TabsList className="grid w-full grid-cols-9 bg-muted/50 p-1 rounded-xl mb-4">
