@@ -28,9 +28,26 @@ export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABL
   }
 });
 
-// Proxy supabase.functions.invoke to backend /functions/v1/* endpoint or in-browser fallback
+// Proxy supabase.functions.invoke to internal router, then HTTP /functions/v1/* endpoint, then SDK fallback
 const originalInvoke = supabase.functions.invoke.bind(supabase.functions);
 supabase.functions.invoke = async function (functionName: string, options?: any) {
+  // 1. Internal server functionsRouter execution for instant performance without network failures
+  try {
+    const session = (await supabase.auth.getSession()).data?.session;
+    const authHeader = session?.access_token ? `Bearer ${session.access_token}` : undefined;
+    const result = await handleEdgeFunction(functionName, options?.body || {}, authHeader);
+
+    if (result && result.status >= 200 && result.status < 300) {
+      if (result.body && result.body.success === false) {
+        return { data: result.body, error: { message: result.body.error || "Operação recusada." } };
+      }
+      return { data: result.body, error: null };
+    }
+  } catch (routerErr: any) {
+    console.warn(`[EdgeFunction:${functionName}] Aviso no roteador interno:`, routerErr);
+  }
+
+  // 2. HTTP fetch to /functions/v1/
   try {
     const session = (await supabase.auth.getSession()).data?.session;
     const authHeader = session?.access_token ? `Bearer ${session.access_token}` : undefined;
@@ -48,31 +65,16 @@ supabase.functions.invoke = async function (functionName: string, options?: any)
       return { data, error: null };
     }
   } catch (fetchErr) {
-    console.warn(`[EdgeFunction:${functionName}] HTTP fetch indisponível, executando fallback local.`, fetchErr);
+    console.warn(`[EdgeFunction:${functionName}] HTTP fetch indisponível:`, fetchErr);
   }
 
-  // Robust fallback: Execute local functionsRouter without raw Edge Function failure
+  // 3. Fallback to original invoke
   try {
-    const session = (await supabase.auth.getSession()).data?.session;
-    const authHeader = session?.access_token ? `Bearer ${session.access_token}` : undefined;
-    const result = await handleEdgeFunction(functionName, options?.body || {}, authHeader);
-    
-    if (result.status >= 200 && result.status < 300) {
-      return { data: result.body, error: null };
-    }
+    return await originalInvoke(functionName, options);
+  } catch (invokeErr: any) {
     return {
       data: null,
-      error: { message: result.body?.error || result.body?.message || `HTTP ${result.status}` },
+      error: { message: invokeErr?.message || "Falha ao enviar requisição." },
     };
-  } catch (routerErr: any) {
-    console.warn(`[EdgeFunction:${functionName}] Erro no roteador local, chamando SDK original:`, routerErr);
-    try {
-      return await originalInvoke(functionName, options);
-    } catch (invokeErr: any) {
-      return {
-        data: null,
-        error: { message: invokeErr?.message || "Falha ao enviar requisição." },
-      };
-    }
   }
 };

@@ -91,7 +91,7 @@ export class GlobalErrorBoundary extends Component<Props, State> {
                 : "Ocorreu um imprevisto ao carregar este recurso. Você pode tentar recarregar ou voltar para o início."}
             </p>
 
-            {process.env.NODE_ENV === "development" && this.state.error?.message && (
+            {Boolean(import.meta.env?.DEV) && this.state.error?.message && (
               <div className="p-3 bg-muted rounded-xl text-left text-xs font-mono overflow-auto max-h-32 text-destructive">
                 {this.state.error.message}
               </div>

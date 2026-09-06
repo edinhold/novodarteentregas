@@ -1,16 +1,27 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
+// Safe environment variable getter compatible with Node.js and browser environments
+function getEnvVar(key: string): string | undefined {
+  if (typeof process !== "undefined" && process.env && process.env[key]) {
+    return process.env[key];
+  }
+  if (typeof import.meta !== "undefined" && import.meta.env && (import.meta.env as any)[key]) {
+    return (import.meta.env as any)[key];
+  }
+  return undefined;
+}
+
 // Helper to access Supabase in server context
 function getSupabaseServer(authHeader?: string | null): SupabaseClient {
-  const rawUrl = process.env.VITE_SUPABASE_URL;
+  const rawUrl = getEnvVar("VITE_SUPABASE_URL");
   const url =
     typeof rawUrl === "string" && rawUrl.trim().startsWith("http")
       ? rawUrl.trim()
       : "https://qhlunszfcpzsfjjugkus.supabase.co";
 
   // Prefer service role key if available, otherwise publishable key
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const rawKey = process.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+  const serviceKey = getEnvVar("SUPABASE_SERVICE_ROLE_KEY");
+  const rawKey = getEnvVar("VITE_SUPABASE_PUBLISHABLE_KEY");
   const anonKey =
     typeof rawKey === "string" && rawKey.trim().length > 0
       ? rawKey.trim()
@@ -63,8 +74,8 @@ function mask(value?: string | null): string {
   return value.length <= 8 ? "***" : `***${value.slice(-8)}`;
 }
 
-const ONESIGNAL_APP_ID = process.env.VITE_ONESIGNAL_APP_ID || "4f68f47f-63ee-4326-8f98-e63514f2b154";
-const ONESIGNAL_APP_API_KEY = process.env.ONESIGNAL_APP_API_KEY || process.env.ONESIGNAL_REST_API_KEY || "";
+const ONESIGNAL_APP_ID = getEnvVar("VITE_ONESIGNAL_APP_ID") || "4f68f47f-63ee-4326-8f98-e63514f2b154";
+const ONESIGNAL_APP_API_KEY = getEnvVar("ONESIGNAL_APP_API_KEY") || getEnvVar("ONESIGNAL_REST_API_KEY") || "";
 const ONESIGNAL_API = "https://api.onesignal.com/notifications?c=push";
 const ANDROID_CHANNEL_ID = "novas_entregas_v1";
 
@@ -940,7 +951,7 @@ export async function handleEdgeFunction(
       };
     }
 
-    const APP_BASE_URL = process.env.APP_BASE_URL || "https://duarteentregas.lovable.app";
+    const APP_BASE_URL = getEnvVar("APP_BASE_URL") || "https://duarteentregas.lovable.app";
 
     const payload = {
       app_id: ONESIGNAL_APP_ID,
