@@ -510,6 +510,61 @@ export const FinancialTab = () => {
     return map;
   }, [storeOwners]);
 
+  // Lista formatada de opções de lojas atreladas aos seus nomes reais
+  const storeOptions = useMemo(() => {
+    const list: Array<{
+      userId: string;
+      storeName: string;
+      ownerName: string;
+      displayLabel: string;
+    }> = [];
+    const seenUserIds = new Set<string>();
+
+    storeOwners.forEach((owner) => {
+      seenUserIds.add(owner.user_id);
+      const rest = restaurants.find((r) => r.owner_id === owner.user_id);
+      const storeName = rest?.name || "Loja Cadastrada";
+      const ownerName = owner.full_name || owner.email || "";
+
+      // Nome da loja é SEMPRE a identificação principal
+      let displayLabel = storeName;
+      if (rest?.name) {
+        if (ownerName && ownerName !== rest.name) {
+          displayLabel = `${rest.name} (${ownerName})`;
+        } else {
+          displayLabel = rest.name;
+        }
+      } else if (ownerName) {
+        displayLabel = ownerName;
+      }
+
+      list.push({
+        userId: owner.user_id,
+        storeName,
+        ownerName,
+        displayLabel,
+      });
+    });
+
+    restaurants.forEach((r) => {
+      if (r.owner_id && !seenUserIds.has(r.owner_id)) {
+        seenUserIds.add(r.owner_id);
+        const owner = storeOwnerMap.get(r.owner_id);
+        const ownerName = owner?.full_name || owner?.email || "";
+        const displayLabel = ownerName ? `${r.name} (${ownerName})` : r.name;
+
+        list.push({
+          userId: r.owner_id,
+          storeName: r.name || "Loja Cadastrada",
+          ownerName,
+          displayLabel,
+        });
+      }
+    });
+
+    return list.sort((a, b) => a.storeName.localeCompare(b.storeName));
+  }, [storeOwners, restaurants, storeOwnerMap]);
+
   const driverMap = useMemo(() => {
     const mapByUserId = new Map<string, DriverProfileRecord>();
     const mapById = new Map<string, DriverProfileRecord>();
@@ -1083,9 +1138,9 @@ export const FinancialTab = () => {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="todos">Todas as Lojas</SelectItem>
-                  {storeOwners.map((owner) => (
-                    <SelectItem key={owner.user_id} value={owner.user_id}>
-                      {owner.full_name || owner.email}
+                  {storeOptions.map((opt) => (
+                    <SelectItem key={opt.userId} value={opt.userId}>
+                      {opt.displayLabel}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -1860,9 +1915,9 @@ export const FinancialTab = () => {
                     <SelectValue placeholder="Selecione uma loja" />
                   </SelectTrigger>
                   <SelectContent>
-                    {storeOwners.map((o) => (
-                      <SelectItem key={o.user_id} value={o.user_id}>
-                        {o.full_name || o.email}
+                    {storeOptions.map((opt) => (
+                      <SelectItem key={opt.userId} value={opt.userId}>
+                        {opt.displayLabel}
                       </SelectItem>
                     ))}
                   </SelectContent>
