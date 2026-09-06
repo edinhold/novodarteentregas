@@ -36,11 +36,15 @@ import {
   AlertTriangle,
   Printer,
   Download,
-  ShieldAlert
+  ShieldAlert,
+  Edit3,
+  History
 } from "lucide-react";
 import { FinancialBackupService } from "@/services/FinancialBackupService";
 import { FinancialPrintModal } from "@/components/admin/financial/FinancialPrintModal";
 import { FinancialResetModal } from "@/components/admin/financial/FinancialResetModal";
+import { EditFinancialValueModal, FinancialEditableItem } from "@/components/admin/financial/EditFinancialValueModal";
+import { FinancialAuditLogsModal } from "@/components/admin/financial/FinancialAuditLogsModal";
 
 // Formatação monetária pt-BR estrita e segura
 const formatCurrency = (value: number | null | undefined): string => {
@@ -149,6 +153,11 @@ export const FinancialTab = () => {
   const [printModalOpen, setPrintModalOpen] = useState(false);
   const [resetModalOpen, setResetModalOpen] = useState(false);
   const [isBackupLoading, setIsBackupLoading] = useState(false);
+
+  // Estados de edição de valor e auditoria
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState<FinancialEditableItem | null>(null);
+  const [auditLogsModalOpen, setAuditLogsModalOpen] = useState(false);
 
   // Estados dos filtros globais
   const [period, setPeriod] = useState<string>("30d");
@@ -870,6 +879,16 @@ export const FinancialTab = () => {
           <Button
             variant="outline"
             size="sm"
+            onClick={() => setAuditLogsModalOpen(true)}
+            className="h-9 text-xs font-semibold gap-1.5 transition-all duration-200 border-border text-foreground hover:bg-muted"
+          >
+            <History className="w-3.5 h-3.5 text-primary" />
+            Logs de Auditoria
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
             onClick={async () => {
               setIsBackupLoading(true);
               try {
@@ -1293,7 +1312,8 @@ export const FinancialTab = () => {
                     <TableHead className="text-xs">Loja</TableHead>
                     <TableHead className="text-xs">Valor</TableHead>
                     <TableHead className="text-xs">Status</TableHead>
-                    <TableHead className="text-xs text-right">ID da Operação</TableHead>
+                    <TableHead className="text-xs">ID da Operação</TableHead>
+                    <TableHead className="text-xs text-right">Ação Admin</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1323,14 +1343,38 @@ export const FinancialTab = () => {
                           {item.status}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-right font-mono text-[10px] text-muted-foreground">
+                      <TableCell className="font-mono text-[10px] text-muted-foreground">
                         {item.id.slice(0, 13)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setEditingItem({
+                              id: item.id,
+                              type: item.type,
+                              storeName: item.store_name,
+                              ownerName: item.owner_name,
+                              storeUserId: item.store_id || item.raw_object?.user_id || item.raw_object?.used_by || item.raw_object?.assigned_to_user_id,
+                              currentValue: item.value,
+                              date: item.created_at,
+                              description: `Lançamento de ${item.type} para ${item.store_name}`,
+                              rawObject: item.raw_object,
+                            });
+                            setEditModalOpen(true);
+                          }}
+                          className="h-7 px-2 text-[11px] font-bold gap-1 text-primary border-primary/30 hover:bg-primary/5"
+                        >
+                          <Edit3 className="w-3 h-3" />
+                          Editar Valor
+                        </Button>
                       </TableCell>
                     </TableRow>
                   ))}
                   {filteredEntries.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                      <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
                         Nenhuma entrada registrada para o período ou filtros selecionados.
                       </TableCell>
                     </TableRow>
@@ -1863,6 +1907,20 @@ export const FinancialTab = () => {
         open={resetModalOpen}
         onOpenChange={setResetModalOpen}
         onResetSuccess={handleRefresh}
+      />
+
+      {/* MODAL DE EDIÇÃO DE VALOR FINANCEIRO POR ADMIN */}
+      <EditFinancialValueModal
+        open={editModalOpen}
+        onOpenChange={setEditModalOpen}
+        item={editingItem}
+        onSuccess={handleRefresh}
+      />
+
+      {/* MODAL DE HISTÓRICO PERMANENTE DE AUDITORIA */}
+      <FinancialAuditLogsModal
+        open={auditLogsModalOpen}
+        onOpenChange={setAuditLogsModalOpen}
       />
     </div>
   );
