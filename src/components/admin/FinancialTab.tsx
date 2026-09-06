@@ -33,8 +33,14 @@ import {
   Check,
   X,
   Loader2,
-  AlertTriangle
+  AlertTriangle,
+  Printer,
+  Download,
+  ShieldAlert
 } from "lucide-react";
+import { FinancialBackupService } from "@/services/FinancialBackupService";
+import { FinancialPrintModal } from "@/components/admin/financial/FinancialPrintModal";
+import { FinancialResetModal } from "@/components/admin/financial/FinancialResetModal";
 
 // Formatação monetária pt-BR estrita e segura
 const formatCurrency = (value: number | null | undefined): string => {
@@ -138,6 +144,11 @@ export const FinancialTab = () => {
 
   // Estado local para controle de ações em andamento (trava de duplo clique)
   const [processingWithdrawalId, setProcessingWithdrawalId] = useState<string | null>(null);
+
+  // Estados dos novos modais e backups
+  const [printModalOpen, setPrintModalOpen] = useState(false);
+  const [resetModalOpen, setResetModalOpen] = useState(false);
+  const [isBackupLoading, setIsBackupLoading] = useState(false);
 
   // Estados dos filtros globais
   const [period, setPeriod] = useState<string>("30d");
@@ -834,7 +845,7 @@ export const FinancialTab = () => {
             Consolidação em tempo real de recargas, comissões, antecipações, saques e saldo de caixa.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button
             variant="outline"
             size="sm"
@@ -844,6 +855,52 @@ export const FinancialTab = () => {
           >
             <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${loadingAny ? "animate-spin" : ""}`} />
             Atualizar Dados
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setPrintModalOpen(true)}
+            className="h-9 text-xs font-semibold gap-1.5 transition-all duration-200 border-primary/30 text-primary hover:bg-primary/5"
+          >
+            <Printer className="w-3.5 h-3.5" />
+            Imprimir Informações
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={async () => {
+              setIsBackupLoading(true);
+              try {
+                const { filename, recordCount } = await FinancialBackupService.downloadBackup();
+                toast.success(`Backup gerado e baixado com sucesso: ${filename} (${recordCount} registros)`);
+              } catch (err: any) {
+                console.error("Erro ao gerar backup:", err);
+                toast.error(`Falha ao gerar backup: ${err.message || "Erro desconhecido"}`);
+              } finally {
+                setIsBackupLoading(false);
+              }
+            }}
+            disabled={isBackupLoading}
+            className="h-9 text-xs font-semibold gap-1.5 transition-all duration-200 border-emerald-500/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/5"
+          >
+            {isBackupLoading ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Download className="w-3.5 h-3.5" />
+            )}
+            Backup do Financeiro
+          </Button>
+
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setResetModalOpen(true)}
+            className="h-9 text-xs font-bold gap-1.5 transition-all duration-200 shadow-sm"
+          >
+            <ShieldAlert className="w-3.5 h-3.5" />
+            Reiniciar Financeiro
           </Button>
         </div>
       </div>
@@ -1711,6 +1768,102 @@ export const FinancialTab = () => {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* MODAL DE IMPRESSÃO DAS INFORMAÇÕES FINANCEIRAS */}
+      <FinancialPrintModal
+        open={printModalOpen}
+        onOpenChange={setPrintModalOpen}
+        summary={{
+          totalEntries: metrics.totalEntradas,
+          paidToDriversTotal: metrics.pagoAosMotoristas,
+          platformRevenueTotal: metrics.receitaOperacional,
+          cashBalance: metrics.saldoCaixa,
+        }}
+        periodLabel={
+          period === "hoje"
+            ? "Hoje"
+            : period === "7d"
+            ? "Últimos 7 Dias"
+            : period === "30d"
+            ? "Últimos 30 Dias"
+            : period === "mes_atual"
+            ? "Este Mês"
+            : period === "mes_anterior"
+            ? "Mês Anterior"
+            : "Período Personalizado"
+        }
+        transactions={
+          // Unificar todas as transações para a visualização de impressão
+          [
+            ...filteredEntries.map((e) => ({
+              id: e.id,
+              date: e.created_at,
+              typeLabel: e.type,
+              partyName: e.store_name,
+              storeName: e.store_name,
+              description: `Crédito adicionado à loja ${e.store_name}`,
+              cashIn: e.value,
+              cashOut: 0,
+              platformRevenue: 0,
+              statusLabel: e.status,
+            })),
+            ...filteredDeliveries.map((req) => {
+              const drv = driverMap.mapByUserId.get(req.driver_id || "") || driverMap.mapById.get(req.driver_id || "");
+              const gross = Number(req.driver_fee || req.credit_cost || 0);
+              const earningNet = earningsByDeliveryMap.get(req.id);
+              const net = earningNet !== undefined ? earningNet : Math.max(0, gross * (1 - appFeePercentConfig / 100));
+              const comm = Math.max(0, gross - net);
+              const storeOwner = storeOwnerMap.get(req.store_owner_id || "");
+              return {
+                id: req.id,
+                date: req.created_at,
+                typeLabel: "Corrida / Entrega",
+                partyName: drv?.full_name || storeOwner?.full_name || "Corrida",
+                storeName: storeOwner?.full_name || "Loja",
+                description: `Entrega #${req.id.slice(0, 8)}`,
+                cashIn: gross,
+                cashOut: net,
+                platformRevenue: comm,
+                statusLabel: req.status === "delivered" ? "Concluída" : req.status,
+              };
+            }),
+            ...filteredWithdrawals.map((w) => {
+              const drv = driverMap.mapById.get(w.driver_id) || driverMap.mapByUserId.get(w.driver_user_id);
+              return {
+                id: w.id,
+                date: w.created_at,
+                typeLabel: w.fee_amount > 0 ? "Antecipação" : "Saque",
+                partyName: drv?.full_name || "Motorista",
+                driverName: drv?.full_name || "Motorista",
+                description: `Pagamento ao motorista ${drv?.full_name || ""}`,
+                cashIn: 0,
+                cashOut: Number(w.net_amount || 0),
+                platformRevenue: Number(w.fee_amount || 0),
+                statusLabel:
+                  w.status === "approved"
+                    ? "Pago"
+                    : w.status === "rejected" || w.status === "denied"
+                    ? "Negado"
+                    : "Pendente",
+              };
+            }),
+          ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+        }
+        appliedFilters={{
+          search: "",
+          type: selectedType,
+          status: selectedStatus,
+          storeId: selectedStoreId,
+          driverId: selectedDriverId,
+        }}
+      />
+
+      {/* MODAL DE REINÍCIO SEGURO DO FINANCEIRO */}
+      <FinancialResetModal
+        open={resetModalOpen}
+        onOpenChange={setResetModalOpen}
+        onResetSuccess={handleRefresh}
+      />
     </div>
   );
 };
