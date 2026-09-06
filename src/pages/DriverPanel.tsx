@@ -21,6 +21,7 @@ import { useGPSTracking } from "@/hooks/useGPSTracking";
 import DriverNotificationSettings from "@/components/driver/DriverNotificationSettings";
 import PushStatusCard from "@/components/driver/PushStatusCard";
 import { cancelDeliveryNotification } from "@/lib/push";
+import { usePushNotifications } from "@/hooks/usePushNotifications";
 
 import ChatWidget from "@/components/ChatWidget";
 import AdminSupportPanel from "@/components/AdminSupportPanel";
@@ -61,6 +62,9 @@ const DriverPanel = () => {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [notificationSettings, setNotificationSettings] = useState<DriverNotificationSettingsState>(loadDriverNotificationSettings);
   const hadPendingStandbyRef = useRef(false);
+
+  // Sincronização e validação automática do dispositivo Push ao abrir o painel
+  usePushNotifications(user?.id, "driver");
 
   useEffect(() => {
     if (loading) return;

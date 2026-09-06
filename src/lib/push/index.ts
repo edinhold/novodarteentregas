@@ -74,7 +74,10 @@ export async function initPush(): Promise<boolean> {
       if (!isInitialized) {
         await OneSignal.init({
           appId: ONESIGNAL_APP_ID,
-          serviceWorkerPath: "/OneSignalSDKWorker.js",
+          serviceWorkerPath:
+            typeof window !== "undefined" && window.location.origin
+              ? `${window.location.origin}/OneSignalSDKWorker.js`
+              : "OneSignalSDKWorker.js",
           serviceWorkerParam: { scope: "/" },
           allowLocalhostAsSecureOrigin: true,
           notifyButton: { enable: false },

@@ -62,7 +62,10 @@ const PushStatusCard = ({ userId }: { userId?: string | null }) => {
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <Badge variant="outline" className="gap-1">
             <Smartphone className="w-3 h-3" />
-            {state?.platform === "android_apk" ? "Aplicativo Android" : state?.platform === "ios" ? "iOS" : "Navegador / PWA"}
+            {state?.platform === "android_apk" ? "Aplicativo Android (10+)" : state?.platform === "ios" ? "iOS" : "Navegador / PWA (Android 10+)"}
+          </Badge>
+          <Badge variant="secondary" className="text-[10px] bg-primary/10 text-primary border-primary/20">
+            Android 10+ OK
           </Badge>
           {state?.subscriptionId && (
             <span className="text-muted-foreground font-mono text-[10px]">
