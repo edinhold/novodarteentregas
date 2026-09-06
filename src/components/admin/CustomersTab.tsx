@@ -232,7 +232,7 @@ const CustomersTab = () => {
                 <SelectItem value="all">Todos</SelectItem>
                 <SelectItem value="customer">Somente clientes</SelectItem>
                 <SelectItem value="driver">Motoristas</SelectItem>
-                <SelectItem value="store_owner">Lojistas</SelectItem>
+                <SelectItem value="store_owner">Lojas</SelectItem>
                 <SelectItem value="admin">Admins</SelectItem>
               </SelectContent>
             </Select>
@@ -292,7 +292,7 @@ const CustomersTab = () => {
                         )}
                         {c.roles.map((r: string) => (
                           <span key={r} className="text-xs bg-muted px-1.5 py-0.5 rounded">
-                            {r === "admin" ? "Admin" : r === "driver" ? "Motorista" : r === "store_owner" ? "Lojista" : r}
+                            {r === "admin" ? "Admin" : r === "driver" ? "Motorista" : r === "store_owner" ? "Loja" : r}
                           </span>
                         ))}
                       </div>

@@ -969,15 +969,15 @@ export const FinancialTab = () => {
               </Select>
             </div>
 
-            {/* Lojista */}
+            {/* Loja */}
             <div>
-              <Label className="text-xs">Lojista / Loja</Label>
+              <Label className="text-xs">Loja</Label>
               <Select value={selectedStoreId} onValueChange={setSelectedStoreId}>
                 <SelectTrigger className="h-9 text-xs mt-1">
                   <SelectValue placeholder="Todas as lojas" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="todos">Todos os Lojistas</SelectItem>
+                  <SelectItem value="todos">Todas as Lojas</SelectItem>
                   {storeOwners.map((owner) => (
                     <SelectItem key={owner.user_id} value={owner.user_id}>
                       {owner.full_name || owner.email}
@@ -1212,7 +1212,7 @@ export const FinancialTab = () => {
             <User className="w-3.5 h-3.5 mr-1.5 text-primary" /> Por Motorista
           </TabsTrigger>
           <TabsTrigger value="lojistas" className="text-xs py-2">
-            <Store className="w-3.5 h-3.5 mr-1.5 text-blue-600" /> Por Lojista / Loja
+            <Store className="w-3.5 h-3.5 mr-1.5 text-blue-600" /> Por Loja
           </TabsTrigger>
         </TabsList>
 
@@ -1233,7 +1233,7 @@ export const FinancialTab = () => {
                   <TableRow>
                     <TableHead className="text-xs">Data / Hora</TableHead>
                     <TableHead className="text-xs">Tipo de Entrada</TableHead>
-                    <TableHead className="text-xs">Lojista / Loja</TableHead>
+                    <TableHead className="text-xs">Loja</TableHead>
                     <TableHead className="text-xs">Valor</TableHead>
                     <TableHead className="text-xs">Status</TableHead>
                     <TableHead className="text-xs text-right">ID da Operação</TableHead>
@@ -1644,23 +1644,23 @@ export const FinancialTab = () => {
           </Card>
         </TabsContent>
 
-        {/* TAB 4: DETALHAMENTO POR LOJISTA / LOJA */}
+        {/* TAB 4: DETALHAMENTO POR LOJA */}
         <TabsContent value="lojistas" className="space-y-4">
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-bold flex items-center justify-between">
-                <span>Selecione um Lojista para Visão Consolidada de Créditos</span>
+                <span>Selecione uma Loja para Visão Consolidada de Créditos</span>
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="max-w-xs">
-                <Label className="text-xs">Lojista Destinatário</Label>
+                <Label className="text-xs">Loja Destinatária</Label>
                 <Select
                   value={detailStoreUserId || ""}
                   onValueChange={(val) => setDetailStoreUserId(val || null)}
                 >
                   <SelectTrigger className="h-9 text-xs mt-1">
-                    <SelectValue placeholder="Selecione um lojista" />
+                    <SelectValue placeholder="Selecione uma loja" />
                   </SelectTrigger>
                   <SelectContent>
                     {storeOwners.map((o) => (
@@ -1679,7 +1679,7 @@ export const FinancialTab = () => {
                       <Store className="w-4 h-4 text-blue-600" /> {selectedStoreData.storeName}
                     </h3>
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      Lojista: {selectedStoreData.owner?.full_name || selectedStoreData.owner?.email || detailStoreUserId} · Tel: {selectedStoreData.owner?.phone}
+                      Proprietário da Loja: {selectedStoreData.owner?.full_name || selectedStoreData.owner?.email || detailStoreUserId} · Tel: {selectedStoreData.owner?.phone}
                     </p>
                   </div>
 
@@ -1704,7 +1704,7 @@ export const FinancialTab = () => {
                 </div>
               ) : (
                 <div className="text-center py-8 text-muted-foreground text-xs">
-                  Selecione um lojista no menu acima para consultar o histórico individual de créditos e recargas.
+                  Selecione uma loja no menu acima para consultar o histórico individual de créditos e recargas.
                 </div>
               )}
             </CardContent>

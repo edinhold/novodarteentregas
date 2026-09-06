@@ -185,7 +185,7 @@ const AdminAddressCorrection = ({ request }: Props) => {
               </Button>
             </div>
             <p className="text-[11px] text-muted-foreground">
-              A diferença de valor é automaticamente estornada ou cobrada nos créditos do lojista.
+              A diferença de valor é automaticamente estornada ou cobrada nos créditos da loja.
             </p>
           </>
         )}

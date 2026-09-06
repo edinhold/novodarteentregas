@@ -10,7 +10,14 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
-import { Ticket, Copy, Trash2, Percent, Save, Wallet, User } from "lucide-react";
+import { Ticket, Copy, Trash2, Percent, Save, Wallet, Store as StoreIcon } from "lucide-react";
+
+interface StoreCreditOption {
+  id: string;
+  name: string;
+  owner_id: string;
+  balance: number;
+}
 
 const generateCode = () => {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -23,63 +30,62 @@ const CreditsTab = () => {
   const queryClient = useQueryClient();
   const [quantity, setQuantity] = useState("1");
   const [value, setValue] = useState("10");
-  const [assignedTo, setAssignedTo] = useState<string>("");
+  const [assignedToOwnerId, setAssignedToOwnerId] = useState<string>("");
   const [generating, setGenerating] = useState(false);
   const [promoPercent, setPromoPercent] = useState("");
   const [savingPromo, setSavingPromo] = useState(false);
 
-  // Direct recharge
-  const [directStore, setDirectStore] = useState<string>("");
+  // Direct recharge state
+  const [directStoreOwnerId, setDirectStoreOwnerId] = useState<string>("");
   const [directAmount, setDirectAmount] = useState("50");
   const [directPromo, setDirectPromo] = useState(false);
   const [directLoading, setDirectLoading] = useState(false);
 
-  const { data: storeOwners = [] } = useQuery({
-    queryKey: ["admin-store-owners"],
+  // Fetch real Stores (restaurants) with owner_id and store_credits balance
+  const { data: stores = [] } = useQuery<StoreCreditOption[]>({
+    queryKey: ["admin-stores-credits-list"],
     queryFn: async () => {
-      // Try the RPC first (includes emails via auth.users)
-      const rpc = await supabase.rpc("admin_list_store_owners");
-      if (!rpc.error && Array.isArray(rpc.data) && rpc.data.length > 0) {
-        return rpc.data as any[];
+      // 1. Get all restaurants with valid owner_id
+      const { data: restList, error: restErr } = await supabase
+        .from("restaurants")
+        .select("id, name, owner_id")
+        .not("owner_id", "is", null)
+        .order("name");
+      if (restErr) throw restErr;
+
+      const ownerIds = (restList || []).map((r) => r.owner_id).filter((id): id is string => Boolean(id));
+      const creditsMap = new Map<string, number>();
+
+      if (ownerIds.length > 0) {
+        const { data: creditsList } = await supabase
+          .from("store_credits")
+          .select("user_id, balance")
+          .in("user_id", ownerIds);
+
+        if (creditsList) {
+          creditsList.forEach((c: any) => {
+            creditsMap.set(c.user_id, Number(c.balance || 0));
+          });
+        }
       }
-      if (rpc.error) {
-        console.warn("[CreditsTab] admin_list_store_owners falhou, usando fallback:", rpc.error.message);
-      }
-      // Fallback: query user_roles + profiles directly (admin RLS allows it)
-      const { data: roles, error: rolesErr } = await supabase
-        .from("user_roles")
-        .select("user_id")
-        .eq("role", "store_owner");
-      if (rolesErr) {
-        toast.error("Erro ao carregar lojistas: " + rolesErr.message);
-        throw rolesErr;
-      }
-      const ids = (roles || []).map((r: any) => r.user_id);
-      if (ids.length === 0) return [];
-      const { data: profiles, error: profErr } = await supabase
-        .from("profiles")
-        .select("user_id, full_name, phone")
-        .in("user_id", ids);
-      if (profErr) {
-        toast.error("Erro ao carregar perfis: " + profErr.message);
-        throw profErr;
-      }
-      const map = new Map((profiles || []).map((p: any) => [p.user_id, p]));
-      return ids.map((id) => {
-        const p: any = map.get(id) || {};
-        return {
-          user_id: id,
-          full_name: p.full_name || "",
-          email: p.phone || id.slice(0, 8),
-        };
-      });
+
+      return (restList || []).map((r: any) => ({
+        id: r.id,
+        name: r.name,
+        owner_id: r.owner_id,
+        balance: creditsMap.get(r.owner_id) ?? 0,
+      }));
     },
   });
 
   const { data: codes = [] } = useQuery({
     queryKey: ["admin-credit-codes"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("credit_codes").select("*").order("created_at", { ascending: false }).limit(100);
+      const { data, error } = await supabase
+        .from("credit_codes")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(100);
       if (error) throw error;
       return data;
     },
@@ -99,8 +105,6 @@ const CreditsTab = () => {
       setPromoPercent(String((config as any).promo_credit_percent));
     }
   }, [config]);
-
-  const storeLabel = (o: any) => o.full_name?.trim() ? `${o.full_name} — ${o.email}` : o.email;
 
   const handleSavePromo = async () => {
     const percent = parseFloat(promoPercent);
@@ -128,21 +132,32 @@ const CreditsTab = () => {
   const handleGenerate = async () => {
     const qty = parseInt(quantity) || 1;
     const val = parseFloat(value) || 10;
-    if (qty < 1 || qty > 50) { toast.error("Gere entre 1 e 50 códigos"); return; }
-    if (!assignedTo) { toast.error("Selecione o lojista destinatário"); return; }
+    if (qty < 1 || qty > 50) {
+      toast.error("Gere entre 1 e 50 códigos");
+      return;
+    }
+    if (!assignedToOwnerId) {
+      toast.error("Selecione a loja destinatária");
+      return;
+    }
+
+    const selectedStore = stores.find((s) => s.owner_id === assignedToOwnerId);
+
     setGenerating(true);
     try {
       const newCodes = Array.from({ length: qty }, () => ({
         code: generateCode(),
         value: val,
-        assigned_to_user_id: assignedTo,
+        assigned_to_user_id: assignedToOwnerId,
       }));
       const { error } = await supabase.from("credit_codes").insert(newCodes as any);
       if (error) throw error;
-      toast.success(`${qty} código(s) gerado(s) para o lojista!`);
+
+      toast.success(`${qty} código(s) gerado(s) para a loja "${selectedStore?.name || "Loja"}"!`);
       queryClient.invalidateQueries({ queryKey: ["admin-credit-codes"] });
+      setAssignedToOwnerId("");
     } catch (err: any) {
-      toast.error(err.message || "Erro ao gerar");
+      toast.error(err.message || "Erro ao gerar códigos");
     } finally {
       setGenerating(false);
     }
@@ -150,20 +165,40 @@ const CreditsTab = () => {
 
   const handleDirectRecharge = async () => {
     const amount = parseFloat(directAmount);
-    if (!directStore) { toast.error("Selecione o lojista"); return; }
-    if (isNaN(amount) || amount <= 0) { toast.error("Valor inválido"); return; }
+    if (!directStoreOwnerId) {
+      toast.error("Selecione a Loja");
+      return;
+    }
+    if (isNaN(amount) || amount <= 0) {
+      toast.error("Informe um valor numérico válido maior que R$ 0,00");
+      return;
+    }
+
+    const selectedStore = stores.find((s) => s.owner_id === directStoreOwnerId);
+
     setDirectLoading(true);
     try {
       const { data, error } = await supabase.rpc("admin_recharge_store", {
-        p_store_owner_id: directStore,
+        p_store_owner_id: directStoreOwnerId,
         p_amount: amount,
         p_apply_promo: directPromo,
       });
       if (error) throw error;
-      toast.success(`Recarga concluída: R$ ${Number(data).toFixed(2)} creditados`);
+
+      const totalCredited = Number(data || amount);
+      toast.success(
+        `Recarga concluída! R$ ${totalCredited.toFixed(2)} creditados na loja "${selectedStore?.name || "Loja"}"`
+      );
+
       setDirectAmount("50");
+      setDirectStoreOwnerId("");
+
+      queryClient.invalidateQueries({ queryKey: ["admin-stores-credits-list"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-credit-codes"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-financial-data"] });
+      queryClient.invalidateQueries({ queryKey: ["my-credits"] });
     } catch (err: any) {
-      toast.error(err.message || "Erro na recarga");
+      toast.error(err.message || "Erro ao processar recarga direta na loja");
     } finally {
       setDirectLoading(false);
     }
@@ -181,14 +216,14 @@ const CreditsTab = () => {
       toast.success("Código excluído!");
       queryClient.invalidateQueries({ queryKey: ["admin-credit-codes"] });
     } catch (err: any) {
-      toast.error(err.message || "Erro ao excluir");
+      toast.error(err.message || "Erro ao excluir código");
     }
   };
 
-  const storeNameById = (id?: string | null) => {
-    if (!id) return "—";
-    const o = (storeOwners as any[]).find((s) => s.user_id === id);
-    return o ? storeLabel(o) : id.slice(0, 8);
+  const storeNameById = (ownerId?: string | null) => {
+    if (!ownerId) return "—";
+    const s = stores.find((st) => st.owner_id === ownerId);
+    return s ? s.name : ownerId.slice(0, 8);
   };
 
   return (
@@ -197,38 +232,49 @@ const CreditsTab = () => {
       <Card>
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
-            <Wallet className="w-4 h-4" /> Recarga Direta (crédito imediato no lojista)
+            <Wallet className="w-4 h-4 text-teal-600 dark:text-teal-400" /> Recarga Direta (crédito imediato no saldo da Loja)
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-3 md:grid-cols-[1fr_140px_auto_auto] items-end">
             <div className="space-y-2">
-              <Label>Lojista *</Label>
-              <Select value={directStore} onValueChange={setDirectStore}>
-                <SelectTrigger><SelectValue placeholder="Selecione o lojista" /></SelectTrigger>
+              <Label>Loja *</Label>
+              <Select value={directStoreOwnerId} onValueChange={setDirectStoreOwnerId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione a loja..." />
+                </SelectTrigger>
                 <SelectContent>
-                  {(storeOwners as any[]).map((o) => (
-                    <SelectItem key={o.user_id} value={o.user_id}>{storeLabel(o)}</SelectItem>
+                  {stores.map((s) => (
+                    <SelectItem key={s.id} value={s.owner_id}>
+                      <span className="font-medium">{s.name}</span>{" "}
+                      <span className="text-muted-foreground text-xs">(Saldo: R$ {s.balance.toFixed(2)})</span>
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-2">
               <Label>Valor (R$)</Label>
-              <Input type="number" step="10" value={directAmount} onChange={(e) => setDirectAmount(e.target.value)} />
+              <Input
+                type="number"
+                step="10"
+                min="1"
+                value={directAmount}
+                onChange={(e) => setDirectAmount(e.target.value)}
+              />
             </div>
-            <label className="flex items-center gap-2 text-sm">
+            <label className="flex items-center gap-2 text-sm cursor-pointer pb-2">
               <Checkbox checked={directPromo} onCheckedChange={(v) => setDirectPromo(Boolean(v))} />
-              Aplicar promoção
+              Aplicar bônus promoção
             </label>
-            <Button onClick={handleDirectRecharge} disabled={directLoading}>
-              {directLoading ? "Creditando..." : "Creditar agora"}
+            <Button onClick={handleDirectRecharge} disabled={directLoading || !directStoreOwnerId}>
+              {directLoading ? "Creditando..." : "Creditar Loja"}
             </Button>
           </div>
         </CardContent>
       </Card>
 
-      {/* Seção Promoção */}
+      {/* Configuração de Promoção */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
@@ -237,12 +283,21 @@ const CreditsTab = () => {
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Porcentagem extra aplicada em resgates de código e (opcionalmente) em recargas diretas.
+            Porcentagem de crédito extra aplicada em resgates de código e em recargas diretas com bônus ativado.
           </p>
           <div className="flex gap-3 items-end">
             <div className="space-y-2">
               <Label>Porcentagem (%)</Label>
-              <Input type="number" min="0" max="100" step="1" placeholder="Ex: 10" value={promoPercent} onChange={(e) => setPromoPercent(e.target.value)} className="w-32" />
+              <Input
+                type="number"
+                min="0"
+                max="100"
+                step="1"
+                placeholder="Ex: 10"
+                value={promoPercent}
+                onChange={(e) => setPromoPercent(e.target.value)}
+                className="w-32"
+              />
             </div>
             <Button onClick={handleSavePromo} disabled={savingPromo}>
               <Save className="w-4 h-4 mr-1" />
@@ -257,45 +312,61 @@ const CreditsTab = () => {
         </CardContent>
       </Card>
 
-      {/* Gerar Códigos vinculados */}
+      {/* Gerar Códigos de Crédito */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
-            <Ticket className="w-4 h-4" /> Gerar Códigos de Crédito (vinculados a um lojista)
+            <Ticket className="w-4 h-4" /> Gerar Códigos de Crédito (vinculados a uma Loja)
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-3 md:grid-cols-[1fr_120px_140px_auto] items-end">
             <div className="space-y-2">
-              <Label>Lojista destinatário *</Label>
-              <Select value={assignedTo} onValueChange={setAssignedTo}>
-                <SelectTrigger><SelectValue placeholder="Selecione o lojista" /></SelectTrigger>
+              <Label>Loja destinatária *</Label>
+              <Select value={assignedToOwnerId} onValueChange={setAssignedToOwnerId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione a loja..." />
+                </SelectTrigger>
                 <SelectContent>
-                  {(storeOwners as any[]).map((o) => (
-                    <SelectItem key={o.user_id} value={o.user_id}>{storeLabel(o)}</SelectItem>
+                  {stores.map((s) => (
+                    <SelectItem key={s.id} value={s.owner_id}>
+                      <span className="font-medium">{s.name}</span>{" "}
+                      <span className="text-muted-foreground text-xs">(Saldo: R$ {s.balance.toFixed(2)})</span>
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-2">
               <Label>Quantidade</Label>
-              <Input type="number" min="1" max="50" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
+              <Input
+                type="number"
+                min="1"
+                max="50"
+                value={quantity}
+                onChange={(e) => setQuantity(e.target.value)}
+              />
             </div>
             <div className="space-y-2">
               <Label>Valor (R$)</Label>
-              <Input type="number" step="5" value={value} onChange={(e) => setValue(e.target.value)} />
+              <Input
+                type="number"
+                step="5"
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+              />
             </div>
-            <Button onClick={handleGenerate} disabled={generating}>
-              {generating ? "Gerando..." : "Gerar"}
+            <Button onClick={handleGenerate} disabled={generating || !assignedToOwnerId}>
+              {generating ? "Gerando..." : "Gerar Códigos"}
             </Button>
           </div>
           <p className="text-xs text-muted-foreground">
-            Apenas o lojista selecionado poderá resgatar estes códigos.
+            Apenas a loja selecionada poderá resgatar estes códigos de crédito.
           </p>
         </CardContent>
       </Card>
 
-      {/* Tabela de Códigos */}
+      {/* Tabela de Códigos Gerados */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Códigos Gerados</CardTitle>
@@ -306,7 +377,7 @@ const CreditsTab = () => {
               <TableRow>
                 <TableHead>Código</TableHead>
                 <TableHead>Valor</TableHead>
-                <TableHead>Vinculado a</TableHead>
+                <TableHead>Loja Vinculada</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Ações</TableHead>
               </TableRow>
@@ -317,8 +388,8 @@ const CreditsTab = () => {
                   <TableCell className="font-mono font-bold">{c.code}</TableCell>
                   <TableCell>R$ {Number(c.value).toFixed(2)}</TableCell>
                   <TableCell className="text-xs">
-                    <div className="flex items-center gap-1">
-                      <User className="w-3 h-3 opacity-60" />
+                    <div className="flex items-center gap-1 font-medium">
+                      <StoreIcon className="w-3.5 h-3.5 opacity-70 text-primary" />
                       {storeNameById(c.assigned_to_user_id)}
                     </div>
                   </TableCell>
@@ -330,11 +401,23 @@ const CreditsTab = () => {
                   <TableCell>
                     <div className="flex gap-1">
                       {!c.is_used && (
-                        <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => copyCode(c.code)}>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8"
+                          onClick={() => copyCode(c.code)}
+                          title="Copiar Código"
+                        >
                           <Copy className="w-4 h-4" />
                         </Button>
                       )}
-                      <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" onClick={() => handleDelete(c.id)}>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8 text-destructive"
+                        onClick={() => handleDelete(c.id)}
+                        title="Excluir Código"
+                      >
                         <Trash2 className="w-4 h-4" />
                       </Button>
                     </div>
@@ -342,7 +425,11 @@ const CreditsTab = () => {
                 </TableRow>
               ))}
               {codes.length === 0 && (
-                <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-8">Nenhum código gerado</TableCell></TableRow>
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+                    Nenhum código gerado ainda
+                  </TableCell>
+                </TableRow>
               )}
             </TableBody>
           </Table>

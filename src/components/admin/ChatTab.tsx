@@ -202,7 +202,7 @@ const ChatTab = () => {
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-base flex items-center gap-2">
-                  <Store className="w-4 h-4" /> Lojistas
+                  <Store className="w-4 h-4" /> Lojas
                   <Badge variant="outline" className="ml-auto">
                     {onlineStoreOwners.length}/{storeOwners.length} online
                   </Badge>
@@ -210,7 +210,7 @@ const ChatTab = () => {
               </CardHeader>
               <CardContent className="space-y-1 max-h-96 overflow-y-auto">
                 {storeOwners.length === 0 && (
-                  <p className="text-xs text-muted-foreground text-center py-3">Nenhum lojista cadastrado</p>
+                  <p className="text-xs text-muted-foreground text-center py-3">Nenhuma loja cadastrada</p>
                 )}
                 {[...storeOwners]
                   .sort((a: any, b: any) => Number(isOnline(b.owner_id)) - Number(isOnline(a.owner_id)))
@@ -220,7 +220,7 @@ const ChatTab = () => {
                     return (
                       <button
                         key={s.owner_id}
-                        onClick={() => openSupport(s.owner_id, `Lojista — ${s.name}`)}
+                        onClick={() => openSupport(s.owner_id, `Loja — ${s.name}`)}
                         className={`w-full text-left p-2 rounded-lg flex items-center gap-2 transition-colors ${active ? "bg-primary/10 border border-primary" : "hover:bg-muted/50"}`}
                       >
                         <Circle className={`w-2.5 h-2.5 shrink-0 ${online ? "fill-green-500 text-green-500" : "fill-muted-foreground/30 text-muted-foreground/30"}`} />
@@ -245,7 +245,7 @@ const ChatTab = () => {
           ) : (
             <Card>
               <CardContent className="p-6 text-center text-sm text-muted-foreground">
-                Selecione um motorista ou lojista acima para iniciar a conversa.
+                Selecione um motorista ou loja acima para iniciar a conversa.
               </CardContent>
             </Card>
           )}

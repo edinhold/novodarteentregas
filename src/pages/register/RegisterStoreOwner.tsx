@@ -98,8 +98,8 @@ const RegisterStoreOwner = () => {
         if (roleError) throw roleError;
       }
 
-      toast.success("Cadastro de lojista realizado com sucesso!");
-      navigate("/lojista");
+      toast.success("Cadastro de loja realizado com sucesso!");
+      navigate("/lojas");
     } catch (error: any) {
       toast.error(error.message || "Erro no cadastro");
     } finally {
@@ -114,7 +114,7 @@ const RegisterStoreOwner = () => {
           <ArrowLeft className="w-5 h-5" />
         </button>
         <h1 className="text-3xl font-extrabold flex items-center gap-2">
-          <Store className="w-8 h-8" /> Cadastro Lojista
+          <Store className="w-8 h-8" /> Cadastro de Loja
         </h1>
         <p className="text-white/80 mt-1">Cadastre seu restaurante e comece a vender</p>
       </div>

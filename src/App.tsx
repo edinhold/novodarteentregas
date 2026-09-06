@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { CartProvider } from "@/contexts/CartContext";
 import { AuthProvider } from "@/contexts/AuthContext";
 
@@ -49,11 +49,13 @@ const App = () => (
               <Route path="/auth" element={<Auth />} />
               
               <Route path="/cadastro/entregador" element={<RegisterDriver />} />
-              <Route path="/cadastro/lojista" element={<RegisterStoreOwner />} />
+              <Route path="/cadastro/lojas" element={<RegisterStoreOwner />} />
+              <Route path="/cadastro/lojista" element={<Navigate to="/cadastro/lojas" replace />} />
               <Route path="/admin/login" element={<AdminLogin />} />
               <Route path="/admin" element={<AdminDashboard />} />
               <Route path="/admin/financeiro" element={<FinanceiroPage />} />
-              <Route path="/lojista" element={<StoreOwnerPanel />} />
+              <Route path="/lojas" element={<StoreOwnerPanel />} />
+              <Route path="/lojista" element={<Navigate to="/lojas" replace />} />
               <Route path="/entregador" element={<DriverPanel />} />
               <Route path="/pedido/:id/rastreio" element={<OrderTracking />} />
               <Route path="/instalar" element={<Install />} />

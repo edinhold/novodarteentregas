@@ -38,7 +38,7 @@ const Auth = () => {
           if (userRoles.includes("admin")) {
             targetPath = "/admin";
           } else if (userRoles.includes("store_owner")) {
-            targetPath = "/lojista";
+            targetPath = "/lojas";
           } else if (userRoles.includes("driver")) {
             targetPath = "/entregador";
           } else {
@@ -51,7 +51,7 @@ const Auth = () => {
               targetPath = "/entregador";
               await supabase.from("user_roles").insert({ user_id: uid, role: "driver" as any }).then(() => {}, () => {});
             } else if (ownedRest) {
-              targetPath = "/lojista";
+              targetPath = "/lojas";
               await supabase.from("user_roles").insert({ user_id: uid, role: "store_owner" as any }).then(() => {}, () => {});
             }
           }
@@ -222,11 +222,11 @@ const Auth = () => {
                 <span className="text-xs font-medium text-foreground">Entregador</span>
               </button>
               <button
-                onClick={() => navigate("/cadastro/lojista")}
+                onClick={() => navigate("/cadastro/lojas")}
                 className="flex flex-col items-center gap-1 p-3 rounded-xl border border-border hover:bg-accent transition-colors"
               >
                 <span className="text-2xl">🏪</span>
-                <span className="text-xs font-medium text-foreground">Lojista</span>
+                <span className="text-xs font-medium text-foreground">Loja</span>
               </button>
             </div>
           </div>

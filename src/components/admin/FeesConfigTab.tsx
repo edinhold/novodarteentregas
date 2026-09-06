@@ -133,7 +133,7 @@ const FeesConfigTab = () => {
         <div className="space-y-2">
           <Label className="flex items-center gap-2">🔗 Link de Compra de Recarga</Label>
           <Input placeholder="https://seusite.com/recargas" value={form.recharge_url} onChange={(e) => setForm(f => ({ ...f, recharge_url: e.target.value }))} />
-          <p className="text-xs text-muted-foreground">URL do site para compra de créditos. Aparecerá como botão no painel do lojista.</p>
+          <p className="text-xs text-muted-foreground">URL do site para compra de créditos. Aparecerá como botão no painel da loja.</p>
         </div>
         <Button onClick={handleSave} disabled={loading} className="w-full">
           {loading ? "Salvando..." : "Salvar Configuração"}

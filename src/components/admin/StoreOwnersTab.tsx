@@ -60,7 +60,7 @@ const StoreOwnersTab = () => {
     if (!impersonateTarget) return;
     setImpersonating(true);
     try {
-      console.log("[Admin:Impersonate] Acessando painel do lojista ID", impersonateTarget.ownerId);
+      console.log("[Admin:Impersonate] Acessando painel da loja ID", impersonateTarget.ownerId);
       const res = await supabase.functions.invoke("admin-impersonate", {
         body: { target_user_id: impersonateTarget.ownerId },
       });
@@ -79,10 +79,10 @@ const StoreOwnersTab = () => {
 
       toast.success(`Acessando painel de ${impersonateTarget.name}...`);
       setImpersonateTarget(null);
-      navigate("/lojista");
+      navigate("/lojas");
     } catch (e: any) {
       console.error("[Admin:Impersonate] falhou", e);
-      toast.error(e.message || "Falha ao acessar o painel do lojista");
+      toast.error(e.message || "Falha ao acessar o painel da loja");
     } finally {
       setImpersonating(false);
     }
@@ -92,13 +92,13 @@ const StoreOwnersTab = () => {
     <>
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Lojistas Ativos</CardTitle>
+          <CardTitle className="text-base">Lojas Ativas</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Restaurante</TableHead>
+                <TableHead>Restaurante / Loja</TableHead>
                 <TableHead>Categoria</TableHead>
                 <TableHead>Endereço</TableHead>
                 <TableHead>Status</TableHead>
@@ -142,21 +142,21 @@ const StoreOwnersTab = () => {
                 </TableRow>
               ))}
               {restaurants.length === 0 && (
-                <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-8">Nenhum lojista cadastrado</TableCell></TableRow>
+                <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-8">Nenhuma loja cadastrada</TableCell></TableRow>
               )}
             </TableBody>
           </Table>
         </CardContent>
       </Card>
 
-      <DeleteConfirm open={!!deleteId} onOpenChange={(o) => !o && setDeleteId(null)} onConfirm={handleDelete} title={deleteId?.name || "lojista"} loading={deleting} />
+      <DeleteConfirm open={!!deleteId} onOpenChange={(o) => !o && setDeleteId(null)} onConfirm={handleDelete} title={deleteId?.name || "loja"} loading={deleting} />
 
       <AlertDialog open={!!impersonateTarget} onOpenChange={(o) => !o && !impersonating && setImpersonateTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Acessar painel do lojista?</AlertDialogTitle>
+            <AlertDialogTitle>Acessar painel da loja?</AlertDialogTitle>
             <AlertDialogDescription>
-              Você entrará no painel de <strong>{impersonateTarget?.name}</strong> como se fosse ele.
+              Você entrará no painel de <strong>{impersonateTarget?.name}</strong> como se fosse o proprietário.
               Sua sessão de administrador será encerrada e a ação será registrada no log de auditoria.
               Para voltar ao painel admin, faça login novamente com sua conta.
             </AlertDialogDescription>

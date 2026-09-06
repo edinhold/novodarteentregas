@@ -18,7 +18,7 @@ import logoDuarteFull from "@/assets/logo-duarte-full.jpeg";
 
 const ROLE_HOME: Record<string, string> = {
   admin: "/admin",
-  store_owner: "/lojista",
+  store_owner: "/lojas",
   driver: "/entregador",
 };
 

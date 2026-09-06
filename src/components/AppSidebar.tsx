@@ -54,12 +54,12 @@ const AppSidebar = ({ role, currentTab, onTabChange }: AppSidebarProps) => {
         ];
       case "admin":
         return [
-          { id: "restaurants", label: "Lojistas", icon: Store },
+          { id: "restaurants", label: "Restaurantes", icon: Store },
           { id: "products", label: "Produtos", icon: Package },
           { id: "orders", label: "Pedidos", icon: ShoppingCart },
           { id: "map", label: "Mapa Geral", icon: MapIcon },
           { id: "drivers", label: "Motoristas", icon: Truck },
-          { id: "storeowners", label: "Lojistas", icon: Users },
+          { id: "storeowners", label: "Lojas", icon: Users },
           { id: "fees", label: "Taxas", icon: Settings },
           { id: "credits", label: "Créditos", icon: Ticket },
           { id: "financial", label: "Financeiro", icon: DollarSign },
