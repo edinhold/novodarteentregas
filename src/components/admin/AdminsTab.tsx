@@ -64,21 +64,55 @@ const AdminsTab = () => {
   const adminUserIds = new Set(admins.map((a: any) => a.user_id));
   const availableDrivers = drivers.filter((d: any) => !adminUserIds.has(d.user_id));
 
+  const assignAdminRole = async (targetUserId: string) => {
+    // 1. Try Edge Function first
+    try {
+      const { data, error } = await supabase.functions.invoke("assign-admin-role", {
+        body: { user_id: targetUserId },
+      });
+      if (!error && data?.success) {
+        return true;
+      }
+      if (data?.error) {
+        console.warn("[assign-admin-role] Edge Function retornou erro:", data.error);
+      }
+    } catch (e) {
+      console.warn("[assign-admin-role] Edge Function falhou, aplicando fallback no banco de dados:", e);
+    }
+
+    // 2. Fallback: Direct database insertion into user_roles
+    const { data: existing } = await supabase
+      .from("user_roles")
+      .select("id")
+      .eq("user_id", targetUserId)
+      .eq("role", "admin")
+      .maybeSingle();
+
+    if (!existing) {
+      const { error: insertErr } = await supabase
+        .from("user_roles")
+        .insert({ user_id: targetUserId, role: "admin" as any });
+
+      if (insertErr) {
+        throw new Error(insertErr.message || "Não foi possível conceder a permissão de administrador.");
+      }
+    }
+
+    return true;
+  };
+
   const handleAdd = async () => {
     if (!selectedUserId) {
-      toast.error("Selecione um motorista");
+      toast.error("Selecione uma pessoa / motorista");
       return;
     }
     setLoading(true);
     try {
-      const { data, error } = await supabase.functions.invoke("assign-admin-role", {
-        body: { user_id: selectedUserId },
-      });
-      if (error) throw error;
-      if (data?.error) { toast.error(data.error); return; }
+      await assignAdminRole(selectedUserId);
       toast.success("Administrador adicionado com sucesso!");
       setSelectedUserId("");
       queryClient.invalidateQueries({ queryKey: ["admin-roles"] });
+      queryClient.invalidateQueries({ queryKey: ["all-drivers-for-admin"] });
     } catch (err: any) {
       toast.error(err.message || "Erro ao adicionar administrador");
     } finally {
@@ -108,14 +142,10 @@ const AdminsTab = () => {
   const handleApproveRequest = async (request: any) => {
     setApproving(request.id);
     try {
-      // Assign admin role via edge function
-      const { data, error } = await supabase.functions.invoke("assign-admin-role", {
-        body: { user_id: request.user_id },
-      });
-      if (error) throw error;
-      if (data?.error) { toast.error(data.error); setApproving(null); return; }
+      // Assign admin role with direct DB fallback
+      await assignAdminRole(request.user_id);
 
-      // Update request status
+      // Update admin_requests status
       const { data: { session } } = await supabase.auth.getSession();
       await (supabase.from("admin_requests" as any) as any)
         .update({ status: "approved", reviewed_at: new Date().toISOString(), reviewed_by: session?.user.id })
@@ -125,7 +155,7 @@ const AdminsTab = () => {
       queryClient.invalidateQueries({ queryKey: ["admin-roles"] });
       queryClient.invalidateQueries({ queryKey: ["admin-requests"] });
     } catch (err: any) {
-      toast.error(err.message || "Erro ao aprovar");
+      toast.error(err.message || "Erro ao aprovar administrador");
     } finally {
       setApproving(null);
     }

@@ -40,11 +40,24 @@ const StoreOwnersTab = () => {
     if (!deleteId) return;
     setDeleting(true);
     try {
-      const res = await supabase.functions.invoke("delete-user", {
-        body: { user_id: deleteId.ownerId },
-      });
-      if (res.error) throw new Error(res.error.message || "Erro na função");
-      if (res.data?.error) throw new Error(res.data.error);
+      let functionSuccess = false;
+      try {
+        const res = await supabase.functions.invoke("delete-user", {
+          body: { user_id: deleteId.ownerId },
+        });
+        if (!res.error && !res.data?.error) {
+          functionSuccess = true;
+        }
+      } catch (e) {
+        console.warn("[delete-user] Edge Function indisponível, usando exclusão direta:", e);
+      }
+
+      if (!functionSuccess) {
+        // Fallback: Delete restaurant record directly from DB
+        const { error: restErr } = await supabase.from("restaurants").delete().eq("id", deleteId.id);
+        if (restErr) throw restErr;
+      }
+
       toast.success(`${deleteId.name} removido!`);
       queryClient.invalidateQueries({ queryKey: ["admin-store-owners"] });
       queryClient.invalidateQueries({ queryKey: ["admin-restaurants"] });

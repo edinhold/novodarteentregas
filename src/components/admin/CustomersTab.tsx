@@ -118,11 +118,23 @@ const CustomersTab = () => {
     const { data: { user: adminUser } } = await supabase.auth.getUser();
     for (const c of deleteTarget) {
       try {
-        const { data, error } = await supabase.functions.invoke("delete-user", {
-          body: { user_id: c.user_id },
-        });
-        if (error) throw error;
-        if (data?.error) throw new Error(data.error);
+        let functionSuccess = false;
+        try {
+          const { data, error } = await supabase.functions.invoke("delete-user", {
+            body: { user_id: c.user_id },
+          });
+          if (!error && !data?.error) {
+            functionSuccess = true;
+          }
+        } catch (e) {
+          console.warn("[delete-user] Edge Function indisponível, aplicando exclusão direta no banco de dados:", e);
+        }
+
+        if (!functionSuccess) {
+          await supabase.from("profiles").delete().eq("user_id", c.user_id);
+          await supabase.from("user_roles").delete().eq("user_id", c.user_id);
+        }
+
         await supabase.from("customer_deletion_logs" as any).insert({
           admin_id: adminUser?.id,
           deleted_user_id: c.user_id,

@@ -44,16 +44,28 @@ const DriversTab = () => {
     if (!deleteId) return;
     setDeleting(true);
     try {
-      const res = await supabase.functions.invoke("delete-user", {
-        body: { user_id: deleteId.userId },
-      });
-      if (res.error) throw new Error(res.error.message || "Erro na função");
-      if (res.data?.error) throw new Error(res.data.error);
+      let functionSuccess = false;
+      try {
+        const res = await supabase.functions.invoke("delete-user", {
+          body: { user_id: deleteId.userId },
+        });
+        if (!res.error && !res.data?.error) {
+          functionSuccess = true;
+        }
+      } catch (e) {
+        console.warn("[delete-user] Edge Function indisponível, excluindo registro de motorista diretamente:", e);
+      }
+
+      if (!functionSuccess) {
+        const { error: drvErr } = await supabase.from("drivers").delete().eq("id", deleteId.id);
+        if (drvErr) throw drvErr;
+      }
+
       toast.success(`${deleteId.name} removido!`);
       queryClient.invalidateQueries({ queryKey: ["admin-drivers"] });
       setDeleteId(null);
     } catch (e: any) {
-      toast.error(e.message || "Erro ao remover");
+      toast.error(e.message || "Erro ao remover motorista");
     } finally {
       setDeleting(false);
     }

@@ -49,6 +49,14 @@ supabase.functions.invoke = async function (functionName: string, options?: any)
     const errData = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
     return { data: null, error: errData };
   } catch {
-    return originalInvoke(functionName, options);
+    try {
+      return await originalInvoke(functionName, options);
+    } catch (invokeErr: any) {
+      console.warn(`[EdgeFunction:${functionName}] Erro de conexão/invocação:`, invokeErr?.message || invokeErr);
+      return {
+        data: null,
+        error: invokeErr || { message: "Failed to send a request to the Edge Function" },
+      };
+    }
   }
 };
