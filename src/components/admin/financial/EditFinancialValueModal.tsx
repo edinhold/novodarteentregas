@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Edit3, RefreshCw, AlertTriangle, Store, Calendar, ShieldCheck, ArrowRight } from "lucide-react";
+import { Edit3, RefreshCw, AlertTriangle, Store, User, Calendar, ShieldCheck, Bike } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
@@ -19,10 +19,19 @@ import { formatCurrency, formatDateTime } from "@/utils/financialCalculations";
 
 export interface FinancialEditableItem {
   id: string;
-  type: "Recarga" | "Recarga Direta";
-  storeName: string;
+  type:
+    | "Recarga"
+    | "Recarga Direta"
+    | "Corrida Motorista"
+    | "Ganho de Motorista"
+    | "Saque Motorista"
+    | "Antecipação Motorista";
+  storeName?: string;
   ownerName?: string;
   storeUserId?: string;
+  driverId?: string;
+  driverUserId?: string;
+  driverName?: string;
   currentValue: number;
   date: string;
   description?: string;
@@ -46,6 +55,7 @@ export const EditFinancialValueModal: React.FC<EditFinancialValueModalProps> = (
 
   const [newValueInput, setNewValueInput] = useState<string>("");
   const [reasonInput, setReasonInput] = useState<string>("");
+  const [showConfirmation, setShowConfirmation] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [currentAdmin, setCurrentAdmin] = useState<{ id: string; email: string } | null>(null);
 
@@ -57,6 +67,7 @@ export const EditFinancialValueModal: React.FC<EditFinancialValueModalProps> = (
           setCurrentAdmin({ id: user.id, email: user.email || "Admin Autenticado" });
         }
       });
+      setShowConfirmation(false);
     }
   }, [open]);
 
@@ -65,6 +76,7 @@ export const EditFinancialValueModal: React.FC<EditFinancialValueModalProps> = (
     if (item) {
       setNewValueInput(String(item.currentValue || 0));
       setReasonInput("");
+      setShowConfirmation(false);
     }
   }, [item]);
 
@@ -74,21 +86,33 @@ export const EditFinancialValueModal: React.FC<EditFinancialValueModalProps> = (
   const parsedNewValue = parseFloat(newValueInput.replace(",", ".")) || 0;
   const adjustmentDiff = parsedNewValue - oldValue;
 
-  const handleSaveCorrection = async () => {
+  const validateForm = (): boolean => {
     if (isNaN(parsedNewValue) || parsedNewValue < 0) {
       toast.error("Por favor, informe um novo valor válido (não negativo).");
-      return;
+      return false;
     }
 
     if (parsedNewValue === oldValue) {
       toast.error("O novo valor informado é idêntico ao valor atual.");
-      return;
+      return false;
     }
 
     if (!reasonInput.trim()) {
       toast.error("Por favor, informe o motivo da correção para o histórico de auditoria.");
-      return;
+      return false;
     }
+
+    return true;
+  };
+
+  const handleStartSave = () => {
+    if (validateForm()) {
+      setShowConfirmation(true);
+    }
+  };
+
+  const handleConfirmAndSave = async () => {
+    if (!validateForm()) return;
 
     setIsSubmitting(true);
     try {
@@ -98,7 +122,7 @@ export const EditFinancialValueModal: React.FC<EditFinancialValueModalProps> = (
         return;
       }
 
-      // 1. UPDATE TARGET FINANCIAL TABLE
+      // 1. UPDATE TARGET FINANCIAL TABLE IN DATABASE
       if (item.type === "Recarga") {
         // Update credit code value
         const { error: codeErr } = await supabase
@@ -108,12 +132,11 @@ export const EditFinancialValueModal: React.FC<EditFinancialValueModalProps> = (
 
         if (codeErr) throw codeErr;
 
-        // If code is used and assigned to a store, adjust store_credits balance by the difference
+        // If code is used and assigned to a store, adjust store_credits balance by difference
         const codeObj = item.rawObject;
         const targetUserId = item.storeUserId || codeObj?.used_by || codeObj?.assigned_to_user_id;
 
         if (targetUserId && (codeObj?.is_used || codeObj?.used_by)) {
-          // Fetch existing store_credits record
           const { data: storeCredit } = await supabase
             .from("store_credits")
             .select("id, balance")
@@ -148,23 +171,68 @@ export const EditFinancialValueModal: React.FC<EditFinancialValueModalProps> = (
             if (scErr) throw scErr;
           }
         } else {
-          // Update by store_credits record id
           const { error: scErr } = await supabase
             .from("store_credits")
             .update({ balance: parsedNewValue, updated_at: new Date().toISOString() })
             .eq("id", item.id);
           if (scErr) throw scErr;
         }
+      } else if (item.type === "Corrida Motorista" || item.type === "Ganho de Motorista") {
+        // Update delivery_requests driver fee in database
+        const { error: reqErr } = await supabase
+          .from("delivery_requests")
+          .update({ driver_fee: parsedNewValue, updated_at: new Date().toISOString() })
+          .eq("id", item.id);
+
+        if (reqErr) throw reqErr;
+
+        // Check or update driver_earnings
+        const { data: existingEarning } = await supabase
+          .from("driver_earnings")
+          .select("id, amount")
+          .eq("delivery_request_id", item.id)
+          .maybeSingle();
+
+        if (existingEarning) {
+          await supabase
+            .from("driver_earnings")
+            .update({ amount: parsedNewValue })
+            .eq("id", existingEarning.id);
+        } else if (item.driverId || item.driverUserId) {
+          await supabase.from("driver_earnings").insert({
+            driver_id: item.driverId || item.driverUserId || "",
+            delivery_request_id: item.id,
+            amount: parsedNewValue,
+            status: "available",
+          });
+        }
+      } else if (item.type === "Saque Motorista" || item.type === "Antecipação Motorista") {
+        // Update withdrawal_requests in database
+        const rawFeeAmount = Number(item.rawObject?.fee_amount || 0);
+        const netValue = Math.max(0, parsedNewValue - rawFeeAmount);
+
+        const { error: withErr } = await supabase
+          .from("withdrawal_requests")
+          .update({
+            amount: parsedNewValue,
+            net_amount: netValue,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", item.id);
+
+        if (withErr) throw withErr;
       }
 
-      // 2. INSERT AUDIT LOG IN financial_adjustment_logs
+      // 2. INSERT AUDIT LOG IN financial_adjustment_logs (Permanent Record)
       try {
         await supabase.from("financial_adjustment_logs" as any).insert({
           admin_user_id: user.id,
           admin_email: user.email || "admin@duarte.com",
           transaction_id: item.id,
           store_id: item.storeUserId || null,
-          store_name: item.storeName || "Loja",
+          store_name: item.storeName || null,
+          driver_id: item.driverId || item.driverUserId || null,
+          driver_name: item.driverName || null,
           movement_type: item.type,
           old_value: oldValue,
           new_value: parsedNewValue,
@@ -176,17 +244,23 @@ export const EditFinancialValueModal: React.FC<EditFinancialValueModalProps> = (
         console.warn("Aviso ao salvar log de auditoria:", auditErr);
       }
 
-      // 3. INVALIDATE REACT QUERY CACHE
+      // 3. RECALCULATE & INVALIDATE REACT QUERY CACHE
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["financial-credit-codes"] }),
-        queryClient.invalidateQueries({ queryKey: ["financial-store-credits"] }),
+        queryClient.invalidateQueries({ queryKey: ["financial-delivery-requests"] }),
+        queryClient.invalidateQueries({ queryKey: ["financial-driver-earnings"] }),
+        queryClient.invalidateQueries({ queryKey: ["financial-withdrawals"] }),
+        queryClient.invalidateQueries({ queryKey: ["financial-drivers"] }),
         queryClient.invalidateQueries({ queryKey: ["financial-audit-logs"] }),
+        queryClient.invalidateQueries({ queryKey: ["financial-store-credits"] }),
+        queryClient.invalidateQueries({ queryKey: ["financial-credit-codes"] }),
         queryClient.invalidateQueries({ queryKey: ["admin-financial-data"] }),
-        queryClient.invalidateQueries({ queryKey: ["my-credits"] }),
-        queryClient.invalidateQueries({ queryKey: ["store-credits"] }),
+        queryClient.invalidateQueries({ queryKey: ["driver-pending-requests"] }),
+        queryClient.invalidateQueries({ queryKey: ["driver-my-requests"] }),
       ]);
 
-      toast.success(`Valor corrigido com sucesso de ${formatCurrency(oldValue)} para ${formatCurrency(parsedNewValue)}!`);
+      toast.success(
+        `Valor corrigido com sucesso de ${formatCurrency(oldValue)} para ${formatCurrency(parsedNewValue)}!`
+      );
 
       onOpenChange(false);
       if (onSuccess) onSuccess();
@@ -198,16 +272,18 @@ export const EditFinancialValueModal: React.FC<EditFinancialValueModalProps> = (
     }
   };
 
+  const isDriverItem = !!item.driverName || item.type.includes("Motorista");
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-foreground font-black text-lg">
             <Edit3 className="w-5 h-5 text-primary" />
-            Editar Valor do Lançamento Financeiro
+            Editar Valor Financeiro {isDriverItem ? "do Motorista" : "da Loja"}
           </DialogTitle>
           <DialogDescription className="text-xs">
-            Corrija o valor de um lançamento inserido incorretamente. O novo valor atualizará o saldo da loja e recalculará os totais.
+            Corrija o valor de um lançamento inserido incorretamente. O novo valor atualizará os saldos e o histórico de auditoria.
           </DialogDescription>
         </DialogHeader>
 
@@ -216,8 +292,13 @@ export const EditFinancialValueModal: React.FC<EditFinancialValueModalProps> = (
           <div className="bg-muted/40 border rounded-lg p-3 space-y-2 text-xs">
             <div className="flex justify-between items-center border-b pb-2">
               <span className="font-semibold text-foreground flex items-center gap-1.5">
-                <Store className="w-3.5 h-3.5 text-primary" />
-                Loja: <strong>{item.storeName}</strong>
+                {isDriverItem ? (
+                  <Bike className="w-3.5 h-3.5 text-primary" />
+                ) : (
+                  <Store className="w-3.5 h-3.5 text-primary" />
+                )}
+                {isDriverItem ? "Motorista:" : "Loja:"}{" "}
+                <strong>{item.driverName || item.storeName || "—"}</strong>
               </span>
               <Badge variant="outline" className="text-[10px] font-bold">
                 {item.type}
@@ -226,8 +307,10 @@ export const EditFinancialValueModal: React.FC<EditFinancialValueModalProps> = (
 
             <div className="grid grid-cols-2 gap-2 text-[11px] text-muted-foreground pt-1">
               <div>
-                <span>Proprietário:</span>
-                <p className="font-medium text-foreground truncate">{item.ownerName || "—"}</p>
+                <span>{isDriverItem ? "ID Motorista:" : "Proprietário:"}</span>
+                <p className="font-medium text-foreground truncate">
+                  {item.driverName ? item.driverId || item.driverUserId || "—" : item.ownerName || "—"}
+                </p>
               </div>
               <div>
                 <span className="flex items-center gap-1">
@@ -236,6 +319,13 @@ export const EditFinancialValueModal: React.FC<EditFinancialValueModalProps> = (
                 <p className="font-medium text-foreground">{item.date ? formatDateTime(item.date) : "—"}</p>
               </div>
             </div>
+
+            {item.description && (
+              <div className="text-[11px] text-muted-foreground border-t pt-1.5">
+                <span>Descrição / Detalhe:</span>
+                <p className="font-medium text-foreground truncate">{item.description}</p>
+              </div>
+            )}
 
             <div className="text-[11px] text-muted-foreground border-t pt-1.5 flex justify-between items-center">
               <span>ID da Operação:</span>
@@ -282,42 +372,77 @@ export const EditFinancialValueModal: React.FC<EditFinancialValueModalProps> = (
               <Textarea
                 value={reasonInput}
                 onChange={(e) => setReasonInput(e.target.value)}
-                placeholder="Informe o motivo da correção (ex: Digitação incorreta do valor da recarga por solicitação do lojista)"
+                placeholder="Informe o motivo da correção (ex: Correção manual de valor lançado incorretamente para o motorista conforme dados do chamado)"
                 className="text-xs mt-1 min-h-[70px]"
               />
             </div>
           </div>
+
+          {/* Prompt de Confirmação */}
+          {showConfirmation && (
+            <div className="bg-amber-50 border border-amber-300 dark:bg-amber-950 dark:border-amber-800 rounded-lg p-3 space-y-2 text-xs">
+              <div className="flex items-center gap-2 font-bold text-amber-800 dark:text-amber-200">
+                <AlertTriangle className="w-4 h-4 text-amber-600" />
+                Confirmação de Ajuste Financeiro
+              </div>
+              <p className="text-amber-900 dark:text-amber-300 text-[11px]">
+                Você confirma a alteração do valor de <strong>{formatCurrency(oldValue)}</strong> para <strong>{formatCurrency(parsedNewValue)}</strong> ({item.type}) para o beneficiário <strong>{item.driverName || item.storeName}</strong>?
+              </p>
+              <div className="text-[10px] text-amber-700 dark:text-amber-400 font-mono">
+                Admin Executor: {currentAdmin?.email || "Admin Autenticado"}
+              </div>
+            </div>
+          )}
 
           {/* Informações do Administrador Executor */}
           <div className="bg-primary/5 border border-primary/20 rounded-lg p-2.5 flex items-center justify-between text-[11px]">
             <span className="text-muted-foreground flex items-center gap-1">
               <ShieldCheck className="w-3.5 h-3.5 text-primary" /> Admin Responsável:
             </span>
-            <span className="font-semibold text-primary">{currentAdmin?.email || "Administrador"}</span>
+            <span className="font-semibold text-primary">{currentAdmin?.email || "Administrador Autorizado"}</span>
           </div>
         </div>
 
         {/* Action Buttons */}
         <div className="flex justify-end gap-2 pt-2 border-t">
-          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              if (showConfirmation) setShowConfirmation(false);
+              else onOpenChange(false);
+            }}
+            disabled={isSubmitting}
+          >
             Cancelar
           </Button>
-          <Button
-            size="sm"
-            onClick={handleSaveCorrection}
-            disabled={isSubmitting}
-            className="gap-1.5 font-bold bg-primary hover:bg-primary/90"
-          >
-            {isSubmitting ? (
-              <>
-                <RefreshCw className="w-4 h-4 animate-spin" /> Salvando Correção...
-              </>
-            ) : (
-              <>
-                <Edit3 className="w-4 h-4" /> Confirmar e Salvar Correção
-              </>
-            )}
-          </Button>
+          {!showConfirmation ? (
+            <Button
+              size="sm"
+              onClick={handleStartSave}
+              disabled={isSubmitting}
+              className="gap-1.5 font-bold bg-primary hover:bg-primary/90"
+            >
+              <Edit3 className="w-4 h-4" /> Continuar Correção
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              onClick={handleConfirmAndSave}
+              disabled={isSubmitting}
+              className="gap-1.5 font-bold bg-emerald-600 hover:bg-emerald-700 text-white"
+            >
+              {isSubmitting ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" /> Salvando...
+                </>
+              ) : (
+                <>
+                  <ShieldCheck className="w-4 h-4" /> Confirmar e Salvar no Banco
+                </>
+              )}
+            </Button>
+          )}
         </div>
       </DialogContent>
     </Dialog>

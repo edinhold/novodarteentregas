@@ -1441,7 +1441,30 @@ export const FinancialTab = () => {
                             {req.status === "delivered" ? "Concluída" : req.status}
                           </Badge>
                         </TableCell>
-                        <TableCell className="text-right text-muted-foreground text-[10px]">—</TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setEditingItem({
+                                id: req.id,
+                                type: "Corrida Motorista",
+                                driverId: req.driver_id || undefined,
+                                driverUserId: req.driver_id || undefined,
+                                driverName: drv?.full_name || "Motorista Cadastrado",
+                                currentValue: gross,
+                                date: req.created_at,
+                                description: `Corrida ${req.id.slice(0, 8)} (${req.pickup_address || "Origem"} → ${req.delivery_address || "Destino"})`,
+                                rawObject: req,
+                              });
+                              setEditModalOpen(true);
+                            }}
+                            className="h-7 px-2 text-[11px] font-bold gap-1 text-primary border-primary/30 hover:bg-primary/5"
+                          >
+                            <Edit3 className="w-3 h-3" />
+                            Editar Valor
+                          </Button>
+                        </TableCell>
                       </TableRow>
                     );
                   })}
@@ -1492,39 +1515,61 @@ export const FinancialTab = () => {
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right">
-                          {isPending ? (
-                            <div className="flex items-center justify-end gap-1.5">
-                              <Button
-                                size="sm"
-                                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold h-7 px-2.5 text-[11px] transition-all duration-200"
-                                disabled={processingWithdrawalId !== null}
-                                onClick={() => handleAcceptWithdrawal(w.id)}
-                              >
-                                {isProcessingThis ? (
-                                  <Loader2 className="w-3 h-3 animate-spin mr-1" />
-                                ) : (
-                                  <Check className="w-3 h-3 mr-1" />
-                                )}
-                                Aceitar
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="destructive"
-                                className="h-7 px-2.5 text-[11px] font-bold transition-all duration-200"
-                                disabled={processingWithdrawalId !== null}
-                                onClick={() => handleRejectWithdrawal(w.id)}
-                              >
-                                {isProcessingThis ? (
-                                  <Loader2 className="w-3 h-3 animate-spin mr-1" />
-                                ) : (
-                                  <X className="w-3 h-3 mr-1" />
-                                )}
-                                Negar
-                              </Button>
-                            </div>
-                          ) : (
-                            <span className="text-[10px] text-muted-foreground">Concluído</span>
-                          )}
+                          <div className="flex items-center justify-end gap-1.5">
+                            {isPending && (
+                              <>
+                                <Button
+                                  size="sm"
+                                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold h-7 px-2.5 text-[11px] transition-all duration-200"
+                                  disabled={processingWithdrawalId !== null}
+                                  onClick={() => handleAcceptWithdrawal(w.id)}
+                                >
+                                  {isProcessingThis ? (
+                                    <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                                  ) : (
+                                    <Check className="w-3 h-3 mr-1" />
+                                  )}
+                                  Aceitar
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  className="h-7 px-2.5 text-[11px] font-bold transition-all duration-200"
+                                  disabled={processingWithdrawalId !== null}
+                                  onClick={() => handleRejectWithdrawal(w.id)}
+                                >
+                                  {isProcessingThis ? (
+                                    <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                                  ) : (
+                                    <X className="w-3 h-3 mr-1" />
+                                  )}
+                                  Negar
+                                </Button>
+                              </>
+                            )}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setEditingItem({
+                                  id: w.id,
+                                  type: w.fee_amount > 0 ? "Antecipação Motorista" : "Saque Motorista",
+                                  driverId: w.driver_id,
+                                  driverUserId: w.driver_user_id,
+                                  driverName: drv?.full_name || "Motorista Cadastrado",
+                                  currentValue: Number(w.amount || 0),
+                                  date: w.created_at,
+                                  description: `Lançamento de ${w.fee_amount > 0 ? "Antecipação" : "Saque"} (${w.status})`,
+                                  rawObject: w,
+                                });
+                                setEditModalOpen(true);
+                              }}
+                              className="h-7 px-2 text-[11px] font-bold gap-1 text-primary border-primary/30 hover:bg-primary/5"
+                            >
+                              <Edit3 className="w-3 h-3" />
+                              Editar Valor
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     );
@@ -1686,39 +1731,61 @@ export const FinancialTab = () => {
                                   </Badge>
                                 </TableCell>
                                 <TableCell className="text-right">
-                                  {isPending ? (
-                                    <div className="flex items-center justify-end gap-1.5">
-                                      <Button
-                                        size="sm"
-                                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold h-7 px-2 text-[10px] transition-all duration-200"
-                                        disabled={processingWithdrawalId !== null}
-                                        onClick={() => handleAcceptWithdrawal(w.id)}
-                                      >
-                                        {isProcessingThis ? (
-                                          <Loader2 className="w-3 h-3 animate-spin mr-1" />
-                                        ) : (
-                                          <Check className="w-3 h-3 mr-1" />
-                                        )}
-                                        Aceitar
-                                      </Button>
-                                      <Button
-                                        size="sm"
-                                        variant="destructive"
-                                        className="h-7 px-2 text-[10px] font-bold transition-all duration-200"
-                                        disabled={processingWithdrawalId !== null}
-                                        onClick={() => handleRejectWithdrawal(w.id)}
-                                      >
-                                        {isProcessingThis ? (
-                                          <Loader2 className="w-3 h-3 animate-spin mr-1" />
-                                        ) : (
-                                          <X className="w-3 h-3 mr-1" />
-                                        )}
-                                        Negar
-                                      </Button>
-                                    </div>
-                                  ) : (
-                                    <span className="text-[10px] text-muted-foreground">—</span>
-                                  )}
+                                  <div className="flex items-center justify-end gap-1.5">
+                                    {isPending && (
+                                      <>
+                                        <Button
+                                          size="sm"
+                                          className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold h-7 px-2 text-[10px] transition-all duration-200"
+                                          disabled={processingWithdrawalId !== null}
+                                          onClick={() => handleAcceptWithdrawal(w.id)}
+                                        >
+                                          {isProcessingThis ? (
+                                            <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                                          ) : (
+                                            <Check className="w-3 h-3 mr-1" />
+                                          )}
+                                          Aceitar
+                                        </Button>
+                                        <Button
+                                          size="sm"
+                                          variant="destructive"
+                                          className="h-7 px-2 text-[10px] font-bold transition-all duration-200"
+                                          disabled={processingWithdrawalId !== null}
+                                          onClick={() => handleRejectWithdrawal(w.id)}
+                                        >
+                                          {isProcessingThis ? (
+                                            <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                                          ) : (
+                                            <X className="w-3 h-3 mr-1" />
+                                          )}
+                                          Negar
+                                        </Button>
+                                      </>
+                                    )}
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => {
+                                        setEditingItem({
+                                          id: w.id,
+                                          type: w.fee_amount > 0 ? "Antecipação Motorista" : "Saque Motorista",
+                                          driverId: w.driver_id,
+                                          driverUserId: w.driver_user_id,
+                                          driverName: selectedDriverData.driver.full_name || "Motorista Cadastrado",
+                                          currentValue: Number(w.amount || 0),
+                                          date: w.created_at,
+                                          description: `Lançamento de ${w.fee_amount > 0 ? "Antecipação" : "Saque"} (${w.status})`,
+                                          rawObject: w,
+                                        });
+                                        setEditModalOpen(true);
+                                      }}
+                                      className="h-7 px-2 text-[11px] font-bold gap-1 text-primary border-primary/30 hover:bg-primary/5"
+                                    >
+                                      <Edit3 className="w-3 h-3" />
+                                      Editar Valor
+                                    </Button>
+                                  </div>
                                 </TableCell>
                               </TableRow>
                             );

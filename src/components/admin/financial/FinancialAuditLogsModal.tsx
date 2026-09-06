@@ -9,7 +9,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { FileText, ShieldCheck, History } from "lucide-react";
+import { History } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { formatCurrency, formatDateTime } from "@/utils/financialCalculations";
@@ -26,6 +26,8 @@ export interface FinancialAuditLogRecord {
   transaction_id: string;
   store_id: string | null;
   store_name: string | null;
+  driver_id?: string | null;
+  driver_name?: string | null;
   movement_type: string;
   old_value: number;
   new_value: number;
@@ -38,7 +40,7 @@ export const FinancialAuditLogsModal: React.FC<FinancialAuditLogsModalProps> = (
   open,
   onOpenChange,
 }) => {
-  const { data: auditLogs = [], isLoading, refetch } = useQuery({
+  const { data: auditLogs = [], isLoading } = useQuery({
     queryKey: ["financial-audit-logs"],
     enabled: open,
     queryFn: async () => {
@@ -64,7 +66,7 @@ export const FinancialAuditLogsModal: React.FC<FinancialAuditLogsModalProps> = (
             Histórico Permanente de Auditoria Financeira
           </DialogTitle>
           <DialogDescription className="text-xs">
-            Registro imutável de todas as correções e edições de valores realizadas por administradores.
+            Registro imutável de todas as correções e edições de valores de Lojas e Motoristas realizadas por administradores.
           </DialogDescription>
         </DialogHeader>
 
@@ -75,8 +77,8 @@ export const FinancialAuditLogsModal: React.FC<FinancialAuditLogsModalProps> = (
                 <TableRow>
                   <TableHead className="font-bold">Data / Hora</TableHead>
                   <TableHead className="font-bold">Administrador</TableHead>
-                  <TableHead className="font-bold">Loja</TableHead>
-                  <TableHead className="font-bold">Tipo</TableHead>
+                  <TableHead className="font-bold">Beneficiário (Loja / Motorista)</TableHead>
+                  <TableHead className="font-bold">Tipo Movimentação</TableHead>
                   <TableHead className="font-bold text-right">Valor Anterior</TableHead>
                   <TableHead className="font-bold text-right">Valor Novo</TableHead>
                   <TableHead className="font-bold text-right">Ajuste</TableHead>
@@ -92,8 +94,8 @@ export const FinancialAuditLogsModal: React.FC<FinancialAuditLogsModalProps> = (
                     <TableCell>
                       <span className="font-semibold text-foreground">{log.admin_email || "Admin"}</span>
                     </TableCell>
-                    <TableCell className="font-medium max-w-[120px] truncate">
-                      {log.store_name || "—"}
+                    <TableCell className="font-medium max-w-[140px] truncate">
+                      {log.driver_name || log.store_name || "—"}
                     </TableCell>
                     <TableCell>
                       <Badge variant="outline" className="text-[10px]">
