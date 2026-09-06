@@ -15,6 +15,11 @@ const RestaurantCard = ({ restaurant }: { restaurant: Restaurant }) => {
     >
       <div className="relative h-36 bg-muted overflow-hidden">
         <img src={restaurant.image || "/placeholder.svg"} alt={restaurant.name} className="w-full h-full object-cover" />
+        {restaurant.logo && (
+          <div className="absolute bottom-2 left-2 bg-background/95 p-0.5 rounded-xl shadow-md backdrop-blur-sm border border-border/50">
+            <img src={restaurant.logo} alt={`${restaurant.name} logo`} className="w-8 h-8 rounded-lg object-cover" />
+          </div>
+        )}
         {!restaurant.is_open && (
           <div className="absolute inset-0 bg-foreground/60 flex items-center justify-center">
             <span className="text-primary-foreground font-bold text-sm bg-destructive px-3 py-1 rounded-full">Fechado</span>
@@ -27,7 +32,12 @@ const RestaurantCard = ({ restaurant }: { restaurant: Restaurant }) => {
         )}
       </div>
       <div className="p-3">
-        <h3 className="font-bold text-sm truncate">{restaurant.name}</h3>
+        <div className="flex items-center gap-2">
+          {restaurant.logo && (
+            <img src={restaurant.logo} alt="" className="w-5 h-5 rounded-md object-cover shrink-0 sm:hidden" />
+          )}
+          <h3 className="font-bold text-sm truncate">{restaurant.name}</h3>
+        </div>
         <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground">
           <span className="flex items-center gap-0.5 text-secondary font-semibold">
             <Star className="w-3.5 h-3.5 fill-secondary" /> {restaurant.rating}

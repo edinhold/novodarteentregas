@@ -122,11 +122,25 @@ const Index = () => {
     );
   }
 
+  const authenticatedStore = useMemo(() => (user ? restaurants.find((r) => r.owner_id === user.id) : null), [user, restaurants]);
+  const currentHeaderLogo = authenticatedStore?.logo || logoDuarte;
+
   return (
     <div className="min-h-screen bg-background pb-24">
       <header className="bg-primary text-primary-foreground px-4 pt-10 pb-6 rounded-b-3xl">
         <div className="flex items-center justify-between mb-4">
-          <img src={logoDuarte} alt="Duarte Delivery" className="h-10 object-contain" />
+          <div className="flex items-center gap-3 cursor-pointer" onClick={() => (authenticatedStore ? navigate("/lojas") : null)}>
+            <img
+              src={currentHeaderLogo}
+              alt={authenticatedStore?.name || "Duarte Delivery"}
+              className={authenticatedStore?.logo ? "h-10 w-10 rounded-xl object-cover border border-primary-foreground/20 shadow-sm" : "h-10 object-contain"}
+            />
+            {authenticatedStore?.name && (
+              <span className="font-bold text-sm text-primary-foreground truncate max-w-[160px]">
+                {authenticatedStore.name}
+              </span>
+            )}
+          </div>
           <div className="flex items-center gap-1">
             <ThemeToggle />
             {user ? (

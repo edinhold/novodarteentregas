@@ -56,8 +56,19 @@ const RestaurantDetail = () => {
 
       <div className="px-4 -mt-8 relative max-w-2xl mx-auto">
         <div className="bg-card rounded-2xl p-4 shadow-lg border border-border/50">
-          <h1 className="text-xl font-extrabold">{restaurant.name}</h1>
-          <p className="text-sm text-muted-foreground mt-1">{restaurant.category_name}</p>
+          <div className="flex items-center gap-3">
+            {restaurant.logo && (
+              <img
+                src={restaurant.logo}
+                alt={restaurant.name}
+                className="w-12 h-12 rounded-xl object-cover border border-border/50 shadow-sm shrink-0"
+              />
+            )}
+            <div>
+              <h1 className="text-xl font-extrabold">{restaurant.name}</h1>
+              <p className="text-sm text-muted-foreground mt-0.5">{restaurant.category_name}</p>
+            </div>
+          </div>
           <div className="flex items-center gap-4 mt-2 text-sm text-muted-foreground">
             <span className="flex items-center gap-1 text-secondary font-semibold">
               <Star className="w-4 h-4 fill-secondary" /> {restaurant.rating}

@@ -3,7 +3,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArrowLeft, Truck, UtensilsCrossed, CreditCard, Store, Map as MapIcon, Star, RefreshCw, Route, MessageSquare } from "lucide-react";
+import { ArrowLeft, Truck, UtensilsCrossed, CreditCard, Store, Map as MapIcon, Star, RefreshCw, Route, MessageSquare, Settings } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import MultiDeliveryOrder from "@/components/MultiDeliveryOrder";
 import { motion } from "framer-motion";
@@ -198,12 +198,14 @@ const StoreOwnerPanel = () => {
                 <ArrowLeft className="w-5 h-5" />
               </button>
               <img 
-                src={logoDuarte} 
-                alt="Duarte Delivery" 
+                src={restaurant?.logo || logoDuarte} 
+                alt={restaurant?.name || "Duarte Delivery"} 
                 className="h-8 w-8 rounded-lg object-cover cursor-pointer hover:opacity-90 transition-opacity" 
                 onClick={() => navigate("/")} 
               />
-              <h1 className="font-bold text-lg flex-1 truncate">Painel do Lojista</h1>
+              <h1 className="font-bold text-lg flex-1 truncate">
+                {restaurant?.name ? `Painel - ${restaurant.name}` : "Painel do Lojista"}
+              </h1>
               <ThemeToggle />
             </header>
 
@@ -217,7 +219,7 @@ const StoreOwnerPanel = () => {
 
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                 {isMobile && (
-                  <TabsList className="grid w-full grid-cols-9 bg-muted/50 p-1 rounded-xl mb-4">
+                  <TabsList className="grid w-full grid-cols-10 bg-muted/50 p-1 rounded-xl mb-4">
                     <TabsTrigger value="store" className="rounded-lg"><Store className="w-4 h-4" /></TabsTrigger>
                     <TabsTrigger value="menu" className="rounded-lg"><UtensilsCrossed className="w-4 h-4" /></TabsTrigger>
                     <TabsTrigger value="driver" className="rounded-lg"><Truck className="w-4 h-4" /></TabsTrigger>
@@ -227,6 +229,7 @@ const StoreOwnerPanel = () => {
                     <TabsTrigger value="map" className="rounded-lg"><MapIcon className="w-4 h-4" /></TabsTrigger>
                     <TabsTrigger value="credits" className="rounded-lg"><CreditCard className="w-4 h-4" /></TabsTrigger>
                     <TabsTrigger value="support" className="rounded-lg"><MessageSquare className="w-4 h-4" /></TabsTrigger>
+                    <TabsTrigger value="settings" className="rounded-lg"><Settings className="w-4 h-4" /></TabsTrigger>
                   </TabsList>
                 )}
 
@@ -270,6 +273,10 @@ const StoreOwnerPanel = () => {
 
                   <TabsContent value="support" className="mt-0 outline-none">
                     <AdminSupportPanel currentUserId={activeUserId!} role="store_owner" />
+                  </TabsContent>
+
+                  <TabsContent value="settings" className="mt-0 outline-none">
+                    <StoreInfoTab restaurant={restaurant} userId={activeUserId!} />
                   </TabsContent>
                 </motion.div>
               </Tabs>

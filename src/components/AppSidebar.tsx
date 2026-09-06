@@ -53,6 +53,7 @@ const AppSidebar = ({ role, currentTab, onTabChange }: AppSidebarProps) => {
           { id: "map", label: "Mapa", icon: MapIcon },
           { id: "credits", label: "Recarga", icon: CreditCard },
           { id: "support", label: "Suporte", icon: MessageSquare },
+          { id: "settings", label: "Configurações", icon: Settings },
         ];
       case "admin":
         return [
