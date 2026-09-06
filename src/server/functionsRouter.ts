@@ -1503,21 +1503,19 @@ export async function handleEdgeFunction(
     }
 
     // Gerar magiclink token para login automático no painel da loja
-    const { data: linkData, error: linkErr } = await supabase.auth.admin.generateLink({
-      type: "magiclink",
-      email: targetEmail,
-    });
-
-    if (linkErr || !linkData?.properties?.hashed_token) {
-      return {
-        status: 200,
-        body: {
-          success: false,
-          code: "ERRO_GERAR_TOKEN",
-          error: `Falha ao gerar credencial temporária para a loja: ${linkErr?.message || "Erro interno"}`,
-          request_id: requestId,
-        },
-      };
+    let tokenHash: string | null = null;
+    try {
+      const { data: linkData, error: linkErr } = await supabase.auth.admin.generateLink({
+        type: "magiclink",
+        email: targetEmail,
+      });
+      if (!linkErr && linkData?.properties?.hashed_token) {
+        tokenHash = linkData.properties.hashed_token;
+      } else if (linkErr) {
+        console.warn("[admin-impersonate] Aviso ao gerar magiclink:", linkErr.message);
+      }
+    } catch (err: any) {
+      console.warn("[admin-impersonate] Capturada exceção ao gerar link:", err?.message);
     }
 
     return {
@@ -1525,7 +1523,9 @@ export async function handleEdgeFunction(
       body: {
         success: true,
         email: targetEmail,
-        token_hash: linkData.properties.hashed_token,
+        target_user_id: targetUserId,
+        mode: tokenHash ? "magiclink" : "impersonate_fallback",
+        token_hash: tokenHash,
         request_id: requestId,
       },
     };
