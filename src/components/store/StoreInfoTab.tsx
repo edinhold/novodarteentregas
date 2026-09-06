@@ -27,6 +27,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { MAP_LAYERS, GOOGLE_MAPS_API_KEY } from "@/config/maps";
 import { getBestLocation } from "@/utils/geolocation";
+import MapErrorBoundary from "@/components/MapErrorBoundary";
 
 import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
 import markerIcon from "leaflet/dist/images/marker-icon.png";
@@ -156,43 +157,58 @@ const StoreInfoTab = ({ restaurant, userId }: StoreInfoTabProps) => {
     }
   }, []);
 
-  // Initialize map
+  // Initialize map safely
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
+    if ((mapContainerRef.current as any)._leaflet_id) return;
 
-    const lat = parseFloat(form.latitude) || -15.5454;
-    const lng = parseFloat(form.longitude) || -54.2958;
+    try {
+      const lat = parseFloat(form.latitude) || -15.5454;
+      const lng = parseFloat(form.longitude) || -54.2958;
 
-    const map = L.map(mapContainerRef.current).setView([lat, lng], form.latitude ? 17 : 12);
-    mapRef.current = map;
+      const map = L.map(mapContainerRef.current).setView([lat, lng], form.latitude ? 17 : 12);
+      mapRef.current = map;
 
-    tileLayerRef.current = L.tileLayer(MAP_LAYERS[mapType].url, {
-      attribution: MAP_LAYERS[mapType].attribution,
-      maxZoom: mapType === "satellite" ? 18 : 19,
-    }).addTo(map);
+      tileLayerRef.current = L.tileLayer(MAP_LAYERS[mapType].url, {
+        attribution: MAP_LAYERS[mapType].attribution,
+        maxZoom: mapType === "satellite" ? 18 : 19,
+      }).addTo(map);
 
-    if (form.latitude && form.longitude) {
-      markerRef.current = L.marker([parseFloat(form.latitude), parseFloat(form.longitude)], { icon: storePin, draggable: true })
-        .addTo(map)
-        .bindPopup("<b>📍 Localização da Loja</b>");
+      if (form.latitude && form.longitude) {
+        markerRef.current = L.marker([parseFloat(form.latitude), parseFloat(form.longitude)], { icon: storePin, draggable: true })
+          .addTo(map)
+          .bindPopup("<b>📍 Localização da Loja</b>");
 
-      markerRef.current.on("dragend", () => {
-        const pos = markerRef.current!.getLatLng();
-        setForm(f => ({ ...f, latitude: pos.lat.toFixed(7), longitude: pos.lng.toFixed(7) }));
-        reverseGeocode(pos.lat, pos.lng);
+        markerRef.current.on("dragend", () => {
+          const pos = markerRef.current!.getLatLng();
+          setForm(f => ({ ...f, latitude: pos.lat.toFixed(7), longitude: pos.lng.toFixed(7) }));
+          reverseGeocode(pos.lat, pos.lng);
+        });
+      }
+
+      map.on("click", (e: L.LeafletMouseEvent) => {
+        const { lat: clickLat, lng: clickLng } = e.latlng;
+        updateMarkerPosition(clickLat, clickLng);
+        reverseGeocode(clickLat, clickLng);
       });
+    } catch (err) {
+      console.error("[StoreInfoTab] Error initializing Leaflet map:", err);
     }
 
-    map.on("click", (e: L.LeafletMouseEvent) => {
-      const { lat: clickLat, lng: clickLng } = e.latlng;
-      updateMarkerPosition(clickLat, clickLng);
-      reverseGeocode(clickLat, clickLng);
-    });
-
     return () => {
-      map.remove();
-      mapRef.current = null;
-      markerRef.current = null;
+      try {
+        if (mapRef.current) {
+          mapRef.current.remove();
+          mapRef.current = null;
+        }
+        markerRef.current = null;
+        tileLayerRef.current = null;
+        if (mapContainerRef.current) {
+          delete (mapContainerRef.current as any)._leaflet_id;
+        }
+      } catch (err) {
+        console.error("[StoreInfoTab] Error removing Leaflet map:", err);
+      }
     };
   }, []);
 
@@ -622,10 +638,12 @@ const StoreInfoTab = ({ restaurant, userId }: StoreInfoTabProps) => {
                 {gpsLoading ? "Buscando..." : "Usar meu GPS"}
               </Button>
             </div>
-            <div
-              ref={mapContainerRef}
-              className="w-full h-[250px] rounded-lg border border-border overflow-hidden z-0"
-            />
+            <MapErrorBoundary fallbackHeight="250px">
+              <div
+                ref={mapContainerRef}
+                className="w-full h-[250px] rounded-lg border border-border overflow-hidden z-0"
+              />
+            </MapErrorBoundary>
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
                 <Label className="text-xs">Latitude</Label>

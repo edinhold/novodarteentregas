@@ -219,17 +219,17 @@ const StoreOwnerPanel = () => {
 
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                 {isMobile && (
-                  <TabsList className="grid w-full grid-cols-10 bg-muted/50 p-1 rounded-xl mb-4">
-                    <TabsTrigger value="store" className="rounded-lg"><Store className="w-4 h-4" /></TabsTrigger>
-                    <TabsTrigger value="menu" className="rounded-lg"><UtensilsCrossed className="w-4 h-4" /></TabsTrigger>
-                    <TabsTrigger value="driver" className="rounded-lg"><Truck className="w-4 h-4" /></TabsTrigger>
-                    <TabsTrigger value="multi" className="rounded-lg"><Route className="w-4 h-4" /></TabsTrigger>
-                    <TabsTrigger value="reassign" className="rounded-lg"><RefreshCw className="w-4 h-4" /></TabsTrigger>
-                    <TabsTrigger value="favorites" className="rounded-lg"><Star className="w-4 h-4" /></TabsTrigger>
-                    <TabsTrigger value="map" className="rounded-lg"><MapIcon className="w-4 h-4" /></TabsTrigger>
-                    <TabsTrigger value="credits" className="rounded-lg"><CreditCard className="w-4 h-4" /></TabsTrigger>
-                    <TabsTrigger value="support" className="rounded-lg"><MessageSquare className="w-4 h-4" /></TabsTrigger>
-                    <TabsTrigger value="settings" className="rounded-lg"><Settings className="w-4 h-4" /></TabsTrigger>
+                  <TabsList className="flex w-full overflow-x-auto p-1 rounded-xl mb-4 scrollbar-none gap-1 justify-start bg-muted/50">
+                    <TabsTrigger value="store" className="rounded-lg shrink-0 gap-1 px-3"><Store className="w-4 h-4" /><span className="text-xs">Loja</span></TabsTrigger>
+                    <TabsTrigger value="menu" className="rounded-lg shrink-0 gap-1 px-3"><UtensilsCrossed className="w-4 h-4" /><span className="text-xs">Cardápio</span></TabsTrigger>
+                    <TabsTrigger value="driver" className="rounded-lg shrink-0 gap-1 px-3"><Truck className="w-4 h-4" /><span className="text-xs">Entregador</span></TabsTrigger>
+                    <TabsTrigger value="multi" className="rounded-lg shrink-0 gap-1 px-3"><Route className="w-4 h-4" /><span className="text-xs">Multi</span></TabsTrigger>
+                    <TabsTrigger value="reassign" className="rounded-lg shrink-0 gap-1 px-3"><RefreshCw className="w-4 h-4" /><span className="text-xs">Reatribuir</span></TabsTrigger>
+                    <TabsTrigger value="favorites" className="rounded-lg shrink-0 gap-1 px-3"><Star className="w-4 h-4" /><span className="text-xs">Favoritos</span></TabsTrigger>
+                    <TabsTrigger value="map" className="rounded-lg shrink-0 gap-1 px-3"><MapIcon className="w-4 h-4" /><span className="text-xs">Mapa</span></TabsTrigger>
+                    <TabsTrigger value="credits" className="rounded-lg shrink-0 gap-1 px-3"><CreditCard className="w-4 h-4" /><span className="text-xs">Recarga</span></TabsTrigger>
+                    <TabsTrigger value="support" className="rounded-lg shrink-0 gap-1 px-3"><MessageSquare className="w-4 h-4" /><span className="text-xs">Suporte</span></TabsTrigger>
+                    <TabsTrigger value="settings" className="rounded-lg shrink-0 gap-1 px-3"><Settings className="w-4 h-4" /><span className="text-xs">Ajustes</span></TabsTrigger>
                   </TabsList>
                 )}
 
