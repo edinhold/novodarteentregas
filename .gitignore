@@ -25,3 +25,7 @@ dist-ssr
 
 # Variaveis de ambiente locais
 .env
+
+# Workspace temporarios do IDE
+brain/
+
