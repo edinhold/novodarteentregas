@@ -9,6 +9,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ArrowLeft, Lock, Mail, ShieldCheck, UserPlus, Phone, User } from "lucide-react";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
+import logoDuarte from "@/assets/logo-duarte.jpeg";
 
 const AdminLogin = () => {
   const navigate = useNavigate();
@@ -142,9 +143,12 @@ const AdminLogin = () => {
       >
         <Card className="border-border/50 shadow-lg">
           <CardHeader className="text-center space-y-2">
-            <div className="mx-auto w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center">
-              <ShieldCheck className="w-8 h-8 text-primary" />
-            </div>
+            <img 
+              src={logoDuarte} 
+              alt="Duarte Delivery" 
+              className="mx-auto h-16 w-16 rounded-2xl object-cover shadow-sm cursor-pointer hover:opacity-90 transition-opacity" 
+              onClick={() => navigate("/")}
+            />
             <CardTitle className="text-xl">Painel Administrativo</CardTitle>
           </CardHeader>
           <CardContent>

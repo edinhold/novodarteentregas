@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { ArrowLeft, Store, Mail, Lock, Phone, User, MapPin, ImageIcon, Upload } from "lucide-react";
 import { motion } from "framer-motion";
+import logoDuarte from "@/assets/logo-duarte.jpeg";
 
 const RegisterStoreOwner = () => {
   const navigate = useNavigate();
@@ -110,9 +111,12 @@ const RegisterStoreOwner = () => {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <div className="bg-amber-600 text-white px-4 pt-10 pb-16 rounded-b-3xl">
-        <button onClick={() => navigate("/auth")} className="mb-4">
-          <ArrowLeft className="w-5 h-5" />
-        </button>
+        <div className="flex items-center justify-between mb-4">
+          <button onClick={() => navigate("/auth")}>
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+          <img src={logoDuarte} alt="Duarte Delivery" className="h-10 object-contain cursor-pointer" onClick={() => navigate("/")} />
+        </div>
         <h1 className="text-3xl font-extrabold flex items-center gap-2">
           <Store className="w-8 h-8" /> Cadastro de Loja
         </h1>

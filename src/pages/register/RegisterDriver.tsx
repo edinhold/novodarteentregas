@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import { ArrowLeft, Bike, Mail, Lock, Phone, User, Camera, Upload } from "lucide-react";
 import { motion } from "framer-motion";
+import logoDuarte from "@/assets/logo-duarte.jpeg";
 
 
 const RegisterDriver = () => {
@@ -95,7 +96,10 @@ const RegisterDriver = () => {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <div className="bg-primary text-primary-foreground px-4 pt-10 pb-16 rounded-b-3xl">
-        <button onClick={() => navigate("/auth")} className="mb-4"><ArrowLeft className="w-5 h-5" /></button>
+        <div className="flex items-center justify-between mb-4">
+          <button onClick={() => navigate("/auth")}><ArrowLeft className="w-5 h-5" /></button>
+          <img src={logoDuarte} alt="Duarte Delivery" className="h-10 object-contain cursor-pointer" onClick={() => navigate("/")} />
+        </div>
         <h1 className="text-3xl font-extrabold flex items-center gap-2"><Bike className="w-8 h-8" /> Cadastro Entregador</h1>
         <p className="opacity-80 mt-1">Comece a entregar e ganhar dinheiro</p>
       </div>

@@ -35,6 +35,7 @@ import AppSidebar from "@/components/AppSidebar";
 import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/sidebar";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { motion } from "framer-motion";
+import logoDuarte from "@/assets/logo-duarte.jpeg";
 
 const statusOptions = [
   { value: "pending", label: "Pendente" },
@@ -234,6 +235,12 @@ const AdminDashboard = () => {
             <button onClick={() => navigate("/")} className="hover:bg-muted p-1 rounded-full transition-colors ml-1">
               <ArrowLeft className="w-5 h-5" />
             </button>
+            <img 
+              src={logoDuarte} 
+              alt="Duarte Delivery" 
+              className="h-8 w-8 rounded-lg object-cover cursor-pointer hover:opacity-90 transition-opacity" 
+              onClick={() => navigate("/")} 
+            />
             <h1 className="font-bold text-lg flex-1 truncate">Painel Administrativo</h1>
             <ThemeToggle />
           </header>

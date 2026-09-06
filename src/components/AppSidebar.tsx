@@ -15,6 +15,8 @@ import {
 } from "@/components/ui/sidebar";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
+import logoDuarte from "@/assets/logo-duarte.jpeg";
+import logoDuarteFull from "@/assets/logo-duarte-full.jpeg";
 
 interface AppSidebarProps {
   role: "admin" | "store" | "driver";
@@ -86,8 +88,12 @@ const AppSidebar = ({ role, currentTab, onTabChange }: AppSidebarProps) => {
     <Sidebar collapsible="icon" className="border-r border-border/50">
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel className="px-4 py-4 mb-2">
-            {!isCollapsed && <span className="font-bold text-primary truncate">Sistema de Entregas</span>}
+          <SidebarGroupLabel className="px-4 py-4 mb-2 flex items-center justify-center cursor-pointer" onClick={() => navigate("/")}>
+            {!isCollapsed ? (
+              <img src={logoDuarteFull} alt="Duarte Delivery" className="h-10 max-w-full object-contain" />
+            ) : (
+              <img src={logoDuarte} alt="Duarte Delivery" className="h-8 w-8 rounded-lg object-cover" />
+            )}
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>

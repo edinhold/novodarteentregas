@@ -7,6 +7,7 @@ import AppSidebar from "@/components/AppSidebar";
 import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/sidebar";
 import ThemeToggle from "@/components/ThemeToggle";
 import { ArrowLeft } from "lucide-react";
+import logoDuarte from "@/assets/logo-duarte.jpeg";
 
 const FinanceiroPage = () => {
   const navigate = useNavigate();
@@ -71,6 +72,12 @@ const FinanceiroPage = () => {
             <button onClick={() => navigate("/admin")} className="hover:bg-muted p-1 rounded-full transition-colors ml-1">
               <ArrowLeft className="w-5 h-5" />
             </button>
+            <img 
+              src={logoDuarte} 
+              alt="Duarte Delivery" 
+              className="h-8 w-8 rounded-lg object-cover cursor-pointer hover:opacity-90 transition-opacity" 
+              onClick={() => navigate("/admin")} 
+            />
             <h1 className="font-bold text-lg flex-1 truncate">Módulo Financeiro — Painel Admin</h1>
             <ThemeToggle />
           </header>
