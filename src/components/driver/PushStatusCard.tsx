@@ -1,7 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Bell, BellOff, Loader2, Smartphone } from "lucide-react";
+import { Bell, BellOff, Loader2, Smartphone, Trash2, CheckCircle2 } from "lucide-react";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
 import { toast } from "sonner";
 
@@ -16,7 +16,7 @@ const TIPS = [
 ];
 
 const PushStatusCard = ({ userId }: { userId?: string | null }) => {
-  const { state, loading, activate } = usePushNotifications(userId, "driver");
+  const { state, loading, activate, unregister } = usePushNotifications(userId, "driver");
 
   const granted = state?.permission === "granted" && !!state?.subscriptionId;
 
@@ -25,6 +25,15 @@ const PushStatusCard = ({ userId }: { userId?: string | null }) => {
     if (s?.permission === "granted" && s.subscriptionId) toast.success("Notificações ativadas neste aparelho!");
     else if (s?.permission === "denied") toast.error("Permissão negada. Libere as notificações nas configurações do aparelho.");
     else toast.info("Não foi possível concluir a inscrição. Tente novamente.");
+  };
+
+  const handleUnregister = async () => {
+    const ok = await unregister();
+    if (ok) {
+      toast.success("Aparelho desvinculado. Você não receberá mais notificações nele.");
+    } else {
+      toast.error("Não foi possível desvincular o aparelho.");
+    }
   };
 
   return (
@@ -42,15 +51,36 @@ const PushStatusCard = ({ userId }: { userId?: string | null }) => {
             <Smartphone className="w-3 h-3" />
             {state?.platform === "android_apk" ? "Aplicativo Android" : state?.platform === "ios" ? "iOS" : "Navegador / PWA"}
           </Badge>
+          {granted && (
+            <Badge variant="outline" className="border-green-500/40 text-green-600 bg-green-500/10 gap-1">
+              <CheckCircle2 className="w-3 h-3" />
+              Dispositivo exclusivo ativo
+            </Badge>
+          )}
           {state?.subscriptionId && (
             <Badge variant="outline">ID ***{state.subscriptionId.slice(-8)}</Badge>
           )}
         </div>
 
-        {!granted && (
+        <div className="text-xs text-muted-foreground bg-muted/40 p-2.5 rounded-lg border border-border/60">
+          <span className="font-semibold text-foreground">Regra de dispositivo único:</span> cada motorista possui apenas 1 aparelho ativo por vez. Se você entrar em outro celular ou navegador, este será desativado automaticamente.
+        </div>
+
+        {!granted ? (
           <Button onClick={handle} disabled={loading} className="w-full">
             {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Bell className="w-4 h-4 mr-2" />}
-            Ativar notificações
+            Ativar notificações neste aparelho
+          </Button>
+        ) : (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleUnregister}
+            disabled={loading}
+            className="w-full text-destructive hover:bg-destructive/10 border-destructive/30"
+          >
+            {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Trash2 className="w-4 h-4 mr-2" />}
+            Desvincular este aparelho
           </Button>
         )}
 

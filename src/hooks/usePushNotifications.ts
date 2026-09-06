@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { enablePush, initPush, syncCurrentSubscription, type PushState } from "@/lib/push";
+import { enablePush, initPush, syncCurrentSubscription, unregisterDevice, type PushState } from "@/lib/push";
 
 export function usePushNotifications(userId?: string | null, profileType = "driver") {
   const [state, setState] = useState<PushState | null>(null);
@@ -60,5 +60,19 @@ export function usePushNotifications(userId?: string | null, profileType = "driv
     }
   }, [userId, profileType]);
 
-  return { state, loading, activate, sync };
+  const unregister = useCallback(async () => {
+    if (!userId) return false;
+    setLoading(true);
+    try {
+      const ok = await unregisterDevice(userId, state?.subscriptionId);
+      if (ok) {
+        setState((prev) => (prev ? { ...prev, permission: "denied", subscriptionId: null } : null));
+      }
+      return ok;
+    } finally {
+      setLoading(false);
+    }
+  }, [userId, state?.subscriptionId]);
+
+  return { state, loading, activate, unregister, sync };
 }

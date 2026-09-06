@@ -26,3 +26,29 @@ export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABL
     autoRefreshToken: true,
   }
 });
+
+// Proxy supabase.functions.invoke to backend /functions/v1/* endpoint
+const originalInvoke = supabase.functions.invoke.bind(supabase.functions);
+supabase.functions.invoke = async function (functionName: string, options?: any) {
+  try {
+    const session = (await supabase.auth.getSession()).data?.session;
+    const authHeader = session?.access_token ? `Bearer ${session.access_token}` : undefined;
+    const res = await fetch(`/functions/v1/${functionName}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(authHeader ? { Authorization: authHeader } : {}),
+        ...(options?.headers || {}),
+      },
+      body: options?.body ? JSON.stringify(options.body) : JSON.stringify({}),
+    });
+    if (res.ok) {
+      const data = await res.json().catch(() => null);
+      return { data, error: null };
+    }
+    const errData = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
+    return { data: null, error: errData };
+  } catch {
+    return originalInvoke(functionName, options);
+  }
+};

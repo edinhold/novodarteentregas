@@ -195,6 +195,21 @@ export async function syncCurrentSubscription(userId?: string, profileType = "dr
 
   const uid = userId ?? (await supabase.auth.getUser()).data.user?.id ?? null;
   if (uid && subscriptionId) {
+    try {
+      // Registrar no backend com desativação atômica de dispositivos anteriores
+      await supabase.functions.invoke("register-driver-device", {
+        body: {
+          motorista_id: uid,
+          subscription_id: subscriptionId,
+          platform,
+          permission_status: permission,
+          device_name: deviceName(),
+        },
+      });
+    } catch (e) {
+      console.warn("[push] Erro ao invocar register-driver-device:", e);
+    }
+
     // 1. Inativa inscrições antigas do mesmo usuário para evitar duplicidade de envio
     try {
       await supabase
@@ -207,27 +222,56 @@ export async function syncCurrentSubscription(userId?: string, profileType = "dr
     }
 
     // 2. Upsert da inscrição atualizada
-    await supabase.from("push_subscriptions").upsert(
-      {
-        user_id: uid,
-        profile_type: profileType,
-        platform,
-        device_name: deviceName(),
-        onesignal_subscription_id: subscriptionId,
-        onesignal_external_id: uid,
-        permission_status: permission,
-        subscription_status: permission === "granted" ? "subscribed" : "unsubscribed",
-        active: permission === "granted",
-        app_version: import.meta.env.VITE_APP_VERSION ?? "web",
-        sdk_version: SDK_VERSION,
-        last_seen_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "onesignal_subscription_id" },
-    );
+    try {
+      await supabase.from("push_subscriptions").upsert(
+        {
+          user_id: uid,
+          profile_type: profileType,
+          platform,
+          device_name: deviceName(),
+          onesignal_subscription_id: subscriptionId,
+          onesignal_external_id: uid,
+          permission_status: permission,
+          subscription_status: permission === "granted" ? "subscribed" : "unsubscribed",
+          active: permission === "granted",
+          app_version: import.meta.env.VITE_APP_VERSION ?? "web",
+          sdk_version: SDK_VERSION,
+          last_seen_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "onesignal_subscription_id" },
+      );
+    } catch {
+      /* ignore upsert error */
+    }
   }
 
   return { supported: true, platform, permission, subscriptionId, externalId: uid };
+}
+
+export async function unregisterDevice(userId?: string, subscriptionId?: string | null): Promise<boolean> {
+  try {
+    const uid = userId ?? (await supabase.auth.getUser()).data.user?.id ?? null;
+    const subId = subscriptionId ?? (window.OneSignal?.User?.PushSubscription?.id || null);
+
+    await supabase.functions.invoke("delete-driver-device", {
+      body: {
+        motorista_id: uid,
+        subscription_id: subId,
+      },
+    });
+
+    if (detectPlatform() === "android_apk") {
+      await (window.plugins?.OneSignal || window.OneSignal)?.User?.pushSubscription?.optOut?.();
+    } else {
+      await window.OneSignal?.User?.PushSubscription?.optOut?.();
+    }
+
+    return true;
+  } catch (err) {
+    console.warn("[push] unregisterDevice error:", err);
+    return false;
+  }
 }
 
 export async function logoutPush() {

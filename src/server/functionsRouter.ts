@@ -29,11 +29,15 @@ function getSupabaseServer(authHeader?: string | null): SupabaseClient {
 }
 
 // Extract authenticated caller safely
-async function getCaller(supabase: SupabaseClient) {
+async function getCaller(supabase: SupabaseClient, authHeader?: string | null) {
   try {
-    const { data, error } = await supabase.auth.getUser();
-    if (error || !data?.user) return null;
-    return data.user;
+    const token = authHeader?.replace(/^Bearer\s+/i, "")?.trim();
+    if (token) {
+      const { data, error } = await supabase.auth.getUser(token);
+      if (!error && data?.user) return data.user;
+    }
+    const { data } = await supabase.auth.getUser();
+    return data?.user || null;
   } catch {
     return null;
   }
@@ -120,7 +124,7 @@ export async function handleEdgeFunction(
 
   // 2. push-diagnostics
   if (functionName === "push-diagnostics") {
-    const caller = await getCaller(supabase);
+    const caller = await getCaller(supabase, authHeader);
     if (!caller) {
       return {
         status: 200,
@@ -246,7 +250,7 @@ export async function handleEdgeFunction(
 
   // 3. push-test
   if (functionName === "push-test") {
-    const caller = await getCaller(supabase);
+    const caller = await getCaller(supabase, authHeader);
     if (!caller) {
       return {
         status: 200,
@@ -413,16 +417,412 @@ export async function handleEdgeFunction(
     }
   }
 
-  // 4. notify-available-drivers
-  if (functionName === "notify-available-drivers") {
-    const caller = await getCaller(supabase);
-    if (!caller) {
+  // 4. register-driver-device (Dispositivo exclusivo por motorista)
+  if (functionName === "register-driver-device") {
+    const caller = await getCaller(supabase, authHeader);
+    const motoristaId = reqBody?.motorista_id || caller?.id;
+    const subscriptionId = reqBody?.subscription_id || reqBody?.onesignal_subscription_id;
+    const platform = reqBody?.platform || reqBody?.plataforma || "web_pwa";
+    const permissionStatus = reqBody?.permission_status || "granted";
+    const deviceName = reqBody?.device_name || "Dispositivo Motorista";
+    const deviceModel = reqBody?.device_model || null;
+
+    if (!motoristaId || !subscriptionId) {
+      console.warn("[DeviceRegistration:error]", { motoristaId, subscriptionId, reason: "MISSING_PARAMS" });
       return {
         status: 200,
-        body: { success: false, code: "NAO_AUTENTICADO", message: "Sessão expirada.", request_id: requestId },
+        body: {
+          success: false,
+          code: "PARAMETROS_INVALIDOS",
+          message: "Informe motorista_id e subscription_id.",
+          request_id: requestId,
+        },
       };
     }
 
+    console.log("[DeviceRegistration:start]", {
+      motorista_id: motoristaId,
+      subscription_id: subscriptionId,
+      plataforma: platform,
+    });
+
+    try {
+      // 1. Identificar dispositivos ativos anteriores para desativação automática
+      const { data: previousDevices } = await supabase
+        .from("driver_push_devices")
+        .select("subscription_id")
+        .eq("driver_id", motoristaId)
+        .eq("active", true)
+        .neq("subscription_id", subscriptionId);
+
+      const prevIds = (previousDevices ?? []).map((p) => p.subscription_id).filter(Boolean);
+      if (prevIds.length > 0) {
+        console.log("[DeviceRegistration:replaced_previous]", {
+          motorista_id: motoristaId,
+          previous_subscription_ids: prevIds,
+        });
+      }
+
+      // 2. Desativar quaisquer outros dispositivos do motorista (regra: somente 1 ativo)
+      await supabase
+        .from("driver_push_devices")
+        .update({
+          active: false,
+          subscription_status: "inactive",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("driver_id", motoristaId)
+        .neq("subscription_id", subscriptionId);
+
+      await supabase
+        .from("push_subscriptions")
+        .update({
+          active: false,
+          subscription_status: "unsubscribed",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("user_id", motoristaId)
+        .neq("onesignal_subscription_id", subscriptionId);
+
+      // 3. Upsert na tabela driver_push_devices
+      const { data: existingDev } = await supabase
+        .from("driver_push_devices")
+        .select("id")
+        .eq("subscription_id", subscriptionId)
+        .maybeSingle();
+
+      if (existingDev) {
+        await supabase
+          .from("driver_push_devices")
+          .update({
+            driver_id: motoristaId,
+            external_id: motoristaId,
+            platform,
+            active: true,
+            subscription_status: "active",
+            permission_status: permissionStatus,
+            last_seen_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", existingDev.id);
+      } else {
+        await supabase
+          .from("driver_push_devices")
+          .insert({
+            driver_id: motoristaId,
+            external_id: motoristaId,
+            subscription_id: subscriptionId,
+            platform,
+            active: true,
+            subscription_status: "active",
+            permission_status: permissionStatus,
+            last_seen_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          });
+      }
+
+      // 4. Upsert na tabela push_subscriptions
+      await supabase
+        .from("push_subscriptions")
+        .upsert(
+          {
+            user_id: motoristaId,
+            profile_type: "motorista",
+            platform,
+            device_name: deviceName,
+            device_model: deviceModel,
+            onesignal_subscription_id: subscriptionId,
+            onesignal_external_id: motoristaId,
+            permission_status: permissionStatus,
+            subscription_status: "subscribed",
+            active: true,
+            last_seen_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "onesignal_subscription_id" }
+        );
+
+      console.log("[DeviceRegistration:success]", {
+        motorista_id: motoristaId,
+        subscription_id: subscriptionId,
+        status: "active",
+        platform,
+      });
+
+      return {
+        status: 200,
+        body: {
+          success: true,
+          message: "Dispositivo registrado e ativado como exclusivo com sucesso.",
+          motorista_id: motoristaId,
+          subscription_id: subscriptionId,
+          status: "active",
+          request_id: requestId,
+        },
+      };
+    } catch (err: any) {
+      console.warn("[DeviceRegistration:error]", { motorista_id: motoristaId, error: err?.message });
+      return {
+        status: 200,
+        body: {
+          success: false,
+          code: "ERRO_REGISTRO_DISPOSITIVO",
+          message: err?.message || "Erro ao registrar dispositivo.",
+          request_id: requestId,
+        },
+      };
+    }
+  }
+
+  // 5. delete-driver-device (Exclusão manual pelo motorista ou admin)
+  if (functionName === "delete-driver-device") {
+    const caller = await getCaller(supabase, authHeader);
+    const motoristaId = reqBody?.motorista_id || caller?.id;
+    const subscriptionId = reqBody?.subscription_id || reqBody?.onesignal_subscription_id;
+
+    if (!motoristaId && !subscriptionId) {
+      return {
+        status: 200,
+        body: {
+          success: false,
+          code: "PARAMETROS_INVALIDOS",
+          message: "Informe motorista_id ou subscription_id.",
+          request_id: requestId,
+        },
+      };
+    }
+
+    try {
+      if (subscriptionId) {
+        await supabase
+          .from("driver_push_devices")
+          .update({
+            active: false,
+            subscription_status: "deleted",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("subscription_id", subscriptionId);
+
+        await supabase
+          .from("push_subscriptions")
+          .update({
+            active: false,
+            subscription_status: "unsubscribed",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("onesignal_subscription_id", subscriptionId);
+      } else if (motoristaId) {
+        await supabase
+          .from("driver_push_devices")
+          .update({
+            active: false,
+            subscription_status: "deleted",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("driver_id", motoristaId);
+
+        await supabase
+          .from("push_subscriptions")
+          .update({
+            active: false,
+            subscription_status: "unsubscribed",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("user_id", motoristaId);
+      }
+
+      console.log("[DeviceDeletion:success]", {
+        motorista_id: motoristaId,
+        subscription_id: subscriptionId,
+        deleted_by: caller?.id || motoristaId,
+      });
+
+      return {
+        status: 200,
+        body: {
+          success: true,
+          message: "Dispositivo desvinculado com sucesso.",
+          request_id: requestId,
+        },
+      };
+    } catch (err: any) {
+      return {
+        status: 200,
+        body: {
+          success: false,
+          code: "ERRO_DESVINCULAR",
+          message: err?.message || "Erro ao desvincular dispositivo.",
+          request_id: requestId,
+        },
+      };
+    }
+  }
+
+  // 6. accept-delivery (Aceite exclusivo atômico e protegido contra concorrência)
+  if (functionName === "accept-delivery") {
+    const caller = await getCaller(supabase, authHeader);
+    const motoristaId = reqBody?.motorista_id || caller?.id;
+    const pedidoId = reqBody?.pedido_id || reqBody?.request_id;
+
+    if (!motoristaId || !pedidoId) {
+      return {
+        status: 200,
+        body: {
+          success: false,
+          code: "PARAMETROS_INVALIDOS",
+          message: "Informe motorista_id e pedido_id.",
+          request_id: requestId,
+        },
+      };
+    }
+
+    console.log("[DeliveryAcceptance:attempt]", {
+      motorista_id: motoristaId,
+      pedido_id: pedidoId,
+      timestamp: new Date().toISOString(),
+    });
+
+    try {
+      // 1. Verificar se pedido existe e se ainda está pendente
+      const { data: currentOrder } = await supabase
+        .from("delivery_requests")
+        .select("id, status, driver_id, driver_fee")
+        .eq("id", pedidoId)
+        .maybeSingle();
+
+      if (!currentOrder) {
+        return {
+          status: 200,
+          body: {
+            success: false,
+            accepted: false,
+            code: "PEDIDO_NAO_ENCONTRADO",
+            message: "Pedido de entrega não encontrado.",
+            request_id: requestId,
+          },
+        };
+      }
+
+      if (currentOrder.status !== "pending" || currentOrder.driver_id) {
+        console.log("[DeliveryAcceptance:conflict]", {
+          motorista_id: motoristaId,
+          pedido_id: pedidoId,
+          reason: "ALREADY_ACCEPTED_OR_NOT_PENDING",
+          current_driver_id: currentOrder.driver_id,
+          status: currentOrder.status,
+        });
+
+        return {
+          status: 200,
+          body: {
+            success: false,
+            accepted: false,
+            code: "JA_ACEITO",
+            message: "Esta entrega já foi aceita por outro motorista.",
+            request_id: requestId,
+          },
+        };
+      }
+
+      // 2. Executar aceite atômico via RPC accept_delivery_request (proteção concorrencial FOR UPDATE)
+      const { data: rpcData, error: rpcError } = await supabase.rpc("accept_delivery_request", {
+        p_motorista_id: motoristaId,
+        p_pedido_id: pedidoId,
+      });
+
+      if (rpcError) {
+        const rawMsg = rpcError.message || "";
+        const isConflict = /já foi assumida|já foi aceita|direcionada|ALREADY_ACCEPTED/i.test(rawMsg);
+        if (isConflict) {
+          console.log("[DeliveryAcceptance:conflict]", {
+            motorista_id: motoristaId,
+            pedido_id: pedidoId,
+            reason: "RPC_CONFLICT",
+            error: rawMsg,
+          });
+          return {
+            status: 200,
+            body: {
+              success: false,
+              accepted: false,
+              code: "JA_ACEITO",
+              message: "Esta entrega já foi aceita por outro motorista.",
+              request_id: requestId,
+            },
+          };
+        }
+        throw rpcError;
+      }
+
+      if (rpcData && (rpcData as any).accepted === false) {
+        console.log("[DeliveryAcceptance:conflict]", {
+          motorista_id: motoristaId,
+          pedido_id: pedidoId,
+          reason: (rpcData as any).reason || "ALREADY_ACCEPTED",
+        });
+        return {
+          status: 200,
+          body: {
+            success: false,
+            accepted: false,
+            code: "JA_ACEITO",
+            message: (rpcData as any).message || "Esta entrega já foi aceita por outro motorista.",
+            request_id: requestId,
+          },
+        };
+      }
+
+      const nowIso = new Date().toISOString();
+
+      // Garantir que accepted_at está preenchido
+      await supabase
+        .from("delivery_requests")
+        .update({ accepted_at: nowIso })
+        .eq("id", pedidoId)
+        .is("accepted_at", null);
+
+      // 3. Cancelar notificações pendentes deste pedido
+      await supabase
+        .from("notification_jobs")
+        .update({ status: "cancelled", last_error: "Chamado aceito pelo motorista." })
+        .eq("pedido_id", pedidoId);
+
+      console.log("[DeliveryAcceptance:success]", {
+        motorista_id: motoristaId,
+        pedido_id: pedidoId,
+        status_before: "pending",
+        status_after: "accepted",
+        accepted_at: nowIso,
+      });
+
+      return {
+        status: 200,
+        body: {
+          success: true,
+          accepted: true,
+          message: "Entrega aceita com sucesso!",
+          driver_fee: (rpcData as any)?.driver_fee || currentOrder.driver_fee,
+          accepted_at: nowIso,
+          request_id: requestId,
+        },
+      };
+    } catch (err: any) {
+      console.warn("[DeliveryAcceptance:error]", { motorista_id: motoristaId, pedido_id: pedidoId, error: err?.message });
+      return {
+        status: 200,
+        body: {
+          success: false,
+          accepted: false,
+          code: "ERRO_ACEITE",
+          message: err?.message || "Erro ao processar aceite da entrega.",
+          request_id: requestId,
+        },
+      };
+    }
+  }
+
+  // 7. notify-available-drivers
+  if (functionName === "notify-available-drivers") {
     const pedidoId = reqBody?.pedido_id;
     if (!pedidoId) {
       return {
@@ -430,6 +830,8 @@ export async function handleEdgeFunction(
         body: { success: false, code: "PARAMETRO_INVALIDO", message: "Informe pedido_id.", request_id: requestId },
       };
     }
+
+    console.log("[DeliveryNotification:start]", { pedidoId, requestId });
 
     // Check if delivery request is still pending and unassigned
     const { data: order } = await supabase
@@ -439,12 +841,18 @@ export async function handleEdgeFunction(
       .maybeSingle();
 
     if (!order || order.status !== "pending" || order.driver_id) {
+      console.log("[DeliveryNotification:skip]", {
+        pedidoId,
+        status: order?.status,
+        driver_id: order?.driver_id,
+        reason: "CHAMADO_JA_ACEITO_OU_INDISPONIVEL",
+      });
       return {
         status: 200,
         body: {
           success: false,
           code: "PEDIDO_INDISPONIVEL",
-          message: "O pedido já foi aceito ou cancelado.",
+          message: "O chamado já foi aceito ou não está mais disponível.",
           request_id: requestId,
         },
       };
@@ -459,6 +867,7 @@ export async function handleEdgeFunction(
       .maybeSingle();
 
     if (existingJob && existingJob.status === "sent") {
+      console.log("[DeliveryNotification:duplicate_prevented]", { pedidoId, eventKey });
       return {
         status: 200,
         body: {
@@ -476,15 +885,12 @@ export async function handleEdgeFunction(
     // - approval_status = 'approved'
     // - is_online = true
     // - not suspended (suspended_until is null or < now)
-    // - last_seen_at within 15 mins
-    const cutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString();
     const { data: drivers } = await supabase
       .from("drivers")
       .select("id, user_id, full_name, suspended_until")
       .eq("is_active", true)
       .eq("approval_status", "approved")
-      .eq("is_online", true)
-      .gte("last_seen_at", cutoff);
+      .eq("is_online", true);
 
     const nowTime = new Date().getTime();
     const unsuspendedDrivers = (drivers ?? []).filter(
@@ -492,6 +898,7 @@ export async function handleEdgeFunction(
     );
 
     if (unsuspendedDrivers.length === 0) {
+      console.log("[DeliveryNotification:skip]", { pedidoId, reason: "SEM_MOTORISTAS_ONLINE" });
       return {
         status: 200,
         body: {
@@ -516,6 +923,7 @@ export async function handleEdgeFunction(
     const freeDrivers = unsuspendedDrivers.filter((d) => !busyDriverIds.has(d.id));
 
     if (freeDrivers.length === 0) {
+      console.log("[DeliveryNotification:skip]", { pedidoId, reason: "MOTORISTAS_OCUPADOS" });
       return {
         status: 200,
         body: {
@@ -527,19 +935,47 @@ export async function handleEdgeFunction(
       };
     }
 
-    // Fetch active push subscriptions for free drivers
+    // Fetch active push subscriptions for free drivers from BOTH driver_push_devices and push_subscriptions
     const freeUserIds = freeDrivers.map((d) => d.user_id);
+
+    const { data: driverDevices } = await supabase
+      .from("driver_push_devices")
+      .select("driver_id, subscription_id, platform, active, subscription_status, updated_at")
+      .in("driver_id", freeUserIds)
+      .eq("active", true)
+      .not("subscription_id", "is", null);
+
     const { data: subs } = await supabase
       .from("push_subscriptions")
-      .select("onesignal_subscription_id, platform, user_id")
+      .select("onesignal_subscription_id, platform, user_id, active, subscription_status, updated_at")
       .in("user_id", freeUserIds)
       .eq("active", true)
-      .eq("subscription_status", "subscribed")
       .not("onesignal_subscription_id", "is", null);
 
-    const subIds = Array.from(new Set((subs ?? []).map((s) => s.onesignal_subscription_id))).filter(Boolean);
+    // DEDUPLICAÇÃO E GARANTIA DE 1 DISPOSITIVO ATIVO POR MOTORISTA
+    // Dispositivos antigos ou inativos não podem receber notificações
+    const driverActiveSubMap = new Map<string, string>(); // motorista_id -> subscription_id
+
+    // Inserir primeiro os da tabela especializada driver_push_devices
+    for (const d of driverDevices ?? []) {
+      if (d.active && d.subscription_status === "active" && d.subscription_id) {
+        driverActiveSubMap.set(d.driver_id, d.subscription_id);
+      }
+    }
+
+    // Complementar com push_subscriptions apenas se o motorista ainda não tiver dispositivo atribuído
+    for (const s of subs ?? []) {
+      if (s.active && s.subscription_status !== "unsubscribed" && s.subscription_status !== "deleted" && s.onesignal_subscription_id) {
+        if (!driverActiveSubMap.has(s.user_id)) {
+          driverActiveSubMap.set(s.user_id, s.onesignal_subscription_id);
+        }
+      }
+    }
+
+    const subIds = Array.from(new Set(Array.from(driverActiveSubMap.values()))).filter(Boolean);
 
     if (subIds.length === 0) {
+      console.log("[DeliveryNotification:skip]", { pedidoId, reason: "SEM_DISPOSITIVOS_ATIVOS" });
       return {
         status: 200,
         body: {
@@ -556,6 +992,7 @@ export async function handleEdgeFunction(
     const { appId, apiKey } = getOneSignalConfig();
 
     if (!appId || !apiKey) {
+      console.warn("[DeliveryNotification:skip]", { pedidoId, reason: "SECRETS_AUSENTES" });
       return {
         status: 200,
         body: {
@@ -569,14 +1006,22 @@ export async function handleEdgeFunction(
       };
     }
 
-    // Send push
+    // Send push com dados completos e rota
     const pushPayload = {
       app_id: appId,
       include_subscription_ids: subIds,
       target_channel: "push",
       headings: { pt: "🚚 Nova entrega disponível", en: "New delivery available" },
-      contents: { pt: "Uma nova entrega está aguardando você. Toque para aceitar!", en: "A new delivery is waiting for you. Tap to accept!" },
-      data: { tipo: "nova_entrega", pedido_id: pedidoId, rota: `/entregador?pedido=${pedidoId}`, evento_id: eventKey },
+      contents: {
+        pt: "Um novo chamado de entrega foi criado. Abra o aplicativo para visualizar os detalhes.",
+        en: "A new delivery request was created. Open the app to view details.",
+      },
+      data: {
+        tipo: "nova_entrega",
+        pedido_id: pedidoId,
+        rota: `/entregador?pedido=${pedidoId}`,
+        evento_id: eventKey,
+      },
       url: `/entregador?pedido=${pedidoId}`,
       android_channel_id: ANDROID_CHANNEL_ID,
       priority: 10,
@@ -594,6 +1039,15 @@ export async function handleEdgeFunction(
 
     const osData = await osRes.json().catch(() => ({}));
     const ok = osRes.ok && !!osData?.id && (!osData.errors || osData.errors.length === 0);
+
+    // Structured Log
+    console.log("[DeliveryNotification:dispatched]", {
+      pedidoId,
+      eligibleDriversCount: freeDrivers.length,
+      activeDevicesCount: subIds.length,
+      notifiedSubscriptionIds: subIds,
+      onesignalNotificationId: osData?.id || null,
+    });
 
     // Record job
     await supabase.from("notification_jobs").upsert(

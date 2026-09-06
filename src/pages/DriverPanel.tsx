@@ -12,7 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { ArrowLeft, MapPin, Phone, MessageSquare, Send, Check, DollarSign, Key, Wallet, XCircle, Home, History, Settings, Map as MapIcon, Signal, SignalZero, Calendar, Radar, PanelLeft } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { isToday, isThisWeek, isThisMonth } from "date-fns";
 import { playNotificationSound, playUrgentNotification, playStandbyAlert, startStandbyMode, stopStandbyMode, resumeAudioContext, setNotificationVolume, setStandbyInterval, setStandbyGate } from "@/lib/notificationSound";
@@ -41,9 +41,14 @@ import {
 const DriverPanel = () => {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const pedidoParam = searchParams.get("pedido") || searchParams.get("pedido_id");
   const queryClient = useQueryClient();
   const [chatMessage, setChatMessage] = useState("");
   const [selectedRequest, setSelectedRequest] = useState<any>(null);
+  const [selectedNotificationOrder, setSelectedNotificationOrder] = useState<any | null>(null);
+  const [orderUnavailableMsg, setOrderUnavailableMsg] = useState<string | null>(null);
+  const [acceptingId, setAcceptingId] = useState<string | null>(null);
   const [pixKey, setPixKey] = useState("");
   const [pixKeyType, setPixKeyType] = useState("cpf");
   const [savingPix, setSavingPix] = useState(false);
@@ -439,25 +444,106 @@ const DriverPanel = () => {
     };
   }, [user?.id]);
 
+  // Verificar se o app foi aberto a partir de uma notificação com chamado específico (?pedido=ID)
+  useEffect(() => {
+    if (!pedidoParam || !user?.id) return;
+    let isCancelled = false;
+
+    const checkOrder = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("delivery_requests")
+          .select("*, restaurants(name, address, phone)")
+          .eq("id", pedidoParam)
+          .maybeSingle();
+
+        if (isCancelled) return;
+
+        if (!data || data.status !== "pending" || (data.driver_id && data.driver_id !== user?.id)) {
+          setOrderUnavailableMsg("Este chamado não está mais disponível (já foi aceito por outro motorista).");
+          setSelectedNotificationOrder(null);
+          toast.error("Este chamado não está mais disponível (já foi aceito por outro motorista).");
+          queryClient.invalidateQueries({ queryKey: ["driver-pending-requests"] });
+        } else {
+          setOrderUnavailableMsg(null);
+          setSelectedNotificationOrder(data);
+        }
+      } catch (err) {
+        console.warn("[DriverPanel] Erro ao consultar pedido da notificação:", err);
+      }
+    };
+
+    checkOrder();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [pedidoParam, user?.id, queryClient]);
+
   const acceptRequest = async (requestId: string) => {
+    if (acceptingId) return;
+    setAcceptingId(requestId);
     try {
       console.log("[Delivery] Motorista tentando aceitar", requestId);
-      const { data, error } = await (supabase as any).rpc("accept_delivery_request", {
-        p_request_id: requestId,
+      // Chamada prioritária ao backend com controle de concorrência e auditoria
+      const { data: edgeData, error: edgeError } = await supabase.functions.invoke("accept-delivery", {
+        body: { pedido_id: requestId, motorista_id: user?.id },
       });
-      if (error) throw error;
-      const fee = Number((data as any)?.driver_fee || 0);
-      const netFee = getNetFee(fee);
-      console.log("[Delivery] Motorista aceitou", requestId, data);
-      toast.success(netFee > 0 ? `Entrega aceita com sucesso! Ganho líquido: R$ ${netFee.toFixed(2)}` : "Entrega aceita com sucesso!");
+
+      if (edgeError || (edgeData && !edgeData.success)) {
+        const isConflict =
+          edgeData?.code === "JA_ACEITO" ||
+          /já foi assumida|já foi aceita|direcionada|ALREADY_ACCEPTED/i.test(
+            edgeData?.message || edgeError?.message || ""
+          );
+
+        if (isConflict) {
+          toast.error("Este chamado não está mais disponível (já foi aceito por outro motorista).");
+          setOrderUnavailableMsg("Este chamado não está mais disponível (já foi aceito por outro motorista).");
+          setSelectedNotificationOrder(null);
+          queryClient.invalidateQueries({ queryKey: ["driver-pending-requests"] });
+          return;
+        }
+
+        // Fallback para chamada RPC direta caso a Edge Function não retorne sucesso
+        const { data: rpcData, error: rpcError } = await (supabase as any).rpc("accept_delivery_request", {
+          p_request_id: requestId,
+        });
+
+        if (rpcError) {
+          const raw = rpcError?.message || "";
+          const conflict = /já foi assumida|já foi aceita|direcionada/i.test(raw);
+          toast.error(conflict ? "Este chamado não está mais disponível (já foi aceito por outro motorista)." : raw);
+          setOrderUnavailableMsg("Este chamado não está mais disponível (já foi aceito por outro motorista).");
+          setSelectedNotificationOrder(null);
+          queryClient.invalidateQueries({ queryKey: ["driver-pending-requests"] });
+          return;
+        }
+
+        const fee = Number((rpcData as any)?.driver_fee || 0);
+        const netFee = getNetFee(fee);
+        toast.success(netFee > 0 ? `Entrega aceita com sucesso! Ganho líquido: R$ ${netFee.toFixed(2)}` : "Entrega aceita com sucesso!");
+      } else {
+        const fee = Number(edgeData?.driver_fee || 0);
+        const netFee = getNetFee(fee);
+        toast.success(netFee > 0 ? `Entrega aceita com sucesso! Ganho líquido: R$ ${netFee.toFixed(2)}` : "Entrega aceita com sucesso!");
+      }
+
       void cancelDeliveryNotification(requestId);
+      setSelectedNotificationOrder(null);
+      setOrderUnavailableMsg(null);
+      if (pedidoParam === requestId) {
+        setSearchParams({}, { replace: true });
+      }
       queryClient.invalidateQueries({ queryKey: ["driver-pending-requests"] });
       queryClient.invalidateQueries({ queryKey: ["driver-my-requests"] });
     } catch (err: any) {
       const raw = err?.message || "Erro ao aceitar";
-      const conflict = /já foi assumida|já foi aceita|direcionada/i.test(raw);
-      toast.error(conflict ? "Esta entrega já foi aceita por outro motorista." : raw);
+      const conflict = /já foi assumida|já foi aceita|direcionada|JA_ACEITO/i.test(raw);
+      toast.error(conflict ? "Este chamado não está mais disponível (já foi aceito por outro motorista)." : raw);
       queryClient.invalidateQueries({ queryKey: ["driver-pending-requests"] });
+    } finally {
+      setAcceptingId(null);
     }
   };
 
@@ -819,8 +905,18 @@ const DriverPanel = () => {
                                 }}>
                                   Recusar
                                 </Button>
-                                <Button size="sm" onClick={() => acceptRequest(r.id)} disabled={!!activeRequest}>
-                                  <Check className="w-4 h-4 mr-1" /> Aceitar
+                                <Button
+                                  size="sm"
+                                  onClick={() => acceptRequest(r.id)}
+                                  disabled={!!activeRequest || !!acceptingId}
+                                >
+                                  {acceptingId === r.id ? (
+                                    "Aceitando..."
+                                  ) : (
+                                    <>
+                                      <Check className="w-4 h-4 mr-1" /> Aceitar
+                                    </>
+                                  )}
                                 </Button>
                               </div>
                             </div>
@@ -1076,6 +1172,112 @@ const DriverPanel = () => {
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               {cancelling ? "Cancelando..." : "Sim, cancelar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Modal quando o chamado da notificação já foi assumido por outro motorista */}
+      <AlertDialog
+        open={!!orderUnavailableMsg}
+        onOpenChange={(open) => {
+          if (!open) {
+            setOrderUnavailableMsg(null);
+            if (pedidoParam) setSearchParams({}, { replace: true });
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-destructive flex items-center gap-2">
+              <XCircle className="w-5 h-5 text-destructive" /> Chamado Indisponível
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-sm font-medium text-foreground pt-2">
+              {orderUnavailableMsg}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction
+              onClick={() => {
+                setOrderUnavailableMsg(null);
+                if (pedidoParam) setSearchParams({}, { replace: true });
+              }}
+            >
+              Entendido
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Modal com detalhes do chamado aberto via Notificação Push */}
+      <AlertDialog
+        open={!!selectedNotificationOrder}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedNotificationOrder(null);
+            if (pedidoParam) setSearchParams({}, { replace: true });
+          }
+        }}
+      >
+        <AlertDialogContent className="sm:max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center justify-between text-base">
+              <span>🚚 Nova Entrega Disponível</span>
+              {selectedNotificationOrder && (
+                <Badge className="bg-green-600 text-white font-bold">
+                  R$ {getNetFee(Number(selectedNotificationOrder.driver_fee || deliveryConfig?.base_fee || 5)).toFixed(2)}
+                </Badge>
+              )}
+            </AlertDialogTitle>
+            {selectedNotificationOrder && (
+              <AlertDialogDescription asChild>
+                <div className="space-y-3 pt-3 text-left text-sm text-foreground">
+                  <div className="bg-muted/50 p-3 rounded-lg space-y-2 border">
+                    <div>
+                      <span className="text-xs text-muted-foreground block">Estabelecimento:</span>
+                      <strong className="text-base">{selectedNotificationOrder.restaurants?.name || "Loja"}</strong>
+                    </div>
+                    <div>
+                      <span className="text-xs text-muted-foreground block">📍 Retirada:</span>
+                      <span className="text-xs">{selectedNotificationOrder.pickup_address}</span>
+                    </div>
+                    <div>
+                      <span className="text-xs text-muted-foreground block">🏠 Entrega:</span>
+                      <span className="text-xs">{selectedNotificationOrder.delivery_address}</span>
+                    </div>
+                    {selectedNotificationOrder.notes && (
+                      <div className="text-xs bg-background/80 p-2 rounded border">
+                        📝 {selectedNotificationOrder.notes}
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    O primeiro motorista a clicar em Aceitar assume a corrida com exclusividade.
+                  </p>
+                </div>
+              </AlertDialogDescription>
+            )}
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2 sm:gap-0">
+            <AlertDialogCancel
+              disabled={!!acceptingId}
+              onClick={() => {
+                setSelectedNotificationOrder(null);
+                if (pedidoParam) setSearchParams({}, { replace: true });
+              }}
+            >
+              Fechar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={!!activeRequest || !!acceptingId}
+              onClick={() => {
+                if (selectedNotificationOrder) {
+                  acceptRequest(selectedNotificationOrder.id);
+                }
+              }}
+              className="bg-primary text-primary-foreground font-semibold"
+            >
+              {acceptingId === selectedNotificationOrder?.id ? "Aceitando..." : "Aceitar Chamado Agora"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
