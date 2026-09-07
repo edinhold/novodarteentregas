@@ -123,6 +123,8 @@ export const EditFinancialValueModal: React.FC<EditFinancialValueModalProps> = (
       }
 
       // 1. UPDATE TARGET FINANCIAL TABLE IN DATABASE
+      const targetStoreUserId = item.storeUserId || item.rawObject?.user_id || item.rawObject?.used_by || item.rawObject?.assigned_to_user_id;
+
       if (item.type === "Recarga") {
         // Update credit code value
         const { error: codeErr } = await supabase
@@ -134,13 +136,12 @@ export const EditFinancialValueModal: React.FC<EditFinancialValueModalProps> = (
 
         // If code is used and assigned to a store, adjust store_credits balance by difference
         const codeObj = item.rawObject;
-        const targetUserId = item.storeUserId || codeObj?.used_by || codeObj?.assigned_to_user_id;
 
-        if (targetUserId && (codeObj?.is_used || codeObj?.used_by)) {
+        if (targetStoreUserId && (codeObj?.is_used || codeObj?.used_by)) {
           const { data: storeCredit } = await supabase
             .from("store_credits")
             .select("id, balance")
-            .eq("user_id", targetUserId)
+            .eq("user_id", targetStoreUserId)
             .maybeSingle();
 
           if (storeCredit) {
@@ -150,24 +151,31 @@ export const EditFinancialValueModal: React.FC<EditFinancialValueModalProps> = (
               .from("store_credits")
               .update({ balance: updatedBal, updated_at: new Date().toISOString() })
               .eq("id", storeCredit.id);
+          } else {
+            await supabase
+              .from("store_credits")
+              .insert({ user_id: targetStoreUserId, balance: Math.max(0, parsedNewValue), updated_at: new Date().toISOString() });
           }
         }
       } else if (item.type === "Recarga Direta") {
         // Update store_credits balance for direct recharge
-        if (item.storeUserId) {
-          const { data: storeCredit } = await supabase
+        if (targetStoreUserId) {
+          const { data: existingSC } = await supabase
             .from("store_credits")
             .select("id, balance")
-            .eq("user_id", item.storeUserId)
+            .eq("user_id", targetStoreUserId)
             .maybeSingle();
 
-          if (storeCredit) {
-            const currentBal = Number(storeCredit.balance) || 0;
-            const updatedBal = Math.max(0, currentBal + adjustmentDiff);
+          if (existingSC) {
             const { error: scErr } = await supabase
               .from("store_credits")
-              .update({ balance: updatedBal, updated_at: new Date().toISOString() })
-              .eq("id", storeCredit.id);
+              .update({ balance: parsedNewValue, updated_at: new Date().toISOString() })
+              .eq("id", existingSC.id);
+            if (scErr) throw scErr;
+          } else {
+            const { error: scErr } = await supabase
+              .from("store_credits")
+              .insert({ user_id: targetStoreUserId, balance: parsedNewValue, updated_at: new Date().toISOString() });
             if (scErr) throw scErr;
           }
         } else {
@@ -229,7 +237,7 @@ export const EditFinancialValueModal: React.FC<EditFinancialValueModalProps> = (
           admin_user_id: user.id,
           admin_email: user.email || "admin@duarte.com",
           transaction_id: item.id,
-          store_id: item.storeUserId || null,
+          store_id: targetStoreUserId || null,
           store_name: item.storeName || null,
           driver_id: item.driverId || item.driverUserId || null,
           driver_name: item.driverName || null,
@@ -253,7 +261,17 @@ export const EditFinancialValueModal: React.FC<EditFinancialValueModalProps> = (
         queryClient.invalidateQueries({ queryKey: ["financial-audit-logs"] }),
         queryClient.invalidateQueries({ queryKey: ["financial-store-credits"] }),
         queryClient.invalidateQueries({ queryKey: ["financial-credit-codes"] }),
+        queryClient.invalidateQueries({ queryKey: ["financial-store-owners"] }),
+        queryClient.invalidateQueries({ queryKey: ["financial-restaurants"] }),
         queryClient.invalidateQueries({ queryKey: ["admin-financial-data"] }),
+        queryClient.invalidateQueries({ queryKey: ["admin-stores-credits-list"] }),
+        queryClient.invalidateQueries({ queryKey: ["admin-store-owners"] }),
+        queryClient.invalidateQueries({ queryKey: ["admin-restaurants"] }),
+        queryClient.invalidateQueries({ queryKey: ["my-credits"] }),
+        queryClient.invalidateQueries({ queryKey: ["my-restaurant"] }),
+        queryClient.invalidateQueries({ queryKey: ["store-credits"] }),
+        queryClient.invalidateQueries({ queryKey: ["credit-codes"] }),
+        queryClient.invalidateQueries({ queryKey: ["restaurants"] }),
         queryClient.invalidateQueries({ queryKey: ["driver-pending-requests"] }),
         queryClient.invalidateQueries({ queryKey: ["driver-my-requests"] }),
       ]);

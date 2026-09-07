@@ -321,6 +321,12 @@ export const FinancialTab = () => {
     queryClient.invalidateQueries({ queryKey: ["financial-withdrawals"] });
     queryClient.invalidateQueries({ queryKey: ["financial-drivers"] });
     queryClient.invalidateQueries({ queryKey: ["financial-store-owners"] });
+    queryClient.invalidateQueries({ queryKey: ["admin-stores-credits-list"] });
+    queryClient.invalidateQueries({ queryKey: ["admin-store-owners"] });
+    queryClient.invalidateQueries({ queryKey: ["admin-restaurants"] });
+    queryClient.invalidateQueries({ queryKey: ["my-credits"] });
+    queryClient.invalidateQueries({ queryKey: ["my-restaurant"] });
+    queryClient.invalidateQueries({ queryKey: ["restaurants"] });
     toast.success("Dados financeiros atualizados com sucesso!");
   };
 
@@ -641,6 +647,7 @@ export const FinancialTab = () => {
         list.push({
           id: sc.id,
           type: "Recarga Direta",
+          store_id: sc.user_id,
           owner_name: owner?.full_name || owner?.email || "Lojista Desconhecido",
           store_name: rest?.name || "Loja Cadastrada",
           value: val,

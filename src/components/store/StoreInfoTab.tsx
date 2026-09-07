@@ -276,7 +276,7 @@ const StoreInfoTab = ({ restaurant, userId }: StoreInfoTabProps) => {
       }
 
       if (restaurant) {
-        const { error } = await supabase.from("restaurants").update(payload).eq("id", restaurant.id).eq("owner_id", userId);
+        const { error } = await supabase.from("restaurants").update(payload).eq("id", restaurant.id);
         if (error) throw error;
         toast.success("Dados da loja atualizados!");
       } else {
@@ -289,6 +289,10 @@ const StoreInfoTab = ({ restaurant, userId }: StoreInfoTabProps) => {
         toast.success("Loja criada com sucesso!");
       }
       queryClient.invalidateQueries({ queryKey: ["my-restaurant", userId] });
+      queryClient.invalidateQueries({ queryKey: ["my-restaurant"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-restaurants"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-store-owners"] });
+      queryClient.invalidateQueries({ queryKey: ["financial-restaurants"] });
       queryClient.invalidateQueries({ queryKey: ["restaurants"] });
     } catch (err: any) {
       toast.error(err.message || "Erro ao salvar informações");

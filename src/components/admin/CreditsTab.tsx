@@ -196,6 +196,8 @@ const CreditsTab = () => {
       queryClient.invalidateQueries({ queryKey: ["admin-stores-credits-list"] });
       queryClient.invalidateQueries({ queryKey: ["admin-credit-codes"] });
       queryClient.invalidateQueries({ queryKey: ["admin-financial-data"] });
+      queryClient.invalidateQueries({ queryKey: ["financial-store-credits"] });
+      queryClient.invalidateQueries({ queryKey: ["store-credits"] });
       queryClient.invalidateQueries({ queryKey: ["my-credits"] });
     } catch (err: any) {
       toast.error(err.message || "Erro ao processar recarga direta na loja");

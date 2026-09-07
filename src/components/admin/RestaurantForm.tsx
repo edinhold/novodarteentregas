@@ -41,19 +41,19 @@ const RestaurantForm = ({ open, onOpenChange, restaurant, categories }: Restaura
   useEffect(() => {
     if (restaurant) {
       setForm({
-        name: restaurant.name,
+        name: restaurant.name || "",
         category_id: restaurant.category_id || "",
-        category_name: restaurant.category_name,
+        category_name: restaurant.category_name || "",
         image: restaurant.image || "",
         logo: restaurant.logo || "",
         address: restaurant.address || "",
-        delivery_fee: String(restaurant.delivery_fee),
-        delivery_time: restaurant.delivery_time,
-        distance: restaurant.distance,
-        min_order: String(restaurant.min_order),
-        rating: String(restaurant.rating),
-        is_open: restaurant.is_open,
-        is_featured: restaurant.is_featured,
+        delivery_fee: restaurant.delivery_fee != null ? String(restaurant.delivery_fee) : "0",
+        delivery_time: restaurant.delivery_time || "30-45 min",
+        distance: restaurant.distance || "1.5 km",
+        min_order: restaurant.min_order != null ? String(restaurant.min_order) : "0",
+        rating: restaurant.rating != null ? String(restaurant.rating) : "0",
+        is_open: restaurant.is_open ?? true,
+        is_featured: restaurant.is_featured ?? false,
         latitude: restaurant.latitude ? String(restaurant.latitude) : "",
         longitude: restaurant.longitude ? String(restaurant.longitude) : "",
       });
@@ -105,6 +105,9 @@ const RestaurantForm = ({ open, onOpenChange, restaurant, categories }: Restaura
         toast.success("Restaurante criado!");
       }
       queryClient.invalidateQueries({ queryKey: ["admin-restaurants"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-store-owners"] });
+      queryClient.invalidateQueries({ queryKey: ["my-restaurant"] });
+      queryClient.invalidateQueries({ queryKey: ["financial-restaurants"] });
       queryClient.invalidateQueries({ queryKey: ["restaurants"] });
       onOpenChange(false);
     } catch (err: any) {
