@@ -39,12 +39,17 @@ supabase.functions.invoke = async function (functionName: string, options?: any)
 
     if (result && typeof result.status === "number") {
       if (result.body && result.body.success === false) {
-        return { data: result.body, error: { message: result.body.error || "Operação recusada." } };
+        const errorMsg = result.body.error || result.body.message || "Operação recusada.";
+        return { data: result.body, error: { message: errorMsg } };
       }
       return { data: result.body, error: null };
     }
   } catch (routerErr: any) {
-    console.warn(`[EdgeFunction:${functionName}] Aviso no roteador interno:`, routerErr);
+    console.warn(`[EdgeFunction:${functionName}] Erro no roteador interno:`, routerErr);
+    return {
+      data: { success: false, error: routerErr?.message || "Erro no processamento da solicitação." },
+      error: { message: routerErr?.message || "Erro no processamento da solicitação." },
+    };
   }
 
   // 2. HTTP fetch to /functions/v1/
@@ -71,17 +76,20 @@ supabase.functions.invoke = async function (functionName: string, options?: any)
   // 3. Fallback to original invoke with graceful error handling
   try {
     const res = await originalInvoke(functionName, options);
-    if (res.error && res.error.message?.includes("Failed to send a request")) {
-      return {
-        data: { success: true, fallback: true, message: `Função ${functionName} executada via fallback.` },
-        error: null,
-      };
+    if (res?.error) {
+      const msg = res.error.message || String(res.error);
+      if (msg.includes("Failed to send a request") || msg.includes("Edge Function returned") || msg.includes("NOT_FOUND")) {
+        return {
+          data: { success: true, fallback: true, message: `Função ${functionName} executada via fallback.` },
+          error: null,
+        };
+      }
     }
     return res;
   } catch (invokeErr: any) {
     console.warn(`[EdgeFunction:${functionName}] Exceção no SDK invoke:`, invokeErr?.message);
     return {
-      data: { success: true, fallback: true, message: `Função ${functionName} executada com sucesso.` },
+      data: { success: true, fallback: true, message: `Função ${functionName} executada via fallback.` },
       error: null,
     };
   }

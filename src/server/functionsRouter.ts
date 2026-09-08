@@ -1531,41 +1531,6 @@ export async function handleEdgeFunction(
     };
   }
 
-  // 10. delete-user: Exclusão de usuário por administradores
-  if (functionName === "delete-user") {
-    const caller = await getCaller(supabase, authHeader);
-    if (!caller || !(await checkAdmin(supabase, caller.id))) {
-      return {
-        status: 200,
-        body: { success: false, code: "SEM_PERMISSAO", error: "Apenas administradores podem excluir usuários.", request_id: requestId },
-      };
-    }
-
-    const targetUserId = reqBody?.user_id || reqBody?.target_user_id;
-    if (!targetUserId) {
-      return {
-        status: 200,
-        body: { success: false, code: "PARAMETRO_AUSENTE", error: "user_id não informado.", request_id: requestId },
-      };
-    }
-
-    try {
-      await supabase.auth.admin.deleteUser(targetUserId);
-    } catch (e: any) {
-      console.warn("[delete-user] Aviso ao excluir no auth:", e?.message);
-    }
-
-    await supabase.from("user_roles").delete().eq("user_id", targetUserId);
-    await supabase.from("profiles").delete().eq("user_id", targetUserId);
-    await supabase.from("restaurants").delete().eq("owner_id", targetUserId);
-    await supabase.from("drivers").delete().eq("user_id", targetUserId);
-
-    return {
-      status: 200,
-      body: { success: true, message: "Usuário removido com sucesso.", request_id: requestId },
-    };
-  }
-
   // 11. assign-admin-role: Atribuição de permissão admin
   if (functionName === "assign-admin-role") {
     const caller = await getCaller(supabase, authHeader);
@@ -1662,10 +1627,10 @@ export async function handleEdgeFunction(
       }
 
       if (targetEmail) {
-        await supabase.auth.admin.generateLink({
-          type: "recovery",
-          email: targetEmail,
-        });
+        const { error: recoveryErr } = await supabase.auth.resetPasswordForEmail(targetEmail);
+        if (recoveryErr) {
+          console.warn("[admin-reset-user-password] Recovery link aviso:", recoveryErr.message);
+        }
       }
 
       try {
@@ -1690,15 +1655,25 @@ export async function handleEdgeFunction(
       };
     }
 
-    const { error: updateErr } = await supabase.auth.admin.updateUserById(targetUserId, {
-      password: newPassword,
+    // Attempt 1: Call admin_set_user_password RPC (Security Definer PostgreSQL function)
+    const { data: rpcData, error: rpcErr } = await supabase.rpc("admin_set_user_password", {
+      p_target_user_id: targetUserId,
+      p_new_password: newPassword,
     });
 
-    if (updateErr) {
-      return {
-        status: 200,
-        body: { success: false, error: updateErr.message, request_id: requestId },
-      };
+    if (rpcErr) {
+      console.warn("[admin-reset-user-password] RPC admin_set_user_password indisponível, tentando fallback:", rpcErr.message);
+      // Attempt 2: Fallback to updateUserById if service role key is present
+      const { error: updateErr } = await supabase.auth.admin.updateUserById(targetUserId, {
+        password: newPassword,
+      });
+
+      if (updateErr) {
+        return {
+          status: 200,
+          body: { success: false, error: updateErr.message || "Erro ao redefinir a senha no Supabase Auth.", request_id: requestId },
+        };
+      }
     }
 
     try {
