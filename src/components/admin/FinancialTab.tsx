@@ -529,19 +529,14 @@ export const FinancialTab = () => {
     storeOwners.forEach((owner) => {
       seenUserIds.add(owner.user_id);
       const rest = restaurants.find((r) => r.owner_id === owner.user_id);
-      const storeName = rest?.name || "Loja Cadastrada";
+      if (!rest || rest.name?.toLowerCase().includes("loja cadastrada")) return;
+
+      const storeName = rest.name;
       const ownerName = owner.full_name || owner.email || "";
 
-      // Nome da loja é SEMPRE a identificação principal
       let displayLabel = storeName;
-      if (rest?.name) {
-        if (ownerName && ownerName !== rest.name) {
-          displayLabel = `${rest.name} (${ownerName})`;
-        } else {
-          displayLabel = rest.name;
-        }
-      } else if (ownerName) {
-        displayLabel = ownerName;
+      if (ownerName && ownerName !== storeName) {
+        displayLabel = `${storeName} (${ownerName})`;
       }
 
       list.push({
@@ -554,6 +549,7 @@ export const FinancialTab = () => {
 
     restaurants.forEach((r) => {
       if (r.owner_id && !seenUserIds.has(r.owner_id)) {
+        if (r.name?.toLowerCase().includes("loja cadastrada")) return;
         seenUserIds.add(r.owner_id);
         const owner = storeOwnerMap.get(r.owner_id);
         const ownerName = owner?.full_name || owner?.email || "";
@@ -561,7 +557,7 @@ export const FinancialTab = () => {
 
         list.push({
           userId: r.owner_id,
-          storeName: r.name || "Loja Cadastrada",
+          storeName: r.name,
           ownerName,
           displayLabel,
         });
@@ -631,7 +627,6 @@ export const FinancialTab = () => {
     storeCredits.forEach((sc) => {
       const directId = `direct-${sc.id}`;
       if (seenIds.has(directId)) return;
-      seenIds.add(directId);
 
       if (!isWithinPeriod(sc.updated_at || sc.created_at)) return;
 
@@ -642,6 +637,12 @@ export const FinancialTab = () => {
       const owner = storeOwnerMap.get(sc.user_id);
       const rest = restaurants.find((r) => r.owner_id === sc.user_id);
 
+      // Desconsiderar créditos órfãos de lojas inexistentes ou com nome genérico "Loja Cadastrada"
+      if (!rest || rest.name?.toLowerCase().includes("loja cadastrada")) {
+        return;
+      }
+
+      seenIds.add(directId);
       const val = Number(sc.balance) || 0;
       if (val > 0) {
         list.push({
@@ -649,7 +650,7 @@ export const FinancialTab = () => {
           type: "Recarga Direta",
           store_id: sc.user_id,
           owner_name: owner?.full_name || owner?.email || "Lojista Desconhecido",
-          store_name: rest?.name || "Loja Cadastrada",
+          store_name: rest.name,
           value: val,
           status: "Aprovada",
           created_at: sc.updated_at || sc.created_at,
