@@ -762,3 +762,232 @@ export async function calculateDistanceMatrix(
 
   return { distancesKm, durationsMin };
 }
+
+export interface MapboxMultiStopRouteLeg {
+  fromIndex: number;
+  toIndex: number;
+  distanceMeters: number;
+  distanceKm: number;
+  durationSeconds: number;
+  durationMin: number;
+}
+
+export interface MapboxMultiStopRouteResult {
+  totalDistanceMeters: number;
+  totalDistanceKm: number;
+  totalDurationSeconds: number;
+  totalDurationMin: number;
+  legs: MapboxMultiStopRouteLeg[];
+  geometry: [number, number][];
+  profile: RouteProfile;
+}
+
+function haversineDistanceKm(
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number }
+): number {
+  const R = 6371;
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLon = ((b.lng - a.lng) * Math.PI) / 180;
+  const s =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((a.lat * Math.PI) / 180) *
+      Math.cos((b.lat * Math.PI) / 180) *
+      Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
+}
+
+/**
+ * 6. CÁLCULO DE ROTA MULTI-PARADAS UNIFICADA (Mapbox Directions API v5 Multi-Waypoint)
+ * Calcula a operação inteira como UMA ÚNICA ROTA: Loja -> Parada 1 -> Parada 2 -> ... -> Parada N
+ */
+export async function calculateMultiStopRoute(
+  origin: { lat: number; lng: number },
+  destinations: { lat: number; lng: number }[],
+  options: {
+    profile?: RouteProfile;
+    signal?: AbortSignal;
+  } = {}
+): Promise<MapboxMultiStopRouteResult> {
+  const profile = options.profile || "driving";
+  const mapboxProfile =
+    profile === "cycling"
+      ? "cycling"
+      : profile === "walking"
+      ? "walking"
+      : "driving";
+
+  if (!isValidCoordinate(origin.lat, origin.lng)) {
+    throw new MapboxServiceError(
+      "INVALID_COORDINATES",
+      "Coordenadas da loja inválidas para cálculo de rota."
+    );
+  }
+
+  if (!destinations || destinations.length === 0) {
+    throw new MapboxServiceError(
+      "INVALID_COORDINATES",
+      "Pelo menos uma parada válida é necessária."
+    );
+  }
+
+  for (let i = 0; i < destinations.length; i++) {
+    const dest = destinations[i];
+    if (!isValidCoordinate(dest.lat, dest.lng)) {
+      throw new MapboxServiceError(
+        "INVALID_COORDINATES",
+        `Coordenadas da parada ${i + 1} são inválidas.`
+      );
+    }
+  }
+
+  const waypoints = [origin, ...destinations];
+  const coordinatesParam = waypoints
+    .map((pt) => `${pt.lng},${pt.lat}`)
+    .join(";");
+
+  const token = assertMapboxToken();
+  const url = new URL(
+    `${MAPBOX_DIRECTIONS_URL}/mapbox/${mapboxProfile}/${coordinatesParam}`
+  );
+  url.searchParams.set("access_token", token);
+  url.searchParams.set("geometries", "geojson");
+  url.searchParams.set("overview", "full");
+  url.searchParams.set("steps", "false");
+  url.searchParams.set("alternatives", "false");
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      MAPBOX_REQUEST_TIMEOUT_MS
+    );
+    const activeSignal = options.signal || controller.signal;
+
+    const response = await fetch(url.toString(), {
+      signal: activeSignal,
+      headers: { Accept: "application/json" },
+    });
+
+    clearTimeout(timeoutId);
+
+    if (response.status === 401 || response.status === 403) {
+      throw new MapboxServiceError(
+        "AUTH_ERROR",
+        "Chave de acesso da Mapbox não autorizada."
+      );
+    }
+    if (response.status === 429) {
+      throw new MapboxServiceError(
+        "RATE_LIMIT",
+        "Limite de requisições atinga na Mapbox."
+      );
+    }
+    if (!response.ok) {
+      throw new MapboxServiceError(
+        "MAPBOX_API_ERROR",
+        `Erro no cálculo de rota multi-paradas (${response.status})`
+      );
+    }
+
+    const data = await response.json();
+    if (data.code === "NoRoute" || !data.routes || data.routes.length === 0) {
+      throw new MapboxServiceError(
+        "ROUTE_NOT_FOUND",
+        "Não foi possível encontrar uma rota transitável conectando todas as paradas."
+      );
+    }
+
+    const route = data.routes[0];
+    const rawTotalMeters = Number(route.distance);
+    if (!Number.isFinite(rawTotalMeters) || rawTotalMeters < 0) {
+      throw new MapboxServiceError(
+        "MAPBOX_API_ERROR",
+        "Distância total retornada pela Mapbox é inválida."
+      );
+    }
+
+    const totalDistanceMeters = rawTotalMeters;
+    const totalDistanceKm = totalDistanceMeters / 1000;
+    const totalDurationSeconds = Number(route.duration) || 0;
+    const totalDurationMin = totalDurationSeconds / 60;
+
+    const rawLegs = Array.isArray(route.legs) ? route.legs : [];
+    const legs: MapboxMultiStopRouteLeg[] = [];
+
+    for (let i = 0; i < destinations.length; i++) {
+      const legData = rawLegs[i];
+      const legDistMeters = legData ? Number(legData.distance) || 0 : 0;
+      const legDurSec = legData ? Number(legData.duration) || 0 : 0;
+
+      legs.push({
+        fromIndex: i,
+        toIndex: i + 1,
+        distanceMeters: legDistMeters,
+        distanceKm: legDistMeters / 1000,
+        durationSeconds: legDurSec,
+        durationMin: legDurSec / 60,
+      });
+    }
+
+    const leafletGeometry: [number, number][] = Array.isArray(
+      route.geometry?.coordinates
+    )
+      ? route.geometry.coordinates.map(([lon, lat]: [number, number]) => [
+          lat,
+          lon,
+        ])
+      : [];
+
+    return {
+      totalDistanceMeters,
+      totalDistanceKm,
+      totalDurationSeconds,
+      totalDurationMin,
+      legs,
+      geometry: leafletGeometry,
+      profile,
+    };
+  } catch (error: any) {
+    if (error?.name === "AbortError") {
+      throw new MapboxServiceError("NETWORK_ERROR", "Cálculo de rota cancelado.");
+    }
+
+    console.warn(
+      "[Mapbox] Fallback Haversine sequencial acionado para rota multi-entregas:",
+      error
+    );
+
+    let fallbackTotalKm = 0;
+    const fallbackLegs: MapboxMultiStopRouteLeg[] = [];
+    const points = [origin, ...destinations];
+
+    for (let i = 0; i < destinations.length; i++) {
+      const pFrom = points[i];
+      const pTo = points[i + 1];
+      const legKm = haversineDistanceKm(pFrom, pTo);
+      fallbackTotalKm += legKm;
+      const legMin = (legKm / 25) * 60;
+
+      fallbackLegs.push({
+        fromIndex: i,
+        toIndex: i + 1,
+        distanceMeters: legKm * 1000,
+        distanceKm: legKm,
+        durationSeconds: legMin * 60,
+        durationMin: legMin,
+      });
+    }
+
+    return {
+      totalDistanceMeters: fallbackTotalKm * 1000,
+      totalDistanceKm: fallbackTotalKm,
+      totalDurationSeconds: (fallbackTotalKm / 25) * 3600,
+      totalDurationMin: (fallbackTotalKm / 25) * 60,
+      legs: fallbackLegs,
+      geometry: points.map((p) => [p.lat, p.lng]),
+      profile,
+    };
+  }
+}
+
