@@ -72,15 +72,21 @@ const PasswordResetTab = () => {
       const { data, error } = await supabase.functions.invoke("admin-reset-passwords", {
         body: { admin_password: password },
       });
-      if (error) throw error;
-      if (data?.error) { toast.error(data.error); return; }
-      toast.success(
-        `Redefinição concluída! ${data.success_count} e-mails enviados.` +
-          (data.failure_count > 0 ? ` ${data.failure_count} falhas.` : "")
-      );
-      setPassword("");
-      setShowConfirm(false);
-      refetchLogs();
+
+      if (data?.success) {
+        toast.success(
+          data.message || `Redefinição concluída! E-mails de recuperação enviados.`
+        );
+        setPassword("");
+        setShowConfirm(false);
+        refetchLogs();
+        return;
+      }
+
+      if (data?.error || error?.message) {
+        toast.error(data?.error || error?.message || "Erro ao redefinir senhas.");
+        return;
+      }
     } catch (err: any) {
       toast.error(err.message || "Erro ao redefinir senhas");
     } finally {
@@ -104,16 +110,24 @@ const PasswordResetTab = () => {
           admin_password: singleAdminPassword,
         },
       });
-      if (error) throw error;
-      if (data?.error) { toast.error(data.error); return; }
-      toast.success(
-        singleMode === "set_password"
-          ? "Senha redefinida com sucesso"
-          : "E-mail de recuperação enviado"
-      );
-      setSingleNewPassword("");
-      setSingleAdminPassword("");
-      refetchLogs();
+
+      if (data?.success) {
+        toast.success(
+          data.message ||
+            (singleMode === "set_password"
+              ? "Senha redefinida com sucesso"
+              : "E-mail de recuperação enviado")
+        );
+        setSingleNewPassword("");
+        setSingleAdminPassword("");
+        refetchLogs();
+        return;
+      }
+
+      if (data?.error || error?.message) {
+        toast.error(data?.error || error?.message || "Erro ao redefinir senha");
+        return;
+      }
     } catch (err: any) {
       toast.error(err.message || "Erro ao redefinir senha");
     } finally {
