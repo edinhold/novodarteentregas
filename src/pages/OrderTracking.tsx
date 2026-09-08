@@ -64,52 +64,64 @@ const OrderTracking = () => {
 
   // Load order data
   useEffect(() => {
-    if (!id || !user) return;
+    if (!id) return;
 
     const fetchOrder = async () => {
-      const { data: orderData } = await supabase
-        .from("orders")
-        .select("*")
-        .eq("id", id)
-        .eq("user_id", user.id)
-        .single();
-
-      if (!orderData) {
-        navigate("/");
-        return;
-      }
-      setOrder(orderData);
-
-      // Fetch restaurant
-      const { data: rest } = await supabase
-        .from("restaurants")
-        .select("*")
-        .eq("id", orderData.restaurant_id)
-        .single();
-      setRestaurant(rest);
-
-      // Find delivery request linked to this order
-      const { data: dr } = await (supabase as any)
-        .from("delivery_requests")
-        .select("*")
-        .eq("restaurant_id", orderData.restaurant_id)
-        .order("created_at", { ascending: false })
-        .limit(1);
-
-      if (dr && dr.length > 0) {
-        setDeliveryRequest(dr[0]);
-        if (dr[0].driver_id) {
-          // Get driver profile
-          const { data: driverData } = await supabase
-            .from("drivers")
-            .select("full_name, phone, vehicle_type")
-            .eq("user_id", dr[0].driver_id)
-            .single();
-          setDriverProfile(driverData);
+      try {
+        let query = supabase.from("orders").select("*").eq("id", id);
+        if (user?.id) {
+          query = query.eq("user_id", user.id);
         }
-      }
+        const { data: orderData } = await query.maybeSingle();
 
-      setLoading(false);
+        if (!orderData) {
+          // If no order found for user or guest, check order by id only
+          const { data: publicOrder } = await supabase.from("orders").select("*").eq("id", id).maybeSingle();
+          if (!publicOrder) {
+            navigate("/");
+            return;
+          }
+          setOrder(publicOrder);
+        } else {
+          setOrder(orderData);
+        }
+
+        const currentOrder = orderData || null;
+        if (!currentOrder) return;
+
+        // Fetch restaurant
+        const { data: rest } = await supabase
+          .from("restaurants")
+          .select("*")
+          .eq("id", currentOrder.restaurant_id)
+          .maybeSingle();
+        setRestaurant(rest);
+
+        // Find delivery request linked to this order
+        const { data: dr } = await (supabase as any)
+          .from("delivery_requests")
+          .select("*")
+          .eq("restaurant_id", currentOrder.restaurant_id)
+          .order("created_at", { ascending: false })
+          .limit(1);
+
+        if (dr && dr.length > 0) {
+          setDeliveryRequest(dr[0]);
+          if (dr[0].driver_id) {
+            // Get driver profile
+            const { data: driverData } = await supabase
+              .from("drivers")
+              .select("full_name, phone, vehicle_type")
+              .eq("user_id", dr[0].driver_id)
+              .maybeSingle();
+            setDriverProfile(driverData);
+          }
+        }
+      } catch (err) {
+        console.error("[OrderTracking] Erro ao carregar pedido:", err);
+      } finally {
+        setLoading(false);
+      }
     };
 
     fetchOrder();
@@ -124,7 +136,7 @@ const OrderTracking = () => {
         .from("driver_locations")
         .select("*")
         .eq("user_id", deliveryRequest.driver_id)
-        .single();
+        .maybeSingle();
       if (data) {
         setDriverLocation({ lat: data.latitude, lng: data.longitude, accuracy: data.accuracy, speed: data.speed });
       }

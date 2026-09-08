@@ -43,7 +43,7 @@ const StoreOwnerPanel = () => {
     queryKey: ["my-restaurant", activeUserId],
     queryFn: async () => {
       if (!activeUserId) return null;
-      const { data, error } = await supabase.from("restaurants").select("*").eq("owner_id", activeUserId).limit(1).single();
+      const { data, error } = await supabase.from("restaurants").select("*").eq("owner_id", activeUserId).limit(1).maybeSingle();
       if (error) return null;
       return data;
     },
@@ -54,7 +54,8 @@ const StoreOwnerPanel = () => {
     queryKey: ["my-credits", activeUserId],
     queryFn: async () => {
       if (!activeUserId) return null;
-      const { data } = await supabase.from("store_credits").select("*").eq("user_id", activeUserId).limit(1).single();
+      const { data, error } = await supabase.from("store_credits").select("*").eq("user_id", activeUserId).limit(1).maybeSingle();
+      if (error) return null;
       return data;
     },
     enabled: !!activeUserId,

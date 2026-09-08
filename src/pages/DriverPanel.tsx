@@ -86,7 +86,7 @@ const DriverPanel = () => {
   const { data: driverProfile } = useQuery({
     queryKey: ["my-driver-profile", user?.id],
     queryFn: async () => {
-      const { data, error } = await supabase.from("drivers").select("*").eq("user_id", user!.id).limit(1).single();
+      const { data, error } = await supabase.from("drivers").select("*").eq("user_id", user!.id).limit(1).maybeSingle();
       if (error) return null;
       return data;
     },
@@ -198,7 +198,7 @@ const DriverPanel = () => {
   const { data: storeOwnerProfile } = useQuery({
     queryKey: ["store-owner-profile", activeRequest?.store_owner_id],
     queryFn: async () => {
-      const { data } = await supabase.from("profiles").select("phone, full_name").eq("user_id", activeRequest!.store_owner_id).single();
+      const { data } = await supabase.from("profiles").select("phone, full_name").eq("user_id", activeRequest!.store_owner_id).maybeSingle();
       return data;
     },
     enabled: !!activeRequest,

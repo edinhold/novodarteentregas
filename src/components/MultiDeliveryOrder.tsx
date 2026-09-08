@@ -93,7 +93,7 @@ const MultiDeliveryOrder = ({ restaurant, userId }: Props) => {
   const { data: config } = useQuery({
     queryKey: ["public-delivery-config"],
     queryFn: async () => {
-      const { data } = await supabase.rpc("get_public_delivery_config").single();
+      const { data } = await supabase.rpc("get_public_delivery_config").maybeSingle();
       return data as any;
     },
   });
@@ -106,7 +106,7 @@ const MultiDeliveryOrder = ({ restaurant, userId }: Props) => {
         .select("*")
         .eq("user_id", userId)
         .limit(1)
-        .single();
+        .maybeSingle();
       return data;
     },
   });

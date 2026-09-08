@@ -1835,7 +1835,7 @@ export async function handleEdgeFunction(
     }
 
     let targetUserId = reqBody?.user_id || reqBody?.target_user_id || reqBody?.owner_id;
-    let targetRestaurantId = reqBody?.restaurant_id || reqBody?.id;
+    const targetRestaurantId = reqBody?.restaurant_id || reqBody?.id;
 
     if (!targetUserId && !targetRestaurantId && (reqBody?.full_name || reqBody?.name || reqBody?.search)) {
       const searchTerm = reqBody.full_name || reqBody.name || reqBody.search;

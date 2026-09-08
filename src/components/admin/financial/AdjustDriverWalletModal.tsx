@@ -179,7 +179,7 @@ export const AdjustDriverWalletModal: React.FC<AdjustDriverWalletModalProps> = (
             created_by_admin_id: authUser?.id,
           } as any)
           .select("id")
-          .single();
+          .maybeSingle();
 
         if (earningErr) throw earningErr;
 

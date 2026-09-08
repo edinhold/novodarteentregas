@@ -20,7 +20,7 @@ const CreditsTab = ({ credits }: CreditsTabProps) => {
   const { data: config } = useQuery({
     queryKey: ["delivery-config"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("delivery_config").select("*").limit(1).single();
+      const { data, error } = await supabase.from("delivery_config").select("*").limit(1).maybeSingle();
       if (error) throw error;
       return data;
     },
