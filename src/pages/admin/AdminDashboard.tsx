@@ -161,14 +161,43 @@ const AdminDashboard = () => {
     if (!deleteRestaurant) return;
     setDeletingRestaurant(true);
     try {
-      const { error } = await supabase.from("restaurants").delete().eq("id", deleteRestaurant.id);
-      if (error) throw error;
-      toast.success("Restaurante excluído!");
+      let functionSuccess = false;
+      try {
+        const res = await supabase.functions.invoke("delete-user", {
+          body: { user_id: deleteRestaurant.owner_id || null, restaurant_id: deleteRestaurant.id },
+        });
+        if (!res.error && !res.data?.error && res.data?.success !== false) {
+          functionSuccess = true;
+        }
+      } catch (e) {
+        console.warn("[delete-user] Edge function/roteador indisponível:", e);
+      }
+
+      if (!functionSuccess) {
+        const { error: rpcErr } = await (supabase as any).rpc("admin_delete_user_cascade", {
+          p_target_user_id: deleteRestaurant.owner_id || null,
+          p_target_restaurant_id: deleteRestaurant.id || null,
+        });
+
+        if (rpcErr) {
+          if (deleteRestaurant.owner_id) {
+            await supabase.from("user_roles").delete().eq("user_id", deleteRestaurant.owner_id);
+            await supabase.from("profiles").delete().eq("user_id", deleteRestaurant.owner_id);
+          }
+          await supabase.from("restaurants").delete().eq("id", deleteRestaurant.id);
+        }
+      }
+
+      toast.success("Restaurante e cadastro associado excluídos com sucesso!");
       queryClient.invalidateQueries({ queryKey: ["admin-restaurants"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-store-owners"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-customers"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-stores-recharge-list"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-financial-data"] });
       queryClient.invalidateQueries({ queryKey: ["restaurants"] });
       setDeleteRestaurant(null);
     } catch (err: any) {
-      toast.error(err.message || "Erro ao excluir");
+      toast.error(err.message || "Erro ao excluir restaurante");
     } finally {
       setDeletingRestaurant(false);
     }

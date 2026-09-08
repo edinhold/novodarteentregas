@@ -10,7 +10,6 @@ Deno.serve(async (req) => {
 
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
     const authHeader = req.headers.get("Authorization");
@@ -33,65 +32,85 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "Sem permissão de administrador" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    const { user_id } = await req.json();
-    if (!user_id) {
-      return new Response(JSON.stringify({ error: "ID do usuário é obrigatório" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    const reqData = await req.json().catch(() => ({}));
+    const user_id = reqData.user_id || reqData.target_user_id || reqData.owner_id;
+    const restaurant_id = reqData.restaurant_id || reqData.id;
+
+    if (!user_id && !restaurant_id) {
+      return new Response(JSON.stringify({ error: "ID do usuário ou restaurante é obrigatório" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Get driver internal id (for FK cleanup on driver_earnings/withdrawal_requests)
-    const { data: driverRow } = await adminClient.from("drivers").select("id").eq("user_id", user_id).maybeSingle();
-    const driverId = driverRow?.id;
+    // Call atomic RPC admin_delete_user_cascade
+    const { data: rpcRes, error: rpcError } = await adminClient.rpc("admin_delete_user_cascade", {
+      p_target_user_id: user_id || null,
+      p_target_restaurant_id: restaurant_id || null,
+    });
 
-    // Get restaurants owned by this user
-    const { data: ownedRestaurants } = await adminClient.from("restaurants").select("id").eq("owner_id", user_id);
-    const restaurantIds = (ownedRestaurants || []).map((r: any) => r.id);
+    if (rpcError) {
+      console.warn("[delete-user EdgeFunction] RPC error, executing direct fallback:", rpcError.message);
 
-    // Delete dependent rows (order matters for FKs)
-    await adminClient.from("chat_messages").delete().eq("sender_id", user_id);
-    await adminClient.from("driver_locations").delete().eq("user_id", user_id);
-    await adminClient.from("location_reports").delete().eq("user_id", user_id).then(() => {}, () => {});
-    await adminClient.from("admin_requests").delete().eq("user_id", user_id);
-    await adminClient.from("admin_requests").update({ reviewed_by: null }).eq("reviewed_by", user_id);
-    await adminClient.from("credit_codes").update({ used_by: null }).eq("used_by", user_id);
-    await adminClient.from("store_driver_favorites").delete().eq("driver_user_id", user_id).then(() => {}, () => {});
+      let restIds: string[] = restaurant_id ? [restaurant_id] : [];
+      if (user_id) {
+        const { data: ownedRests } = await adminClient.from("restaurants").select("id").eq("owner_id", user_id);
+        if (ownedRests && ownedRests.length > 0) {
+          restIds = Array.from(new Set([...restIds, ...ownedRests.map((r: any) => r.id)]));
+        }
+      }
 
-    // Delivery requests where user is store owner or driver
-    await adminClient.from("delivery_requests").delete().eq("store_owner_id", user_id);
-    await adminClient.from("delivery_requests").update({ driver_id: null }).eq("driver_id", user_id);
+      // Unlink historical financial data
+      if (user_id) {
+        await adminClient.from("orders").update({ user_id: null }).eq("user_id", user_id);
+        await adminClient.from("delivery_requests").update({ store_owner_id: null }).eq("store_owner_id", user_id);
+        await adminClient.from("delivery_requests").update({ driver_id: null }).eq("driver_id", user_id);
+        await adminClient.from("store_recharges").update({ store_owner_id: null }).eq("store_owner_id", user_id);
+        await adminClient.from("credit_codes").update({ used_by: null }).eq("used_by", user_id);
+        await adminClient.from("credit_codes").update({ assigned_to_user_id: null }).eq("assigned_to_user_id", user_id);
+        await adminClient.from("delivery_groups").update({ store_owner_id: null }).eq("store_owner_id", user_id);
+        await adminClient.from("withdrawal_requests").update({ driver_user_id: null }).eq("driver_user_id", user_id);
+      }
 
-    // Orders placed by user
-    await adminClient.from("orders").delete().eq("user_id", user_id);
+      if (restIds.length > 0) {
+        await adminClient.from("orders").update({ restaurant_id: null }).in("restaurant_id", restIds);
+        await adminClient.from("delivery_requests").update({ restaurant_id: null }).in("restaurant_id", restIds);
+        await adminClient.from("store_recharges").update({ restaurant_id: null }).in("restaurant_id", restIds);
+        await adminClient.from("credit_codes").update({ restaurant_id: null }).in("restaurant_id", restIds);
+        await adminClient.from("delivery_groups").update({ restaurant_id: null }).in("restaurant_id", restIds);
+      }
 
-    // Driver-related financial data
-    if (driverId) {
-      await adminClient.from("withdrawal_requests").delete().eq("driver_id", driverId);
-      await adminClient.from("driver_earnings").delete().eq("driver_id", driverId);
+      // Delete non-financial dependent rows
+      if (user_id) {
+        await adminClient.from("chat_messages").delete().eq("sender_id", user_id);
+        await adminClient.from("driver_locations").delete().eq("user_id", user_id);
+        await adminClient.from("push_subscriptions").delete().eq("user_id", user_id);
+        await adminClient.from("driver_push_devices").delete().eq("external_id", user_id);
+        await adminClient.from("location_reports").delete().eq("reporter_id", user_id);
+        await adminClient.from("admin_requests").delete().eq("user_id", user_id);
+        await adminClient.from("store_credits").delete().eq("user_id", user_id);
+        await adminClient.from("drivers").delete().eq("user_id", user_id);
+        await adminClient.from("user_roles").delete().eq("user_id", user_id);
+      }
+
+      if (restIds.length > 0) {
+        await adminClient.from("store_driver_favorites").delete().in("restaurant_id", restIds);
+        await adminClient.from("products").delete().in("restaurant_id", restIds);
+        await adminClient.from("restaurants").delete().in("id", restIds);
+      }
+
+      if (user_id) {
+        await adminClient.from("profiles").delete().eq("user_id", user_id);
+      }
     }
-    await adminClient.from("withdrawal_requests").delete().eq("driver_user_id", user_id);
 
-    // Restaurants owned by user (and their products/categories cascade via FK if configured)
-    if (restaurantIds.length > 0) {
-      await adminClient.from("products").delete().in("restaurant_id", restaurantIds);
-      await adminClient.from("delivery_requests").delete().in("restaurant_id", restaurantIds);
-      await adminClient.from("orders").delete().in("restaurant_id", restaurantIds);
-      await adminClient.from("restaurants").delete().in("id", restaurantIds);
-    }
-
-    await adminClient.from("drivers").delete().eq("user_id", user_id);
-    await adminClient.from("store_credits").delete().eq("user_id", user_id);
-    await adminClient.from("user_roles").delete().eq("user_id", user_id);
-    await adminClient.from("profiles").delete().eq("user_id", user_id);
-
-    const { error } = await adminClient.auth.admin.deleteUser(user_id);
-    if (error) {
-      console.error("Delete user error:", error.message);
-      // Return a generic error to the client to avoid leaking database details
-      return new Response(JSON.stringify({ error: "Falha ao excluir usuário" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    if (user_id) {
+      const { error: deleteAuthError } = await adminClient.auth.admin.deleteUser(user_id);
+      if (deleteAuthError) {
+        console.warn("Delete auth user warning:", deleteAuthError.message);
+      }
     }
 
     return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-  } catch (err) {
+  } catch (err: any) {
     console.error("Unexpected error in delete-user:", err);
-    return new Response(JSON.stringify({ error: "Erro interno no servidor" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ error: err?.message || "Erro interno no servidor" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 });

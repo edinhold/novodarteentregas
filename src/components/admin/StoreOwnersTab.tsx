@@ -43,27 +43,47 @@ const StoreOwnersTab = () => {
       let functionSuccess = false;
       try {
         const res = await supabase.functions.invoke("delete-user", {
-          body: { user_id: deleteId.ownerId },
+          body: { user_id: deleteId.ownerId, restaurant_id: deleteId.id },
         });
-        if (!res.error && !res.data?.error) {
+        if (!res.error && !res.data?.error && res.data?.success !== false) {
           functionSuccess = true;
         }
       } catch (e) {
-        console.warn("[delete-user] Edge Function indisponível, usando exclusão direta:", e);
+        console.warn("[delete-user] Invoca ao roteador/Edge Function falhou:", e);
       }
 
       if (!functionSuccess) {
-        // Fallback: Delete restaurant record directly from DB
-        const { error: restErr } = await supabase.from("restaurants").delete().eq("id", deleteId.id);
-        if (restErr) throw restErr;
+        // Fallback: Invoke admin_delete_user_cascade RPC directly
+        const { error: rpcErr } = await (supabase as any).rpc("admin_delete_user_cascade", {
+          p_target_user_id: deleteId.ownerId || null,
+          p_target_restaurant_id: deleteId.id || null,
+        });
+
+        if (rpcErr) {
+          console.warn("[delete-user] Alerta no RPC fallback, executando limpeza direta:", rpcErr.message);
+          if (deleteId.ownerId) {
+            await supabase.from("orders").update({ user_id: null }).eq("user_id", deleteId.ownerId);
+            await supabase.from("delivery_requests").update({ store_owner_id: null }).eq("store_owner_id", deleteId.ownerId);
+            await supabase.from("store_recharges").update({ store_owner_id: null }).eq("store_owner_id", deleteId.ownerId);
+            await supabase.from("credit_codes").update({ used_by: null }).eq("used_by", deleteId.ownerId);
+            await supabase.from("user_roles").delete().eq("user_id", deleteId.ownerId);
+            await supabase.from("profiles").delete().eq("user_id", deleteId.ownerId);
+          }
+          await supabase.from("restaurants").delete().eq("id", deleteId.id);
+        }
       }
 
-      toast.success(`${deleteId.name} removido!`);
+      toast.success(`${deleteId.name} removido com sucesso!`);
+      // Invalidate all related caches to reflect deletion across all admin tabs
       queryClient.invalidateQueries({ queryKey: ["admin-store-owners"] });
       queryClient.invalidateQueries({ queryKey: ["admin-restaurants"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-customers"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-stores-recharge-list"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-financial-data"] });
+      queryClient.invalidateQueries({ queryKey: ["customer-deletion-logs"] });
       setDeleteId(null);
     } catch (e: any) {
-      toast.error(e.message || "Erro ao remover");
+      toast.error(e.message || "Erro ao remover loja");
     } finally {
       setDeleting(false);
     }

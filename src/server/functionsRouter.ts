@@ -1801,6 +1801,131 @@ export async function handleEdgeFunction(
     }
   }
 
+  // 14. delete-user: Exclusão completa e desvinculação histórica de Loja/Lojista/Usuário
+  if (functionName === "delete-user") {
+    const caller = await getCaller(supabase, authHeader);
+    if (!caller || !(await checkAdmin(supabase, caller.id))) {
+      return {
+        status: 200,
+        body: {
+          success: false,
+          code: "SEM_PERMISSAO",
+          error: "Apenas administradores podem excluir usuários/lojas.",
+          request_id: requestId,
+        },
+      };
+    }
+
+    const targetUserId = reqBody?.user_id || reqBody?.target_user_id || reqBody?.owner_id;
+    const targetRestaurantId = reqBody?.restaurant_id || reqBody?.id;
+
+    if (!targetUserId && !targetRestaurantId) {
+      return {
+        status: 200,
+        body: {
+          success: false,
+          code: "PARAMETROS_INVALIDOS",
+          error: "Informe user_id ou restaurant_id para exclusão.",
+          request_id: requestId,
+        },
+      };
+    }
+
+    try {
+      // Execute atomic cascade RPC function first
+      const { data: rpcRes, error: rpcErr } = await supabase.rpc("admin_delete_user_cascade", {
+        p_target_user_id: targetUserId || null,
+        p_target_restaurant_id: targetRestaurantId || null,
+      });
+
+      if (rpcErr) {
+        console.warn("[delete-user] RPC admin_delete_user_cascade falhou/indisponível, aplicando fallback direto:", rpcErr.message);
+
+        // Direct Fallback if RPC fails:
+        let restIds: string[] = targetRestaurantId ? [targetRestaurantId] : [];
+        if (targetUserId) {
+          const { data: ownedRests } = await supabase.from("restaurants").select("id").eq("owner_id", targetUserId);
+          if (ownedRests && ownedRests.length > 0) {
+            restIds = Array.from(new Set([...restIds, ...ownedRests.map((r: any) => r.id)]));
+          }
+        }
+
+        // Unlink historical financial references
+        if (targetUserId) {
+          await supabase.from("orders").update({ user_id: null }).eq("user_id", targetUserId);
+          await supabase.from("delivery_requests").update({ store_owner_id: null }).eq("store_owner_id", targetUserId);
+          await supabase.from("delivery_requests").update({ driver_id: null }).eq("driver_id", targetUserId);
+          await supabase.from("store_recharges").update({ store_owner_id: null }).eq("store_owner_id", targetUserId);
+          await supabase.from("credit_codes").update({ used_by: null }).eq("used_by", targetUserId);
+          await supabase.from("credit_codes").update({ assigned_to_user_id: null }).eq("assigned_to_user_id", targetUserId);
+          await supabase.from("delivery_groups").update({ store_owner_id: null }).eq("store_owner_id", targetUserId);
+          await supabase.from("withdrawal_requests").update({ driver_user_id: null }).eq("driver_user_id", targetUserId);
+        }
+
+        if (restIds.length > 0) {
+          await supabase.from("orders").update({ restaurant_id: null }).in("restaurant_id", restIds);
+          await supabase.from("delivery_requests").update({ restaurant_id: null }).in("restaurant_id", restIds);
+          await supabase.from("store_recharges").update({ restaurant_id: null }).in("restaurant_id", restIds);
+          await supabase.from("credit_codes").update({ restaurant_id: null }).in("restaurant_id", restIds);
+          await supabase.from("delivery_groups").update({ restaurant_id: null }).in("restaurant_id", restIds);
+        }
+
+        // Delete non-financial dependent rows
+        if (targetUserId) {
+          await supabase.from("chat_messages").delete().eq("sender_id", targetUserId);
+          await supabase.from("driver_locations").delete().eq("user_id", targetUserId);
+          await supabase.from("push_subscriptions").delete().eq("user_id", targetUserId);
+          await supabase.from("driver_push_devices").delete().eq("external_id", targetUserId);
+          await supabase.from("location_reports").delete().eq("reporter_id", targetUserId);
+          await supabase.from("admin_requests").delete().eq("user_id", targetUserId);
+          await supabase.from("store_credits").delete().eq("user_id", targetUserId);
+          await supabase.from("drivers").delete().eq("user_id", targetUserId);
+          await supabase.from("user_roles").delete().eq("user_id", targetUserId);
+        }
+
+        if (restIds.length > 0) {
+          await supabase.from("store_driver_favorites").delete().in("restaurant_id", restIds);
+          await supabase.from("products").delete().in("restaurant_id", restIds);
+          await supabase.from("restaurants").delete().in("id", restIds);
+        }
+
+        if (targetUserId) {
+          await supabase.from("profiles").delete().eq("user_id", targetUserId);
+        }
+      }
+
+      // Delete auth user record via auth admin API if available
+      if (targetUserId) {
+        try {
+          await supabase.auth.admin.deleteUser(targetUserId);
+        } catch (authErr: any) {
+          console.warn("[delete-user] Aviso ao remover de auth.users:", authErr?.message);
+        }
+      }
+
+      return {
+        status: 200,
+        body: {
+          success: true,
+          message: "Loja/Lojista excluído com sucesso!",
+          target_user_id: targetUserId,
+          request_id: requestId,
+        },
+      };
+    } catch (err: any) {
+      console.error("[delete-user] Erro na exclusão:", err);
+      return {
+        status: 200,
+        body: {
+          success: false,
+          code: "ERRO_EXCLUSAO",
+          error: err?.message || "Erro ao excluir usuário/loja.",
+          request_id: requestId,
+        },
+      };
+    }
+  }
+
   // Default fallback for other functions
   return {
     status: 200,

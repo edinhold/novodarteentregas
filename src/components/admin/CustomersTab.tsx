@@ -123,16 +123,26 @@ const CustomersTab = () => {
           const { data, error } = await supabase.functions.invoke("delete-user", {
             body: { user_id: c.user_id },
           });
-          if (!error && !data?.error) {
+          if (!error && !data?.error && data?.success !== false) {
             functionSuccess = true;
           }
         } catch (e) {
-          console.warn("[delete-user] Edge Function indisponível, aplicando exclusão direta no banco de dados:", e);
+          console.warn("[delete-user] Edge Function/roteador indisponível:", e);
         }
 
         if (!functionSuccess) {
-          await supabase.from("profiles").delete().eq("user_id", c.user_id);
-          await supabase.from("user_roles").delete().eq("user_id", c.user_id);
+          const { error: rpcErr } = await (supabase as any).rpc("admin_delete_user_cascade", {
+            p_target_user_id: c.user_id,
+          });
+
+          if (rpcErr) {
+            console.warn("[delete-user] RPC fallback falhou, aplicando limpeza direta:", rpcErr.message);
+            await supabase.from("orders").update({ user_id: null }).eq("user_id", c.user_id);
+            await supabase.from("delivery_requests").update({ store_owner_id: null }).eq("store_owner_id", c.user_id);
+            await supabase.from("delivery_requests").update({ driver_id: null }).eq("driver_id", c.user_id);
+            await supabase.from("user_roles").delete().eq("user_id", c.user_id);
+            await supabase.from("profiles").delete().eq("user_id", c.user_id);
+          }
         }
 
         await supabase.from("customer_deletion_logs" as any).insert({
@@ -153,6 +163,11 @@ const CustomersTab = () => {
     setReason("");
     setSelected(new Set());
     queryClient.invalidateQueries({ queryKey: ["admin-customers"] });
+    queryClient.invalidateQueries({ queryKey: ["admin-store-owners"] });
+    queryClient.invalidateQueries({ queryKey: ["admin-restaurants"] });
+    queryClient.invalidateQueries({ queryKey: ["admin-drivers"] });
+    queryClient.invalidateQueries({ queryKey: ["admin-stores-recharge-list"] });
+    queryClient.invalidateQueries({ queryKey: ["admin-financial-data"] });
     queryClient.invalidateQueries({ queryKey: ["customer-deletion-logs"] });
     if (ok) toast.success(`${ok} cliente(s) excluído(s)`);
     if (fail) toast.error(`${fail} falha(s) ao excluir`);
