@@ -2016,14 +2016,22 @@ export const FinancialTab = () => {
               const earningNet = earningsByDeliveryMap.get(req.id);
               const net = earningNet !== undefined ? earningNet : Math.max(0, gross * (1 - appFeePercentConfig / 100));
               const comm = Math.max(0, gross - net);
-              const storeOwner = storeOwnerMap.get(req.store_owner_id || "");
+
+              let resolvedStoreName = "Loja não identificada";
+              if (req.restaurant_id && restaurantMap.has(req.restaurant_id)) {
+                resolvedStoreName = restaurantMap.get(req.restaurant_id).name;
+              } else if (req.store_owner_id && restaurantByOwnerMap.has(req.store_owner_id)) {
+                resolvedStoreName = restaurantByOwnerMap.get(req.store_owner_id).name;
+              }
+
               return {
                 id: req.id,
                 date: req.created_at,
                 typeLabel: "Corrida / Entrega",
-                partyName: drv?.full_name || storeOwner?.full_name || "Corrida",
-                storeName: storeOwner?.full_name || "Loja",
-                description: `Entrega #${req.id.slice(0, 8)}`,
+                partyName: `${drv?.full_name || "Motorista"} (Loja: ${resolvedStoreName})`,
+                storeName: resolvedStoreName,
+                driverName: drv?.full_name || "Motorista",
+                description: `Entrega #${req.id.slice(0, 8)} (${resolvedStoreName})`,
                 cashIn: gross,
                 cashOut: net,
                 platformRevenue: comm,
@@ -2038,6 +2046,7 @@ export const FinancialTab = () => {
                 typeLabel: w.fee_amount > 0 ? "Antecipação" : "Saque",
                 partyName: drv?.full_name || "Motorista",
                 driverName: drv?.full_name || "Motorista",
+                storeName: "—",
                 description: `Pagamento ao motorista ${drv?.full_name || ""}`,
                 cashIn: 0,
                 cashOut: Number(w.net_amount || 0),
