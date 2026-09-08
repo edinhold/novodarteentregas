@@ -532,6 +532,40 @@ export const FinancialTab = () => {
     return map;
   }, [restaurants]);
 
+  // Resolver o nome da loja/estabelecimento para quem o motorista fez ou está fazendo a entrega
+  const getDeliveryStoreName = useCallback(
+    (req: DeliveryRequestRecord): string => {
+      if (req.restaurant_id) {
+        const rest = restaurantMap.get(req.restaurant_id);
+        if (rest?.name && !rest.name.toLowerCase().includes("loja cadastrada")) {
+          return rest.name;
+        }
+      }
+      if (req.store_owner_id) {
+        const rest = restaurantByOwnerMap.get(req.store_owner_id);
+        if (rest?.name && !rest.name.toLowerCase().includes("loja cadastrada")) {
+          return rest.name;
+        }
+        const owner = storeOwnerMap.get(req.store_owner_id);
+        if (owner?.full_name && owner.full_name.trim()) {
+          return owner.full_name;
+        }
+      }
+      if (req.restaurant_id) {
+        const rest = restaurantMap.get(req.restaurant_id);
+        if (rest?.name) return rest.name;
+      }
+      if (req.pickup_address && req.pickup_address.trim()) {
+        const parts = req.pickup_address.split("-");
+        if (parts.length > 0 && parts[0].trim()) {
+          return parts[0].trim();
+        }
+      }
+      return "—";
+    },
+    [restaurantMap, restaurantByOwnerMap, storeOwnerMap]
+  );
+
   // Lista formatada de opções de lojas atreladas aos seus nomes reais
   const storeOptions = useMemo(() => {
     const list: Array<{
@@ -1510,6 +1544,7 @@ export const FinancialTab = () => {
                   <TableRow>
                     <TableHead className="text-xs">Data / Hora</TableHead>
                     <TableHead className="text-xs">Motorista</TableHead>
+                    <TableHead className="text-xs">Loja / Estabelecimento</TableHead>
                     <TableHead className="text-xs">Tipo Movimentação</TableHead>
                     <TableHead className="text-xs">Valor Bruto</TableHead>
                     <TableHead className="text-xs">Comissão App</TableHead>
@@ -1523,6 +1558,7 @@ export const FinancialTab = () => {
                   {/* Corridas */}
                   {filteredDeliveries.map((req) => {
                     const drv = driverMap.mapByUserId.get(req.driver_id || "") || driverMap.mapById.get(req.driver_id || "");
+                    const storeName = getDeliveryStoreName(req);
                     const gross = Number(req.driver_fee || req.credit_cost || 0);
                     const earningNet = earningsByDeliveryMap.get(req.id);
                     const net = earningNet !== undefined ? earningNet : Math.max(0, gross * (1 - appFeePercentConfig / 100));
@@ -1532,6 +1568,14 @@ export const FinancialTab = () => {
                       <TableRow key={`del-${req.id}`} className="text-xs">
                         <TableCell className="whitespace-nowrap">{formatDate(req.created_at)}</TableCell>
                         <TableCell className="font-semibold">{drv?.full_name || "Motorista —"}</TableCell>
+                        <TableCell className="font-medium text-foreground">
+                          <div className="flex items-center gap-1.5 min-w-[120px]">
+                            <Store className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                            <span className="truncate max-w-[160px]" title={storeName}>
+                              {storeName}
+                            </span>
+                          </div>
+                        </TableCell>
                         <TableCell>
                           <Badge variant="outline" className="text-[10px] border-primary/40 text-primary">
                             Corrida
@@ -1562,7 +1606,7 @@ export const FinancialTab = () => {
                                 driverName: drv?.full_name || "Motorista Cadastrado",
                                 currentValue: gross,
                                 date: req.created_at,
-                                description: `Corrida ${req.id.slice(0, 8)} (${req.pickup_address || "Origem"} → ${req.delivery_address || "Destino"})`,
+                                description: `Corrida ${req.id.slice(0, 8)} (${storeName})`,
                                 rawObject: req,
                               });
                               setEditModalOpen(true);
@@ -1587,6 +1631,7 @@ export const FinancialTab = () => {
                       <TableRow key={`with-${w.id}`} className="text-xs bg-muted/20">
                         <TableCell className="whitespace-nowrap">{formatDate(w.created_at)}</TableCell>
                         <TableCell className="font-semibold">{drv?.full_name || "Motorista —"}</TableCell>
+                        <TableCell className="text-muted-foreground">—</TableCell>
                         <TableCell>
                           <Badge variant="secondary" className="text-[10px] bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300">
                             {w.fee_amount > 0 ? "Antecipação" : "Saque"}
@@ -1685,7 +1730,7 @@ export const FinancialTab = () => {
 
                   {filteredDeliveries.length === 0 && filteredWithdrawals.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
+                      <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
                         Nenhuma movimentação de motorista registrada para os filtros aplicados.
                       </TableCell>
                     </TableRow>
