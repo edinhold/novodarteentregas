@@ -54,11 +54,36 @@ const RegisterDriver = () => {
     }
     setLoading(true);
     try {
-      const { data, error } = await supabase.auth.signUp({
-        email: form.email, password: form.password,
-        options: { data: { full_name: form.fullName }, emailRedirectTo: window.location.origin },
-      });
-      if (error) throw error;
+      const doSignUp = async () => {
+        const res = await supabase.auth.signUp({
+          email: form.email,
+          password: form.password,
+          options: { data: { full_name: form.fullName }, emailRedirectTo: window.location.origin },
+        });
+        if (res.error) throw res.error;
+        return res.data;
+      };
+
+      let data: any;
+      try {
+        data = await doSignUp();
+      } catch (signUpErr: any) {
+        if (/already registered|user_already_exists|já cadastrado/i.test(signUpErr?.message || "")) {
+          const { data: cleanRes } = await supabase.functions.invoke("clean-orphan-signup", {
+            body: { email: form.email, phone: form.phone },
+          });
+          if (cleanRes?.active) {
+            throw new Error("Este e-mail ou telefone já possui uma conta ativa no sistema.");
+          }
+          if (cleanRes?.cleaned) {
+            data = await doSignUp();
+          } else {
+            throw signUpErr;
+          }
+        } else {
+          throw signUpErr;
+        }
+      }
       if (data.user) {
         let photoUrl: string | null = null;
 

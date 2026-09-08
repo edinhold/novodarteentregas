@@ -1938,6 +1938,152 @@ export async function handleEdgeFunction(
     }
   }
 
+  // 15. admin-delete-financial-entry: Exclusão individual e segura de um único lançamento financeiro pelo ID
+  if (functionName === "admin-delete-financial-entry") {
+    const caller = await getCaller(supabase, authHeader);
+    if (!caller || !(await checkAdmin(supabase, caller.id))) {
+      return {
+        status: 200,
+        body: {
+          success: false,
+          code: "SEM_PERMISSAO",
+          error: "Apenas administradores podem excluir lançamentos financeiros.",
+          request_id: requestId,
+        },
+      };
+    }
+
+    const entryId = reqBody?.entry_id || reqBody?.id || reqBody?.raw_id;
+    const sourceTable = reqBody?.source_table || reqBody?.table;
+
+    if (!entryId) {
+      return {
+        status: 200,
+        body: {
+          success: false,
+          code: "PARAMETROS_INVALIDOS",
+          error: "ID do lançamento é obrigatório.",
+          request_id: requestId,
+        },
+      };
+    }
+
+    try {
+      // Execute atomic RPC function first
+      const { data: rpcRes, error: rpcErr } = await supabase.rpc("admin_delete_single_financial_entry", {
+        p_entry_id: entryId,
+        p_source_table: sourceTable || "auto",
+      });
+
+      if (rpcErr) {
+        console.warn("[admin-delete-financial-entry] RPC warning, applying direct table deletes:", rpcErr.message);
+
+        if (sourceTable === "credit_codes" || (!sourceTable && entryId)) {
+          await supabase.from("store_recharges").delete().eq("credit_code_id", entryId);
+          await supabase.from("credit_codes").delete().eq("id", entryId);
+        }
+        if (sourceTable === "store_recharges") {
+          await supabase.from("store_recharges").delete().eq("id", entryId);
+        }
+        if (sourceTable === "driver_earnings") {
+          await supabase.from("driver_earnings").delete().eq("id", entryId);
+        }
+        if (sourceTable === "withdrawal_requests") {
+          await supabase.from("withdrawal_requests").delete().eq("id", entryId);
+        }
+        if (sourceTable === "delivery_requests") {
+          await supabase.from("driver_earnings").update({ delivery_request_id: null }).eq("delivery_request_id", entryId);
+          await supabase.from("orders").update({ delivery_request_id: null }).eq("delivery_request_id", entryId);
+          await supabase.from("delivery_requests").delete().eq("id", entryId);
+        }
+      }
+
+      return {
+        status: 200,
+        body: {
+          success: true,
+          message: "Lançamento financeiro excluído com sucesso!",
+          entry_id: entryId,
+          request_id: requestId,
+        },
+      };
+    } catch (err: any) {
+      console.error("[admin-delete-financial-entry] Erro ao excluir lançamento:", err);
+      return {
+        status: 200,
+        body: {
+          success: false,
+          code: "ERRO_EXCLUSAO_LANCAMENTO",
+          error: err?.message || "Erro ao excluir lançamento financeiro.",
+          request_id: requestId,
+        },
+      };
+    }
+  }
+
+  // 16. clean-orphan-signup: Limpeza automática de conta auth.users órfã para liberar recadastro
+  if (functionName === "clean-orphan-signup") {
+    const email = reqBody?.email?.trim();
+    const phone = reqBody?.phone?.trim();
+
+    if (!email && !phone) {
+      return {
+        status: 200,
+        body: { success: false, cleaned: false, active: false, message: "Email ou telefone é necessário.", request_id: requestId },
+      };
+    }
+
+    try {
+      try {
+        const { data: { users }, error: listErr } = await supabase.auth.admin.listUsers();
+        if (!listErr && users) {
+          const matchedUser = users.find((u) => (email && u.email?.toLowerCase() === email.toLowerCase()) || (phone && u.phone === phone));
+          if (matchedUser) {
+            const uid = matchedUser.id;
+            // Check if user has an ACTIVE store, ACTIVE driver, or ACTIVE role
+            const [{ data: ownedStore }, { data: driverRow }, { data: roles }] = await Promise.all([
+              supabase.from("restaurants").select("id").eq("owner_id", uid).maybeSingle(),
+              supabase.from("drivers").select("id").eq("user_id", uid).maybeSingle(),
+              supabase.from("user_roles").select("id").eq("user_id", uid),
+            ]);
+
+            const isActive = !!ownedStore || !!driverRow || (roles && roles.length > 0);
+            if (isActive) {
+              return {
+                status: 200,
+                body: { success: true, cleaned: false, active: true, message: "Usuário ativo no sistema.", request_id: requestId },
+              };
+            }
+
+            // User is an orphan! Perform complete cleanup
+            await supabase.from("profiles").delete().eq("user_id", uid);
+            await supabase.from("user_roles").delete().eq("user_id", uid);
+            await supabase.auth.admin.deleteUser(uid);
+
+            console.log("[clean-orphan-signup] Conta auth órfã limpa com sucesso:", uid, email);
+            return {
+              status: 200,
+              body: { success: true, cleaned: true, active: false, message: "Registro órfão limpo com sucesso.", request_id: requestId },
+            };
+          }
+        }
+      } catch (adminErr: any) {
+        console.warn("[clean-orphan-signup] Aviso na API auth admin:", adminErr?.message);
+      }
+
+      return {
+        status: 200,
+        body: { success: true, cleaned: false, active: false, request_id: requestId },
+      };
+    } catch (err: any) {
+      console.warn("[clean-orphan-signup] Exceção na verificação de órfãos:", err);
+      return {
+        status: 200,
+        body: { success: false, cleaned: false, active: false, request_id: requestId },
+      };
+    }
+  }
+
   // Default fallback for other functions
   return {
     status: 200,

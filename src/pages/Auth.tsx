@@ -83,15 +83,38 @@ const Auth = () => {
           navigate("/");
         }
       } else {
-        const { error } = await supabase.auth.signUp({
-          email: cleanEmail,
-          password,
-          options: {
-            data: { full_name: fullName },
-            emailRedirectTo: window.location.origin,
-          },
-        });
-        if (error) throw error;
+        const doSignUp = async () => {
+          const res = await supabase.auth.signUp({
+            email: cleanEmail,
+            password,
+            options: {
+              data: { full_name: fullName },
+              emailRedirectTo: window.location.origin,
+            },
+          });
+          if (res.error) throw res.error;
+          return res.data;
+        };
+
+        try {
+          await doSignUp();
+        } catch (signUpErr: any) {
+          if (/already registered|user_already_exists|já cadastrado/i.test(signUpErr?.message || "")) {
+            const { data: cleanRes } = await supabase.functions.invoke("clean-orphan-signup", {
+              body: { email: cleanEmail },
+            });
+            if (cleanRes?.active) {
+              throw new Error("Este e-mail já possui um cadastro ativo no sistema.");
+            }
+            if (cleanRes?.cleaned) {
+              await doSignUp();
+            } else {
+              throw signUpErr;
+            }
+          } else {
+            throw signUpErr;
+          }
+        }
         toast.success("Cadastro realizado com sucesso!");
         navigate("/");
       }

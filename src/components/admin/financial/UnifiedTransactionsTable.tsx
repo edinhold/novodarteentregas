@@ -1,4 +1,6 @@
 import React, { useState, useMemo } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -12,6 +14,16 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { UnifiedTransaction, TransactionType, TransactionStatus } from "@/types/financial";
 import { formatCurrency, formatDateTime } from "@/utils/financialCalculations";
 import {
@@ -19,6 +31,8 @@ import {
   Download,
   Copy,
   Eye,
+  Trash2,
+  AlertTriangle,
   Filter,
   ArrowDownLeft,
   ArrowUpRight,
@@ -41,16 +55,74 @@ interface UnifiedTransactionsTableProps {
 export const UnifiedTransactionsTable: React.FC<UnifiedTransactionsTableProps> = ({
   transactions = [],
 }) => {
+  const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(15);
   const [selectedTx, setSelectedTx] = useState<UnifiedTransaction | null>(null);
+  const [deleteConfirmTx, setDeleteConfirmTx] = useState<UnifiedTransaction | null>(null);
+  const [deletingTx, setDeletingTx] = useState(false);
 
   const copyText = (text: string, label: string) => {
     navigator.clipboard.writeText(text);
     toast.success(`${label} copiado!`);
+  };
+
+  const handleDeleteSingleTx = async () => {
+    if (!deleteConfirmTx) return;
+    setDeletingTx(true);
+    try {
+      let success = false;
+      try {
+        const res = await supabase.functions.invoke("admin-delete-financial-entry", {
+          body: {
+            entry_id: deleteConfirmTx.rawId,
+            source_table: (deleteConfirmTx as any).sourceTable || deleteConfirmTx.type,
+          },
+        });
+        if (!res.error && !res.data?.error && res.data?.success !== false) {
+          success = true;
+        }
+      } catch (invokeErr) {
+        console.warn("[delete-financial-entry] Invoke falhou:", invokeErr);
+      }
+
+      if (!success) {
+        const { error: rpcErr } = await (supabase as any).rpc("admin_delete_single_financial_entry", {
+          p_entry_id: deleteConfirmTx.rawId,
+          p_source_table: (deleteConfirmTx as any).sourceTable || "auto",
+        });
+
+        if (rpcErr) {
+          console.warn("[delete-financial-entry] RPC warning, aplicando deleção direta por tabela:", rpcErr.message);
+          if (deleteConfirmTx.type === "recarga" || deleteConfirmTx.type === "recarga_direta") {
+            await supabase.from("store_recharges").delete().eq("credit_code_id", deleteConfirmTx.rawId);
+            await supabase.from("store_recharges").delete().eq("id", deleteConfirmTx.rawId);
+            await supabase.from("credit_codes").delete().eq("id", deleteConfirmTx.rawId);
+          } else if (deleteConfirmTx.type === "saque") {
+            await supabase.from("withdrawal_requests").delete().eq("id", deleteConfirmTx.rawId);
+          } else if (deleteConfirmTx.type === "corrida") {
+            await supabase.from("driver_earnings").update({ delivery_request_id: null }).eq("delivery_request_id", deleteConfirmTx.rawId);
+            await supabase.from("orders").update({ delivery_request_id: null }).eq("delivery_request_id", deleteConfirmTx.rawId);
+            await supabase.from("delivery_requests").delete().eq("id", deleteConfirmTx.rawId);
+          }
+        }
+      }
+
+      toast.success("Lançamento financeiro removido com sucesso!");
+      queryClient.invalidateQueries({ queryKey: ["admin-financial-data"] });
+      queryClient.invalidateQueries({ queryKey: ["delivery-config"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-stores-recharge-list"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-driver-earnings"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-withdrawals"] });
+      setDeleteConfirmTx(null);
+    } catch (err: any) {
+      toast.error(err.message || "Erro ao excluir lançamento financeiro.");
+    } finally {
+      setDeletingTx(false);
+    }
   };
 
   // Filtered transactions
@@ -386,15 +458,26 @@ export const UnifiedTransactionsTable: React.FC<UnifiedTransactionsTableProps> =
                       {getStatusBadge(tx.status, tx.statusLabel)}
                     </TableCell>
                     <TableCell className="text-center">
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                        onClick={() => setSelectedTx(tx)}
-                        title="Ver Auditoria"
-                      >
-                        <Eye className="w-4 h-4" />
-                      </Button>
+                      <div className="flex items-center justify-center gap-1">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                          onClick={() => setSelectedTx(tx)}
+                          title="Ver Auditoria"
+                        >
+                          <Eye className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                          onClick={() => setDeleteConfirmTx(tx)}
+                          title="Excluir este lançamento financeiro"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))
@@ -556,6 +639,49 @@ export const UnifiedTransactionsTable: React.FC<UnifiedTransactionsTableProps> =
             </div>
           </DialogContent>
         </Dialog>
+      )}
+
+      {/* Confirm Delete Single Financial Entry Modal */}
+      {deleteConfirmTx && (
+        <AlertDialog open={!!deleteConfirmTx} onOpenChange={(o) => !o && !deletingTx && setDeleteConfirmTx(null)}>
+          <AlertDialogContent className="max-w-md">
+            <AlertDialogHeader>
+              <AlertDialogTitle className="flex items-center gap-2 text-destructive text-base">
+                <AlertTriangle className="w-5 h-5" /> Excluir lançamento financeiro?
+              </AlertDialogTitle>
+              <AlertDialogDescription asChild>
+                <div className="space-y-3 text-xs text-muted-foreground pt-2">
+                  <p>
+                    Você está prestes a excluir <strong>estritamente um único lançamento financeiro</strong>.
+                  </p>
+
+                  <div className="p-3 bg-muted/60 rounded-lg space-y-1.5 border font-mono text-[11px] text-foreground">
+                    <div><strong>ID do Registro:</strong> {deleteConfirmTx.rawId}</div>
+                    <div><strong>Data/Hora:</strong> {formatDateTime(deleteConfirmTx.date)}</div>
+                    <div><strong>Operação:</strong> {deleteConfirmTx.typeLabel}</div>
+                    <div><strong>Envolvido:</strong> {deleteConfirmTx.partyName}</div>
+                    <div><strong>Valor:</strong> {formatCurrency(deleteConfirmTx.grossAmount || deleteConfirmTx.cashIn || deleteConfirmTx.cashOut)}</div>
+                  </div>
+
+                  <div className="p-2.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-300 font-sans leading-relaxed text-[11px]">
+                    ⚠️ <strong>Atenção:</strong> Somente este lançamento com o ID exato será excluído. Nenhum outro registro, carteira, saldo de loja ou valor a receber de motorista será alterado.
+                  </div>
+                </div>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+
+            <AlertDialogFooter className="mt-4">
+              <AlertDialogCancel disabled={deletingTx}>Cancelar</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleDeleteSingleTx}
+                disabled={deletingTx}
+                className="bg-destructive hover:bg-destructive/90 text-destructive-foreground font-semibold"
+              >
+                {deletingTx ? "Excluindo..." : "Confirmar exclusão"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       )}
     </Card>
   );
