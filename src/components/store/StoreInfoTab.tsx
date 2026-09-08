@@ -76,10 +76,8 @@ const StoreInfoTab = ({ restaurant, userId }: StoreInfoTabProps) => {
   const [removingLogo, setRemovingLogo] = useState(false);
 
   // Password state
-  const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [passwordLoading, setPasswordLoading] = useState(false);
@@ -415,10 +413,6 @@ const StoreInfoTab = ({ restaurant, userId }: StoreInfoTabProps) => {
   const handlePasswordChange = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!currentPassword) {
-      toast.error("Informe a senha atual");
-      return;
-    }
     if (!newPassword) {
       toast.error("Informe a nova senha");
       return;
@@ -434,32 +428,14 @@ const StoreInfoTab = ({ restaurant, userId }: StoreInfoTabProps) => {
 
     setPasswordLoading(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user?.email) {
-        throw new Error("Sessão expirada ou usuário não identificado. Faça login novamente.");
-      }
-
-      // Validar senha atual re-autenticando no Supabase
-      const { error: authError } = await supabase.auth.signInWithPassword({
-        email: user.email,
-        password: currentPassword,
-      });
-
-      if (authError) {
-        toast.error("Senha atual incorreta. Verifique e tente novamente.");
-        setPasswordLoading(false);
-        return;
-      }
-
-      // Atualizar a senha de forma segura no Supabase Auth
+      // Atualizar a senha diretamente no Supabase Auth para a sessão ativa do lojista
       const { error: updateError } = await supabase.auth.updateUser({
         password: newPassword,
       });
 
       if (updateError) throw updateError;
 
-      toast.success("Senha alterada com sucesso! Sua sessão continua ativa.");
-      setCurrentPassword("");
+      toast.success("Senha alterada com sucesso! Sua nova senha já está valendo.");
       setNewPassword("");
       setConfirmPassword("");
     } catch (err: any) {
@@ -708,29 +684,6 @@ const StoreInfoTab = ({ restaurant, userId }: StoreInfoTabProps) => {
         </CardHeader>
         <CardContent>
           <form onSubmit={handlePasswordChange} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="current-password">Senha Atual *</Label>
-              <div className="relative">
-                <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  id="current-password"
-                  type={showCurrentPassword ? "text" : "password"}
-                  value={currentPassword}
-                  onChange={(e) => setCurrentPassword(e.target.value)}
-                  placeholder="Sua senha atual"
-                  className="pl-9 pr-10"
-                  required
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowCurrentPassword(!showCurrentPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  {showCurrentPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-            </div>
-
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="new-password">Nova Senha *</Label>
