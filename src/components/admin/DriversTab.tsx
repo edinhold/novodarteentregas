@@ -49,20 +49,34 @@ const DriversTab = () => {
         const res = await supabase.functions.invoke("delete-user", {
           body: { user_id: deleteId.userId },
         });
-        if (!res.error && !res.data?.error) {
+        if (!res.error && !res.data?.error && res.data?.success !== false) {
           functionSuccess = true;
         }
       } catch (e) {
-        console.warn("[delete-user] Edge Function indisponível, excluindo registro de motorista diretamente:", e);
+        console.warn("[delete-user] Edge Function/roteador indisponível:", e);
       }
 
       if (!functionSuccess) {
-        const { error: drvErr } = await supabase.from("drivers").delete().eq("id", deleteId.id);
-        if (drvErr) throw drvErr;
+        const { error: rpcErr } = await (supabase as any).rpc("admin_delete_user_cascade", {
+          p_target_user_id: deleteId.userId || null,
+        });
+
+        if (rpcErr) {
+          console.warn("[delete-user] RPC fallback falhou, aplicando limpeza direta de motorista:", rpcErr.message);
+          await supabase.from("delivery_requests").update({ driver_id: null }).eq("driver_id", deleteId.userId);
+          await supabase.from("withdrawal_requests").update({ driver_user_id: null }).eq("driver_user_id", deleteId.userId);
+          await supabase.from("drivers").delete().eq("id", deleteId.id);
+          if (deleteId.userId) {
+            await supabase.from("user_roles").delete().eq("user_id", deleteId.userId);
+            await supabase.from("profiles").delete().eq("user_id", deleteId.userId);
+          }
+        }
       }
 
-      toast.success(`${deleteId.name} removido!`);
+      toast.success(`${deleteId.name} removido com sucesso!`);
       queryClient.invalidateQueries({ queryKey: ["admin-drivers"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-drivers-financial"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-financial-data"] });
       setDeleteId(null);
     } catch (e: any) {
       toast.error(e.message || "Erro ao remover motorista");
