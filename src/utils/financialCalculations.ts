@@ -438,6 +438,87 @@ export const calculateFinancials = ({
     }
   });
 
+  // 2.5 Process Manual Driver Wallet Adjustments (driver_earnings entries without a delivery_request_id)
+  driverEarnings.forEach((e) => {
+    if (!e.delivery_request_id) {
+      const dateStr = e.created_at;
+      const inPeriod = isWithinPeriod(dateStr, period, customStart, customEnd, lastResetTimestamp);
+      const amountVal = Number(e.amount || 0);
+
+      let driverName = "Motorista";
+      let driverPhone = "";
+      if (e.driver_id) {
+        const drv = driverMap.get(e.driver_id) || driverByUserMap.get(e.driver_id);
+        if (drv?.full_name) {
+          driverName = drv.full_name;
+          driverPhone = drv.phone || "";
+        } else {
+          const p = profileMap.get(e.driver_id);
+          if (p?.full_name) {
+            driverName = p.full_name;
+            driverPhone = p.phone || "";
+          }
+        }
+      }
+
+      const isCredit = amountVal >= 0;
+      const rideTime = formatTimeHHmm(dateStr);
+      const rideDate = formatDateOnly(dateStr);
+
+      if (inPeriod) {
+        driverEarningsList.push({
+          id: `adj-${e.id}`,
+          corridaId: "Ajuste manual — sem corrida vinculada",
+          driverId: e.driver_id || "",
+          driverName,
+          driverPhone,
+          storeId: "",
+          storeName: "Admin (Ajuste Manual)",
+          rideTime,
+          formattedDate: rideDate,
+          rawTimestamp: dateStr,
+          grossValue: Math.abs(amountVal),
+          driverValue: amountVal,
+          platformCommission: 0,
+          status: e.status || "pending",
+          statusLabel: isCredit ? "Ajuste Manual — Crédito" : "Ajuste Manual — Débito",
+          pickupAddress: e.description || "Ajuste efetuado manualmente pelo Admin",
+          deliveryAddress: "Ajuste manual — sem corrida vinculada",
+        });
+
+        transactions.push({
+          id: `tx-adj-${e.id}`,
+          rawId: e.id,
+          date: dateStr,
+          type: isCredit ? "recarga_direta" : "saque",
+          typeLabel: isCredit ? "Ajuste Manual — Crédito" : "Ajuste Manual — Débito",
+          description: e.description
+            ? `Ajuste manual (${e.description})`
+            : `Ajuste de saldo efetuado pelo Admin (${isCredit ? "Crédito" : "Débito"})`,
+          partyName: driverName,
+          partyRole: "driver",
+          driverName,
+          cashIn: 0,
+          cashOut: 0,
+          platformRevenue: 0,
+          grossAmount: Math.abs(amountVal),
+          driverAmount: amountVal,
+          feeAmount: 0,
+          status: "completed",
+          statusLabel: isCredit ? "Crédito Efetivado" : "Débito Efetivado",
+          details: {
+            corrida_id: "Ajuste manual — sem corrida vinculada",
+            tipo: isCredit ? "Ajuste Manual — Crédito" : "Ajuste Manual — Débito",
+            motivo: e.description || "Ajuste financeiro pelo Admin",
+            motorista: driverName,
+            valor: amountVal,
+            criado_em: e.created_at,
+          },
+        });
+      }
+    }
+  });
+
   // 3. Process Withdrawal Requests (Saídas de Caixa e Taxas de Antecipação)
   withdrawalRequests.forEach((w) => {
     const dateStr = w.created_at;

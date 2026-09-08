@@ -35,6 +35,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
+import { AdjustDriverWalletModal } from "./AdjustDriverWalletModal";
 
 interface DriverEarningsTableProps {
   earnings: DriverEarningItem[];
@@ -54,6 +55,7 @@ export const DriverEarningsTable: React.FC<DriverEarningsTableProps> = ({
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(15);
   const [selectedItem, setSelectedItem] = useState<DriverEarningItem | null>(null);
+  const [adjustModalOpen, setAdjustModalOpen] = useState(false);
 
   // Extract unique driver options from earnings + driversList
   const driverOptions = useMemo(() => {
@@ -248,6 +250,16 @@ export const DriverEarningsTable: React.FC<DriverEarningsTableProps> = ({
                 Atualizar
               </Button>
             )}
+
+            <Button
+              variant="default"
+              size="sm"
+              className="h-8 gap-1.5 text-xs font-semibold bg-primary hover:bg-primary/90"
+              onClick={() => setAdjustModalOpen(true)}
+            >
+              <DollarSign className="w-3.5 h-3.5" />
+              Ajustar Carteira
+            </Button>
 
             <Button
               variant="outline"
@@ -728,6 +740,13 @@ export const DriverEarningsTable: React.FC<DriverEarningsTableProps> = ({
           </DialogContent>
         </Dialog>
       )}
+
+      <AdjustDriverWalletModal
+        open={adjustModalOpen}
+        onOpenChange={setAdjustModalOpen}
+        driverId={selectedDriverId !== "all" ? selectedDriverId : null}
+        onSuccess={onRefresh}
+      />
     </Card>
   );
 };

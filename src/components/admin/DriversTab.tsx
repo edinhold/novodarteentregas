@@ -7,8 +7,9 @@ import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Trash2, Eye, Check, X } from "lucide-react";
+import { Wallet, Trash2, Eye, Check, X } from "lucide-react";
 import { toast } from "sonner";
+import { AdjustDriverWalletModal } from "./financial/AdjustDriverWalletModal";
 
 import DeleteConfirm from "./DeleteConfirm";
 
@@ -17,6 +18,13 @@ const DriversTab = () => {
   const [deleteId, setDeleteId] = useState<{ id: string; userId: string; name: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [viewDriver, setViewDriver] = useState<any>(null);
+  const [adjustDriverId, setAdjustDriverId] = useState<string | null>(null);
+  const [adjustModalOpen, setAdjustModalOpen] = useState(false);
+
+  const openAdjustFor = (driverId: string | null) => {
+    setAdjustDriverId(driverId);
+    setAdjustModalOpen(true);
+  };
 
   const { data: drivers = [] } = useQuery({
     queryKey: ["admin-drivers"],
@@ -116,8 +124,16 @@ const DriversTab = () => {
   return (
     <>
       <Card>
-        <CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-base">Motoristas Ativos</CardTitle>
+          <Button
+            variant="default"
+            size="sm"
+            className="gap-1.5 font-medium"
+            onClick={() => openAdjustFor(null)}
+          >
+            <Wallet className="w-4 h-4" /> Ajustar Carteira
+          </Button>
         </CardHeader>
         <CardContent className="p-0">
           <Table>
@@ -127,8 +143,9 @@ const DriversTab = () => {
                 <TableHead>Telefone</TableHead>
                 <TableHead>Veículo</TableHead>
                 <TableHead>Placa</TableHead>
+                <TableHead>Saldo Atual</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead className="w-20"></TableHead>
+                <TableHead className="w-28 text-right">Ações</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -156,8 +173,17 @@ const DriversTab = () => {
                       </Badge>
                     </div>
                   </TableCell>
-                  <TableCell>
-                    <div className="flex gap-1">
+                  <TableCell className="text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-primary hover:text-primary hover:bg-primary/10"
+                        title="Ajustar Carteira (Crédito/Débito)"
+                        onClick={() => openAdjustFor(d.id)}
+                      >
+                        <Wallet className="w-4 h-4" />
+                      </Button>
                       {approval !== "approved" && (
                         <Button variant="ghost" size="icon" className="h-8 w-8 text-green-600 hover:text-green-700" title="Aprovar" onClick={() => handleApproval(d.id, "approved", d.full_name)}>
                           <Check className="w-4 h-4" />
@@ -183,11 +209,17 @@ const DriversTab = () => {
                 <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-8">Nenhum motorista cadastrado</TableCell></TableRow>
               )}
             </TableBody>
-
           </Table>
         </CardContent>
       </Card>
       <DeleteConfirm open={!!deleteId} onOpenChange={(o) => !o && setDeleteId(null)} onConfirm={handleDelete} title={deleteId?.name || "motorista"} loading={deleting} />
+
+      <AdjustDriverWalletModal
+        open={adjustModalOpen}
+        onOpenChange={setAdjustModalOpen}
+        driverId={adjustDriverId}
+        driversList={drivers}
+      />
 
       {/* Driver detail dialog */}
       <Dialog open={!!viewDriver} onOpenChange={(o) => !o && setViewDriver(null)}>
@@ -221,9 +253,23 @@ const DriversTab = () => {
                 <p>Atualização: {new Date(viewDriver.updated_at).toLocaleString("pt-BR")}</p>
                 <p className="font-mono text-[10px]">ID: {viewDriver.user_id}</p>
               </div>
-              <div className="bg-muted/50 rounded-lg p-3 text-center">
-                <p className="text-xs text-muted-foreground">A Receber</p>
-                <p className="text-xl font-extrabold text-accent">R$ {getDriverEarnings(viewDriver.id).toFixed(2)}</p>
+              <div className="bg-muted/50 rounded-lg p-3 flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-muted-foreground">Saldo Atual (A Receber)</p>
+                  <p className="text-xl font-extrabold text-accent">R$ {getDriverEarnings(viewDriver.id).toFixed(2)}</p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="default"
+                  className="gap-1 font-medium"
+                  onClick={() => {
+                    const id = viewDriver.id;
+                    setViewDriver(null);
+                    openAdjustFor(id);
+                  }}
+                >
+                  <Wallet className="w-3.5 h-3.5" /> Ajustar
+                </Button>
               </div>
             </div>
           )}

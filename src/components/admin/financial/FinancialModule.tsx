@@ -8,6 +8,7 @@ import { PendingWithdrawalsSection } from "./PendingWithdrawalsSection";
 import { UnifiedTransactionsTable } from "./UnifiedTransactionsTable";
 import { DriverEarningsTable } from "./DriverEarningsTable";
 import { DirectRechargeModal } from "./DirectRechargeModal";
+import { AdjustDriverWalletModal } from "./AdjustDriverWalletModal";
 import { FinancialReportModal } from "./FinancialReportModal";
 import { FinancialMaintenanceSection } from "./FinancialMaintenanceSection";
 import { Button } from "@/components/ui/button";
@@ -40,6 +41,7 @@ export const FinancialModule: React.FC<FinancialModuleProps> = ({ standalone = f
 
   // Modals state
   const [directRechargeOpen, setDirectRechargeOpen] = useState(false);
+  const [driverWalletModalOpen, setDriverWalletModalOpen] = useState(false);
   const [reportModalOpen, setReportModalOpen] = useState(false);
 
   // Query: delivery config
@@ -267,7 +269,16 @@ export const FinancialModule: React.FC<FinancialModuleProps> = ({ standalone = f
             className="h-9 gap-1.5 text-xs font-semibold bg-teal-600 hover:bg-teal-700 text-white"
           >
             <Wallet className="w-3.5 h-3.5" />
-            Recarga Direta
+            Recarga Direta Lojista
+          </Button>
+
+          <Button
+            size="sm"
+            onClick={() => setDriverWalletModalOpen(true)}
+            className="h-9 gap-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white"
+          >
+            <Truck className="w-3.5 h-3.5" />
+            Ajustar Carteira Motorista
           </Button>
 
           <Button
@@ -479,6 +490,13 @@ export const FinancialModule: React.FC<FinancialModuleProps> = ({ standalone = f
         onOpenChange={setDirectRechargeOpen}
         stores={stores}
         promoPercent={Number(config?.promo_credit_percent || 0)}
+      />
+
+      {/* Driver Wallet Adjustment Modal */}
+      <AdjustDriverWalletModal
+        open={driverWalletModalOpen}
+        onOpenChange={setDriverWalletModalOpen}
+        onSuccess={handleRefresh}
       />
 
       {/* Financial Closing Report Modal */}
