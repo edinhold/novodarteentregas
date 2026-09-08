@@ -516,6 +516,22 @@ export const FinancialTab = () => {
     return map;
   }, [storeOwners]);
 
+  const restaurantMap = useMemo(() => {
+    const map = new Map<string, any>();
+    (restaurants || []).forEach((r) => {
+      if (r.id) map.set(r.id, r);
+    });
+    return map;
+  }, [restaurants]);
+
+  const restaurantByOwnerMap = useMemo(() => {
+    const map = new Map<string, any>();
+    (restaurants || []).forEach((r) => {
+      if (r.owner_id) map.set(r.owner_id, r);
+    });
+    return map;
+  }, [restaurants]);
+
   // Lista formatada de opções de lojas atreladas aos seus nomes reais
   const storeOptions = useMemo(() => {
     const list: Array<{
