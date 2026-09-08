@@ -2,6 +2,22 @@
 -- Ensures store/lojista accounts can be completely deleted from auth.users, profiles, user_roles and restaurants,
 -- while unlinking historical financial transactions so stats are preserved and credentials (email/phone) are freed.
 
+-- 1. Ensure RLS policies allow Administrators to view and DELETE profiles & user_roles
+DROP POLICY IF EXISTS "Admins can manage profiles" ON public.profiles;
+CREATE POLICY "Admins can manage profiles"
+  ON public.profiles FOR ALL
+  TO authenticated
+  USING (public.has_role(auth.uid(), 'admin'))
+  WITH CHECK (public.has_role(auth.uid(), 'admin'));
+
+DROP POLICY IF EXISTS "Admins can manage user_roles" ON public.user_roles;
+CREATE POLICY "Admins can manage user_roles"
+  ON public.user_roles FOR ALL
+  TO authenticated
+  USING (public.has_role(auth.uid(), 'admin'))
+  WITH CHECK (public.has_role(auth.uid(), 'admin'));
+
+-- 2. Atomic security definer cascade function for complete deletion
 CREATE OR REPLACE FUNCTION public.admin_delete_user_cascade(
   p_target_user_id UUID,
   p_target_restaurant_id UUID DEFAULT NULL

@@ -136,10 +136,15 @@ const CustomersTab = () => {
           });
 
           if (rpcErr) {
-            console.warn("[delete-user] RPC fallback falhou, aplicando limpeza direta:", rpcErr.message);
+            console.warn("[delete-user] RPC fallback falhou, aplicando limpeza direta no cliente:", rpcErr.message);
             await supabase.from("orders").update({ user_id: null }).eq("user_id", c.user_id);
             await supabase.from("delivery_requests").update({ store_owner_id: null }).eq("store_owner_id", c.user_id);
             await supabase.from("delivery_requests").update({ driver_id: null }).eq("driver_id", c.user_id);
+            await supabase.from("store_recharges").update({ store_owner_id: null }).eq("store_owner_id", c.user_id);
+            await supabase.from("credit_codes").update({ used_by: null }).eq("used_by", c.user_id);
+            await supabase.from("store_driver_favorites").delete().eq("driver_id", c.user_id).then(() => {}, () => {});
+            await supabase.from("drivers").delete().eq("user_id", c.user_id);
+            await supabase.from("restaurants").delete().eq("owner_id", c.user_id);
             await supabase.from("user_roles").delete().eq("user_id", c.user_id);
             await supabase.from("profiles").delete().eq("user_id", c.user_id);
           }

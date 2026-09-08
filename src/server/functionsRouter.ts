@@ -1816,8 +1816,20 @@ export async function handleEdgeFunction(
       };
     }
 
-    const targetUserId = reqBody?.user_id || reqBody?.target_user_id || reqBody?.owner_id;
-    const targetRestaurantId = reqBody?.restaurant_id || reqBody?.id;
+    let targetUserId = reqBody?.user_id || reqBody?.target_user_id || reqBody?.owner_id;
+    let targetRestaurantId = reqBody?.restaurant_id || reqBody?.id;
+
+    if (!targetUserId && !targetRestaurantId && (reqBody?.full_name || reqBody?.name || reqBody?.search)) {
+      const searchTerm = reqBody.full_name || reqBody.name || reqBody.search;
+      const { data: matchedProf } = await supabase
+        .from("profiles")
+        .select("user_id")
+        .or(`full_name.ilike.%${searchTerm}%,phone.ilike.%${searchTerm}%`)
+        .maybeSingle();
+      if (matchedProf?.user_id) {
+        targetUserId = matchedProf.user_id;
+      }
+    }
 
     if (!targetUserId && !targetRestaurantId) {
       return {
@@ -1825,7 +1837,7 @@ export async function handleEdgeFunction(
         body: {
           success: false,
           code: "PARAMETROS_INVALIDOS",
-          error: "Informe user_id ou restaurant_id para exclusão.",
+          error: "Informe user_id, restaurant_id ou nome/telefone para exclusão.",
           request_id: requestId,
         },
       };
