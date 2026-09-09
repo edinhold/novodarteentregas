@@ -121,7 +121,7 @@ const MenuTab = ({ restaurant }: MenuTabProps) => {
                     {!p.is_available && <span className="text-xs text-muted-foreground">(indisponível)</span>}
                   </div>
                   {p.description && <p className="text-xs text-muted-foreground truncate">{p.description}</p>}
-                  <p className="text-sm font-bold text-primary">R$ {p.price.toFixed(2)}</p>
+                  <p className="text-sm font-bold text-primary">R$ {Number(p.price || 0).toFixed(2)}</p>
                 </div>
                 <div className="flex gap-1">
                   <Button size="icon" variant="ghost" onClick={() => openEdit(p)}><Pencil className="w-4 h-4" /></Button>

@@ -451,7 +451,7 @@ export const useGPSTracking = (options: GPSTrackingOptions = {}) => {
         const code = err?.code ?? 0;
         lastErrorTsRef.current = Date.now();
 
-        if (code === 1 || err?.message?.toLowerCase().includes("denied")) {
+        if (code === 1 || (err?.message || "").toLowerCase().includes("denied")) {
           setErrorStatus("Permissão de localização negada.");
           maybeToastError(1, "Permissão de localização negada.");
           setWatching(false);

@@ -55,33 +55,47 @@ const AdminDashboard = () => {
 
   // Protect admin route
   useEffect(() => {
+    let isMounted = true;
     const checkAdmin = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        navigate("/admin/login", { replace: true });
-        return;
-      }
-      const { data: isAdmin, error: roleError } = await supabase.rpc("has_role", {
-        _user_id: session.user.id,
-        _role: "admin",
-      });
-      if (roleError) {
-        setAuthError("Não foi possível verificar sua permissão. Tente novamente em instantes.");
-        toast.error("Erro ao verificar permissão de administrador.");
-        return;
-      }
-      if (!isAdmin) {
-        toast.error("Acesso negado. Sua conta não possui permissão de administrador.", {
-          description: `Conta: ${session.user.email}`,
-          duration: 6000,
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          if (isMounted) navigate("/admin/login", { replace: true });
+          return;
+        }
+        const { data: isAdmin, error: roleError } = await supabase.rpc("has_role", {
+          _user_id: session.user.id,
+          _role: "admin",
         });
-        await supabase.auth.signOut();
-        navigate("/admin/login", { replace: true });
-        return;
+        if (roleError) {
+          console.error("Erro na consulta de permissão RPC has_role:", roleError);
+          if (isMounted) {
+            setAuthError("Erro ao verificar permissão de administrador. Tente novamente.");
+            toast.error("Erro ao verificar permissão de administrador.");
+          }
+          return;
+        }
+        if (!isAdmin) {
+          if (isMounted) {
+            toast.error("Acesso negado. Sua conta não possui permissão de administrador.", {
+              description: `Conta: ${session.user.email}`,
+              duration: 6000,
+            });
+          }
+          await supabase.auth.signOut();
+          if (isMounted) navigate("/admin/login", { replace: true });
+          return;
+        }
+        if (isMounted) setAuthChecked(true);
+      } catch (err: any) {
+        console.error("Exceção na checagem de permissão de admin:", err);
+        if (isMounted) {
+          setAuthError("Não foi possível verificar permissão. Verifique sua conexão e tente novamente.");
+        }
       }
-      setAuthChecked(true);
     };
     checkAdmin();
+    return () => { isMounted = false; };
   }, [navigate]);
 
   // Realtime: notify admin on new withdrawal requests
@@ -233,7 +247,7 @@ const AdminDashboard = () => {
     { label: "Restaurantes", value: restaurants.length, icon: Store, color: "text-primary" },
     { label: "Produtos", value: products.length, icon: Package, color: "text-secondary" },
     { label: "Pedidos", value: orders.length, icon: ShoppingCart, color: "text-accent" },
-    { label: "Faturamento", value: `R$ ${orders.reduce((s: number, o: any) => s + Number(o.total), 0).toFixed(0)}`, icon: TrendingUp, color: "text-primary" },
+    { label: "Faturamento", value: `R$ ${orders.reduce((s: number, o: any) => s + Number(o?.total || 0), 0).toFixed(0)}`, icon: TrendingUp, color: "text-primary" },
   ];
 
   if (!authChecked) {
@@ -385,7 +399,7 @@ const AdminDashboard = () => {
                       <TableRow key={p.id}>
                         <TableCell className="font-medium">{p.name}</TableCell>
                         <TableCell>{p.restaurants?.name}</TableCell>
-                        <TableCell>R$ {Number(p.price).toFixed(2)}</TableCell>
+                        <TableCell>R$ {Number(p?.price || 0).toFixed(2)}</TableCell>
                         <TableCell>{p.category}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-1">
@@ -420,7 +434,7 @@ const AdminDashboard = () => {
                         <div className="min-w-0">
                           <p className="font-bold text-sm">#{order.id.slice(0, 8)}</p>
                           <p className="text-xs text-muted-foreground">{order.restaurants?.name}</p>
-                          <p className="font-bold text-sm mt-1">R$ {Number(order.total).toFixed(2)}</p>
+                          <p className="font-bold text-sm mt-1">R$ {Number(order?.total || 0).toFixed(2)}</p>
                         </div>
                         <Select value={order.status} onValueChange={(v) => handleOrderStatus(order.id, v)}>
                           <SelectTrigger className="w-[140px] h-8 text-xs">

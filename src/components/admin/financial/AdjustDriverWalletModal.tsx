@@ -167,7 +167,7 @@ export const AdjustDriverWalletModal: React.FC<AdjustDriverWalletModalProps> = (
 
         if (!error && data && typeof data === "object" && (data as any).success !== false) {
           rpcSuccess = true;
-        } else if (error && !error.message?.toLowerCase().includes("schema cache") && !error.message?.toLowerCase().includes("could not find the function")) {
+        } else if (error && !(error?.message || "").toLowerCase().includes("schema cache") && !(error?.message || "").toLowerCase().includes("could not find the function")) {
           throw new Error(error.message || "Falha ao processar ajuste no backend.");
         }
       } catch (rpcErr: any) {

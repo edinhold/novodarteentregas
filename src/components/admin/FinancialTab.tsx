@@ -537,13 +537,13 @@ export const FinancialTab = () => {
     (req: DeliveryRequestRecord): string => {
       if (req.restaurant_id) {
         const rest = restaurantMap.get(req.restaurant_id);
-        if (rest?.name && !rest.name.toLowerCase().includes("loja cadastrada")) {
+        if (rest?.name && !(rest.name || "").toLowerCase().includes("loja cadastrada")) {
           return rest.name;
         }
       }
       if (req.store_owner_id) {
         const rest = restaurantByOwnerMap.get(req.store_owner_id);
-        if (rest?.name && !rest.name.toLowerCase().includes("loja cadastrada")) {
+        if (rest?.name && !(rest.name || "").toLowerCase().includes("loja cadastrada")) {
           return rest.name;
         }
         const owner = storeOwnerMap.get(req.store_owner_id);
@@ -579,7 +579,7 @@ export const FinancialTab = () => {
     storeOwners.forEach((owner) => {
       seenUserIds.add(owner.user_id);
       const rest = restaurants.find((r) => r.owner_id === owner.user_id);
-      if (!rest || rest.name?.toLowerCase().includes("loja cadastrada")) return;
+      if (!rest || (rest.name || "").toLowerCase().includes("loja cadastrada")) return;
 
       const storeName = rest.name;
       const ownerName = owner.full_name || owner.email || "";
@@ -599,7 +599,7 @@ export const FinancialTab = () => {
 
     restaurants.forEach((r) => {
       if (r.owner_id && !seenUserIds.has(r.owner_id)) {
-        if (r.name?.toLowerCase().includes("loja cadastrada")) return;
+        if ((r.name || "").toLowerCase().includes("loja cadastrada")) return;
         seenUserIds.add(r.owner_id);
         const owner = storeOwnerMap.get(r.owner_id);
         const ownerName = owner?.full_name || owner?.email || "";
@@ -607,14 +607,14 @@ export const FinancialTab = () => {
 
         list.push({
           userId: r.owner_id,
-          storeName: r.name,
+          storeName: r.name || "Loja",
           ownerName,
-          displayLabel,
+          displayLabel: displayLabel || "Loja",
         });
       }
     });
 
-    return list.sort((a, b) => a.storeName.localeCompare(b.storeName));
+    return list.sort((a, b) => (a.storeName || "").localeCompare(b.storeName || ""));
   }, [storeOwners, restaurants, storeOwnerMap]);
 
   const driverMap = useMemo(() => {
@@ -688,7 +688,7 @@ export const FinancialTab = () => {
       const rest = restaurants.find((r) => r.owner_id === sc.user_id);
 
       // Desconsiderar créditos órfãos de lojas inexistentes ou com nome genérico "Loja Cadastrada"
-      if (!rest || rest.name?.toLowerCase().includes("loja cadastrada")) {
+      if (!rest || (rest.name || "").toLowerCase().includes("loja cadastrada")) {
         return;
       }
 

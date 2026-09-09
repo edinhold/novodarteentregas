@@ -242,7 +242,7 @@ const StoreInfoTab = ({ restaurant, userId }: StoreInfoTabProps) => {
       }
       toast.success(`📍 Localização GPS obtida (precisão: ${Math.round(loc.accuracy)}m)`);
     } catch (err: any) {
-      const isDenied = err?.code === 1 || err?.message?.toLowerCase().includes("denied");
+      const isDenied = err?.code === 1 || (err?.message || "").toLowerCase().includes("denied");
       toast.error(isDenied ? "Não foi possível obter sua localização. Verifique se a localização/GPS está ativada e permita o acesso à localização." : "Não foi possível obter sua localização. Verifique se a localização/GPS está ativada e tente novamente.");
     } finally {
       setGpsLoading(false);

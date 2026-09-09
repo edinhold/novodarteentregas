@@ -63,8 +63,8 @@ const FavoritesTab = ({ restaurant }: FavoritesTabProps) => {
     const favIds = new Set(favorites.map((f: any) => f.driver_id));
     return allDrivers
       .filter((d: any) =>
-        (d.full_name?.toLowerCase().includes(term) ||
-          d.driver_code?.toLowerCase().includes(term)) &&
+        ((d.full_name || "").toLowerCase().includes(term) ||
+          (d.driver_code || "").toLowerCase().includes(term)) &&
         !favIds.has(d.id)
       )
       .slice(0, 8);

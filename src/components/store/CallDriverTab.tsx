@@ -410,7 +410,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
         if (settled) return;
         finish();
         console.warn(`${GPS_LOG} erro após ${Date.now() - startedAt}ms: ${err?.message}`);
-        const isDenied = err?.code === 1 || err?.message?.toLowerCase().includes("denied");
+        const isDenied = err?.code === 1 || (err?.message || "").toLowerCase().includes("denied");
         if (isDenied) {
           setGpsStatus("denied");
           setGpsMessage("Não foi possível obter sua localização. Verifique se a localização/GPS está ativada e permita o acesso à localização.");
@@ -569,7 +569,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
 
       toast.success("Localização obtida com sucesso!");
     } catch (err: any) {
-      const isDenied = err?.code === 1 || err?.message?.toLowerCase().includes("denied");
+      const isDenied = err?.code === 1 || (err?.message || "").toLowerCase().includes("denied");
       if (isDenied) {
         finishError("Não foi possível obter sua localização. Verifique se a localização/GPS está ativada e permita o acesso à localização.");
       } else {

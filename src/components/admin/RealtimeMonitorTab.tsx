@@ -162,7 +162,12 @@ const RealtimeMonitorContent = () => {
 
   const filtered = enrichedDrivers.filter((d: any) => {
     const q = search.toLowerCase();
-    return !q || d.full_name?.toLowerCase().includes(q) || d.driver_code?.toLowerCase().includes(q) || d.vehicle_plate?.toLowerCase().includes(q);
+    return (
+      !q ||
+      (d.full_name || "").toLowerCase().includes(q) ||
+      (d.driver_code || "").toLowerCase().includes(q) ||
+      (d.vehicle_plate || "").toLowerCase().includes(q)
+    );
   });
 
   const stats = useMemo(() => {

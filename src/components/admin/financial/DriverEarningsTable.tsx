@@ -107,11 +107,11 @@ export const DriverEarningsTable: React.FC<DriverEarningsTableProps> = ({
       // Search term
       if (searchTerm.trim()) {
         const q = searchTerm.toLowerCase();
-        const matchesCorrida = item.corridaId.toLowerCase().includes(q);
-        const matchesDriver = item.driverName.toLowerCase().includes(q);
-        const matchesStore = item.storeName.toLowerCase().includes(q);
-        const matchesOrigin = item.pickupAddress?.toLowerCase().includes(q) || false;
-        const matchesDest = item.deliveryAddress?.toLowerCase().includes(q) || false;
+        const matchesCorrida = (item.corridaId || "").toLowerCase().includes(q);
+        const matchesDriver = (item.driverName || "").toLowerCase().includes(q);
+        const matchesStore = (item.storeName || "").toLowerCase().includes(q);
+        const matchesOrigin = (item.pickupAddress || "").toLowerCase().includes(q);
+        const matchesDest = (item.deliveryAddress || "").toLowerCase().includes(q);
         if (!matchesCorrida && !matchesDriver && !matchesStore && !matchesOrigin && !matchesDest) {
           return false;
         }

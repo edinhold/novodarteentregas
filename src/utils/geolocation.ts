@@ -169,7 +169,7 @@ export async function getBestLocation(options?: {
   }
 
   // If permission explicitly denied, rethrow immediately without wasting time
-  if (firstError?.code === 1 || firstError?.message?.toLowerCase().includes("denied")) {
+  if (firstError?.code === 1 || (firstError?.message || "").toLowerCase().includes("denied")) {
     throw firstError;
   }
 

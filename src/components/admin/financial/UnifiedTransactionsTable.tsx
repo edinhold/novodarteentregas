@@ -139,10 +139,10 @@ export const UnifiedTransactionsTable: React.FC<UnifiedTransactionsTableProps> =
       // Search term
       if (searchTerm.trim()) {
         const q = searchTerm.toLowerCase();
-        const matchesId = tx.id.toLowerCase().includes(q) || tx.rawId.toLowerCase().includes(q);
-        const matchesParty = tx.partyName.toLowerCase().includes(q);
-        const matchesDesc = tx.description.toLowerCase().includes(q);
-        const matchesCode = tx.details?.codigo?.toLowerCase()?.includes(q);
+        const matchesId = (tx.id || "").toLowerCase().includes(q) || (tx.rawId || "").toLowerCase().includes(q);
+        const matchesParty = (tx.partyName || "").toLowerCase().includes(q);
+        const matchesDesc = (tx.description || "").toLowerCase().includes(q);
+        const matchesCode = (tx.details?.codigo || "").toLowerCase().includes(q);
         if (!matchesId && !matchesParty && !matchesDesc && !matchesCode) {
           return false;
         }
