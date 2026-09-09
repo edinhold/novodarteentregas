@@ -1818,6 +1818,13 @@ export type Database = {
         }
         Returns: Json
       }
+      admin_set_user_password: {
+        Args: {
+          p_new_password: string
+          p_target_user_id: string
+        }
+        Returns: Json
+      }
       admin_decide_withdrawal: {
         Args: { p_decision: string; p_reason?: string; p_request_id: string }
         Returns: Json
