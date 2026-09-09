@@ -180,16 +180,13 @@ export const AdjustDriverWalletModal: React.FC<AdjustDriverWalletModalProps> = (
         const { data: authData } = await supabase.auth.getUser();
         const adminId = authData?.user?.id;
         const adminEmail = authData?.user?.email || "admin@sistema";
-        const formattedDesc = `[Ajuste Manual — ${operation === "add" ? "Crédito" : "Débito"}] ${reason.trim()}`;
-
-        // Insert into driver_earnings using universal core fields
+        // Insert into driver_earnings using 3 universal core fields: driver_id, amount, status
         const { data: earningData, error: earningErr } = await supabase
           .from("driver_earnings")
           .insert({
             driver_id: selectedDriverId,
             amount: signedAmount,
             status: "pending",
-            description: formattedDesc,
           } as any)
           .select("id")
           .maybeSingle();

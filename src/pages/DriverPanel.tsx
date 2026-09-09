@@ -256,6 +256,35 @@ const DriverPanel = () => {
     return Math.max(0, grossFee * (1 - appFeePercent / 100));
   };
 
+  // Realtime subscription for driver earnings & wallet adjustments
+  useEffect(() => {
+    if (!driverProfile?.id) return;
+
+    const channel = supabase
+      .channel(`driver-wallet-realtime-${driverProfile.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "driver_earnings",
+          filter: `driver_id=eq.${driverProfile.id}`,
+        },
+        (payload) => {
+          queryClient.invalidateQueries({ queryKey: ["my-earnings", driverProfile.id] });
+          queryClient.invalidateQueries({ queryKey: ["my-withdrawals", user?.id] });
+          if (payload.eventType === "INSERT") {
+            toast.info("🎉 Seu saldo de carteira foi atualizado pelo administrador!");
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [driverProfile?.id, user?.id, queryClient]);
+
   // Request local notification permission (no push provider configured).
   useEffect(() => {
     if (!user?.id) return;
