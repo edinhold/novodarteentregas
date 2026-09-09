@@ -148,7 +148,10 @@ const MultiDeliveryOrder = ({ restaurant, userId }: Props) => {
 
   // Parâmetros oficiais da regra de precificação do Admin
   const baseFee = Number(config?.base_fee ?? 5.30);
-  const feePerKm = Number(config?.fee_per_km ?? 1.70);
+  const isDynamicPricing = !!(config as any)?.dynamic_pricing_enabled && Number((config as any)?.dynamic_fee_per_km ?? 0) > 0;
+  const feePerKm = isDynamicPricing
+    ? Number((config as any).dynamic_fee_per_km)
+    : Number(config?.fee_per_km ?? 1.70);
   const minKm = Number(config?.min_km ?? 0);
   const maxKm = Number(config?.max_km ?? 0);
   const roundUp = Boolean(config?.round_km_up);

@@ -201,7 +201,10 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
   // Delivery config loaded for price calculations
   const configLoaded = !!deliveryConfig;
   const baseFee = Number((deliveryConfig as any)?.base_fee ?? 0);
-  const feePerKm = Number((deliveryConfig as any)?.fee_per_km ?? 0);
+  const isDynamicPricing = !!(deliveryConfig as any)?.dynamic_pricing_enabled && Number((deliveryConfig as any)?.dynamic_fee_per_km ?? 0) > 0;
+  const feePerKm = isDynamicPricing 
+    ? Number((deliveryConfig as any).dynamic_fee_per_km) 
+    : Number((deliveryConfig as any)?.fee_per_km ?? 0);
   const minKm = Number((deliveryConfig as any)?.min_km ?? 0);
   const maxKm = Number((deliveryConfig as any)?.max_km ?? 0);
   const roundKmUp = !!(deliveryConfig as any)?.round_km_up;

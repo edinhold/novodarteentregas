@@ -682,7 +682,7 @@ const DriverPanel = () => {
   const pendingBalance = earnings
     .filter((e: any) => e.status === "pending")
     .reduce((sum: number, e: any) => sum + Number(e.amount), 0);
-  const paymentDay = Number((deliveryConfig as any)?.payment_day ?? 5);
+  const paymentDay = Number((deliveryConfig as any)?.payment_day ?? 3);
   const isPaymentDay = new Date().getDay() === paymentDay;
   const fixedFee = Number((deliveryConfig as any)?.withdrawal_fixed_fee ?? 1.00);
   const earlyFeePercent = Number((deliveryConfig as any)?.early_withdrawal_fee_percent ?? 10);
@@ -1047,17 +1047,22 @@ const DriverPanel = () => {
                         {(() => {
                           const weekdayNames = ["Domingo","Segunda-feira","Terça-feira","Quarta-feira","Quinta-feira","Sexta-feira","Sábado"];
                           return isPaymentDay ? (
-                            <div className="bg-accent/10 border border-accent/30 rounded-lg p-3 text-center">
-                              <p className="text-sm font-bold text-accent">🎉 Hoje é dia de pagamento!</p>
-                              <p className="text-xs text-muted-foreground">Você pode solicitar seu saque agora (taxa fixa de R$ {fixedFee.toFixed(2)})</p>
+                            <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-3 text-center space-y-1">
+                              <p className="text-sm font-bold text-emerald-600 dark:text-emerald-400">🎉 Hoje é {weekdayNames[paymentDay]} (Dia Oficial de Saque)!</p>
+                              <p className="text-xs text-muted-foreground">
+                                Solicitação isenta da taxa de adiantamento! Cobrada apenas a taxa de manutenção de <strong>R$ {fixedFee.toFixed(2)}</strong>.
+                              </p>
                             </div>
                           ) : (
-                            <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 text-center">
-                              <p className="text-xs text-foreground">
-                                Saque sem taxa de antecipação apenas às <strong>{weekdayNames[paymentDay]}</strong>.
+                            <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 text-center space-y-1">
+                              <p className="text-xs font-semibold text-amber-700 dark:text-amber-400">
+                                ⚡ Solicitação de Adiantamento
                               </p>
-                              <p className="text-xs text-muted-foreground mt-1">
-                                Sacando hoje será aplicada taxa de antecipação de <strong>{earlyFeePercent}%</strong>.
+                              <p className="text-xs text-muted-foreground">
+                                Fora de <strong>{weekdayNames[paymentDay]}</strong> (dia oficial de saque), é cobrada a taxa de adiantamento de <strong>{earlyFeePercent}%</strong>.
+                              </p>
+                              <p className="text-[11px] text-muted-foreground italic pt-0.5">
+                                No dia oficial ({weekdayNames[paymentDay]}), a taxa é de apenas R$ {fixedFee.toFixed(2)} (manutenção).
                               </p>
                             </div>
                           );
@@ -1070,14 +1075,14 @@ const DriverPanel = () => {
                           <div className="flex justify-between text-sm text-muted-foreground">
                             <span>
                               {isPaymentDay
-                                ? "Taxa fixa por saque"
-                                : `Taxa de antecipação (${earlyFeePercent}%)`}
+                                ? `Taxa de manutenção (${weekdayNames[paymentDay]})`
+                                : `Taxa de adiantamento (${earlyFeePercent}%)`}
                             </span>
-                            <span>- R$ {feeAmountPreview.toFixed(2)}</span>
+                            <span className="font-mono text-destructive">- R$ {feeAmountPreview.toFixed(2)}</span>
                           </div>
-                          <div className="flex justify-between text-sm font-bold border-t pt-1 mt-1">
+                          <div className="flex justify-between text-sm font-bold border-t pt-1.5 mt-1">
                             <span>Valor a receber</span>
-                            <span className="text-primary text-lg">R$ {netPreview.toFixed(2)}</span>
+                            <span className="text-primary text-lg font-mono">R$ {netPreview.toFixed(2)}</span>
                           </div>
                         </div>
 

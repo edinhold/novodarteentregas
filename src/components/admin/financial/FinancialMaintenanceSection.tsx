@@ -39,7 +39,7 @@ export const FinancialMaintenanceSection: React.FC<FinancialMaintenanceSectionPr
 }) => {
   const queryClient = useQueryClient();
   const [paymentDay, setPaymentDay] = useState<string>(
-    deliveryConfig?.payment_day !== undefined ? String(deliveryConfig.payment_day) : "1"
+    deliveryConfig?.payment_day !== undefined ? String(deliveryConfig.payment_day) : "3"
   );
   const [savingPaymentDay, setSavingPaymentDay] = useState(false);
 
