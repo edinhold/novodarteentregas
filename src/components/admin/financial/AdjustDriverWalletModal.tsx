@@ -177,26 +177,25 @@ export const AdjustDriverWalletModal: React.FC<AdjustDriverWalletModalProps> = (
       // 2. Fallback: Direct insert into driver_earnings and audit log if RPC function is reloading in schema cache
       if (!rpcSuccess) {
         const signedAmount = operation === "add" ? amountVal : -amountVal;
-        const adjType = operation === "add" ? "manual_credit" : "manual_debit";
         const { data: authData } = await supabase.auth.getUser();
         const adminId = authData?.user?.id;
         const adminEmail = authData?.user?.email || "admin@sistema";
+        const formattedDesc = `[Ajuste Manual — ${operation === "add" ? "Crédito" : "Débito"}] ${reason.trim()}`;
 
-        // Insert into driver_earnings
+        // Insert into driver_earnings using universal core fields
         const { data: earningData, error: earningErr } = await supabase
           .from("driver_earnings")
           .insert({
             driver_id: selectedDriverId,
             amount: signedAmount,
             status: "pending",
-            description: reason.trim(),
-            adjustment_type: adjType,
-            created_by_admin_id: adminId,
+            description: formattedDesc,
           } as any)
           .select("id")
-          .single();
+          .maybeSingle();
 
         if (earningErr) {
+          console.error("[AdjustDriverWallet] Fallback Insert Error:", earningErr);
           throw new Error(earningErr.message || "Erro ao registrar o ajuste de saldo na carteira.");
         }
 
