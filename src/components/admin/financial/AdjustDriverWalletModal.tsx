@@ -74,18 +74,24 @@ export const AdjustDriverWalletModal: React.FC<AdjustDriverWalletModalProps> = (
     }));
   }, [providedDriversList, fetchedDrivers]);
 
-  // Pre-select driver when dialog opens or prop changes
+  // 1. Reset form fields ONLY ONCE when dialog opens (open transitions from false to true)
   useEffect(() => {
     if (open) {
-      if (preselectedDriverId) {
-        setSelectedDriverId(preselectedDriverId);
-      } else if (driversOptions.length > 0 && !selectedDriverId) {
-        setSelectedDriverId(driversOptions[0].id);
-      }
       setAmountInput("");
       setReason("");
       setOperation("add");
+      setSubmitting(false);
       idempotencyKeyRef.current = `adj-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    }
+  }, [open]);
+
+  // 2. Select initial driver independently without wiping amountInput/reason on background query updates
+  useEffect(() => {
+    if (!open) return;
+    if (preselectedDriverId) {
+      setSelectedDriverId(preselectedDriverId);
+    } else if (driversOptions.length > 0 && !selectedDriverId) {
+      setSelectedDriverId(driversOptions[0].id);
     }
   }, [open, preselectedDriverId, driversOptions]);
 
@@ -204,11 +210,11 @@ export const AdjustDriverWalletModal: React.FC<AdjustDriverWalletModalProps> = (
         <div className="space-y-4 py-2">
           {/* Seletor de Motorista */}
           <div className="space-y-1.5">
-            <Label className="text-xs font-semibold flex items-center gap-1">
+            <Label htmlFor="wallet-adjust-driver" className="text-xs font-semibold flex items-center gap-1">
               <UserCheck className="w-3.5 h-3.5 text-muted-foreground" /> Motorista
             </Label>
             <Select value={selectedDriverId} onValueChange={setSelectedDriverId} disabled={submitting}>
-              <SelectTrigger className="w-full">
+              <SelectTrigger id="wallet-adjust-driver" className="w-full">
                 <SelectValue placeholder="Selecione o motorista..." />
               </SelectTrigger>
               <SelectContent className="max-h-60">
@@ -255,10 +261,10 @@ export const AdjustDriverWalletModal: React.FC<AdjustDriverWalletModalProps> = (
             </div>
           </div>
 
-          {/* Campo de Valor com suporte a BRL */}
+          {/* Campo de Valor com suporte a BRL e digitação livre */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <Label className="text-xs font-semibold">Valor do Ajuste (R$)</Label>
+              <Label htmlFor="wallet-adjust-amount" className="text-xs font-semibold">Valor do Ajuste (R$)</Label>
               {amountVal > 0 && (
                 <Badge variant="secondary" className="text-[11px] font-semibold text-primary">
                   Valor reconhecido: {formatCurrency(amountVal)}
@@ -266,14 +272,15 @@ export const AdjustDriverWalletModal: React.FC<AdjustDriverWalletModalProps> = (
               )}
             </div>
             <Input
+              id="wallet-adjust-amount"
               type="text"
               inputMode="decimal"
-              pattern="[0-9.,]*"
               placeholder="0,00"
               value={amountInput}
               onChange={(e) => setAmountInput(e.target.value)}
               className="text-lg font-bold"
               disabled={submitting}
+              autoComplete="off"
             />
             {/* Botões de Atalho / Presets Rápidos */}
             <div className="flex flex-wrap items-center gap-1.5 pt-1">
@@ -296,10 +303,11 @@ export const AdjustDriverWalletModal: React.FC<AdjustDriverWalletModalProps> = (
 
           {/* Motivo / Descrição Obrigatório */}
           <div className="space-y-1.5">
-            <Label className="text-xs font-semibold">
+            <Label htmlFor="wallet-adjust-reason" className="text-xs font-semibold">
               Motivo / Descrição do Ajuste *
             </Label>
             <Textarea
+              id="wallet-adjust-reason"
               rows={2}
               placeholder="Ex.: Corridas realizadas durante indisponibilidade do sistema; ajuste de taxa; etc."
               value={reason}
