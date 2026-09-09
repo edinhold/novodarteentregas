@@ -72,13 +72,15 @@ const FeesConfigTab = () => {
     if (!config) return;
     setLoading(true);
     try {
-      const baseFeeVal = Math.max(0, parseFloat(form.base_fee) || 0);
-      const feePerKmVal = Math.max(0, parseFloat(form.fee_per_km) || 0);
-      const minKmVal = Math.max(0, parseFloat(form.min_km) || 0);
-      const maxKmVal = Math.max(0, parseFloat(form.max_km) || 0);
-      const withdrawalFixedFeeVal = Math.max(0, parseFloat(form.withdrawal_fixed_fee) || 1.00);
-      const paymentDayVal = parseInt(form.payment_day, 10) ?? 3;
-      const dynamicFeePerKmVal = Math.max(0, parseFloat(form.dynamic_fee_per_km) || 0);
+      const baseFeeVal = isNaN(parseFloat(form.base_fee)) ? 5 : Math.max(0, parseFloat(form.base_fee));
+      const feePerKmVal = isNaN(parseFloat(form.fee_per_km)) ? 1.5 : Math.max(0, parseFloat(form.fee_per_km));
+      const minKmVal = isNaN(parseFloat(form.min_km)) ? 0 : Math.max(0, parseFloat(form.min_km));
+      const maxKmVal = isNaN(parseFloat(form.max_km)) ? 0 : Math.max(0, parseFloat(form.max_km));
+      const earlyWithdrawalFeePercentVal = isNaN(parseFloat(form.early_withdrawal_fee_percent)) ? 10 : Math.max(0, parseFloat(form.early_withdrawal_fee_percent));
+      const withdrawalFixedFeeVal = isNaN(parseFloat(form.withdrawal_fixed_fee)) ? 1.00 : Math.max(0, parseFloat(form.withdrawal_fixed_fee));
+      const paymentDayVal = isNaN(parseInt(form.payment_day, 10)) ? 3 : parseInt(form.payment_day, 10);
+      const appFeePerDeliveryVal = isNaN(parseFloat(form.app_fee_per_delivery)) ? 2 : Math.max(0, parseFloat(form.app_fee_per_delivery));
+      const dynamicFeePerKmVal = isNaN(parseFloat(form.dynamic_fee_per_km)) ? 0 : Math.max(0, parseFloat(form.dynamic_fee_per_km));
       
       if (maxKmVal > 0 && minKmVal > maxKmVal) {
         toast.error("Km mínimo não pode ser maior que o máximo");
@@ -89,10 +91,10 @@ const FeesConfigTab = () => {
       const { error } = await supabase.from("delivery_config").update({
         base_fee: baseFeeVal,
         fee_per_km: feePerKmVal,
-        early_withdrawal_fee_percent: parseFloat(form.early_withdrawal_fee_percent) || 10,
+        early_withdrawal_fee_percent: earlyWithdrawalFeePercentVal,
         withdrawal_fixed_fee: withdrawalFixedFeeVal,
         payment_day: paymentDayVal,
-        app_fee_per_delivery: parseFloat(form.app_fee_per_delivery) || 2,
+        app_fee_per_delivery: appFeePerDeliveryVal,
         whatsapp_number: form.whatsapp_number.trim(),
         recharge_url: form.recharge_url.trim(),
         min_km: minKmVal,
