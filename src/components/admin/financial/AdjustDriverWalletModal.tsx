@@ -16,13 +16,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { formatCurrency } from "@/utils/financialCalculations";
+import { formatCurrency, parseBRLToNumber } from "@/utils/financialCalculations";
 import {
   Wallet,
   PlusCircle,
   MinusCircle,
-  ArrowUpRight,
-  ArrowDownLeft,
   AlertTriangle,
   Loader2,
   CheckCircle2,
@@ -109,9 +107,9 @@ export const AdjustDriverWalletModal: React.FC<AdjustDriverWalletModalProps> = (
     enabled: open && !!selectedDriverId,
   });
 
+  // Parse amountInput using robust BRL parser
   const amountVal = useMemo(() => {
-    const parsed = parseFloat(amountInput.replace(",", "."));
-    return isNaN(parsed) || parsed <= 0 ? 0 : parsed;
+    return parseBRLToNumber(amountInput);
   }, [amountInput]);
 
   const newBalance = useMemo(() => {
@@ -134,16 +132,14 @@ export const AdjustDriverWalletModal: React.FC<AdjustDriverWalletModalProps> = (
       return toast.error("Selecione um motorista para realizar o ajuste.");
     }
     if (amountVal <= 0) {
-      return toast.error("Informe um valor maior que zero para o ajuste.");
+      return toast.error("Informe um valor válido e maior que zero para o ajuste (ex.: R$ 10,50).");
     }
     if (!reason.trim()) {
       return toast.error("O motivo/descrição do ajuste é obrigatório.");
     }
     if (isDebitExceeded) {
       return toast.error(
-        `Débito não permitido: o valor (R$ ${amountVal.toFixed(
-          2
-        )}) é superior ao saldo disponível (R$ ${currentBalance.toFixed(2)}).`
+        `Débito não permitido: o valor (${formatCurrency(amountVal)}) é superior ao saldo disponível (${formatCurrency(currentBalance)}).`
       );
     }
 
@@ -152,7 +148,7 @@ export const AdjustDriverWalletModal: React.FC<AdjustDriverWalletModalProps> = (
 
     try {
       // Execute atomic PostgreSQL RPC function with admin permissions check
-      const { data, error } = await (supabase as any).rpc("admin_adjust_driver_wallet", {
+      const { data, error } = await supabase.rpc("admin_adjust_driver_wallet", {
         p_driver_id: selectedDriverId,
         p_operation: operation,
         p_amount: amountVal,
@@ -161,55 +157,27 @@ export const AdjustDriverWalletModal: React.FC<AdjustDriverWalletModalProps> = (
       });
 
       if (error) {
-        console.warn("[AdjustDriverWallet] RPC error fallback:", error);
-
-        // Fallback to direct transactional table inserts if RPC signature varies
-        const signedAmount = operation === "add" ? amountVal : -amountVal;
-        const authUser = (await supabase.auth.getUser()).data.user;
-
-        const { data: earningData, error: earningErr } = await supabase
-          .from("driver_earnings")
-          .insert({
-            driver_id: selectedDriverId,
-            amount: signedAmount,
-            status: "pending",
-            delivery_request_id: null,
-            description: reason.trim(),
-            adjustment_type: operation === "add" ? "manual_credit" : "manual_debit",
-            created_by_admin_id: authUser?.id,
-          } as any)
-          .select("id")
-          .maybeSingle();
-
-        if (earningErr) throw earningErr;
-
-        // Insert audit log
-        await supabase.from("financial_adjustment_logs").insert({
-          admin_user_id: authUser?.id || "admin",
-          admin_email: authUser?.email || "admin@sistema",
-          transaction_id: key,
-          driver_id: selectedDriverId,
-          driver_name: selectedDriverName,
-          movement_type: operation === "add" ? "Ajuste Manual — Crédito" : "Ajuste Manual — Débito",
-          old_value: currentBalance,
-          new_value: newBalance,
-          adjustment_amount: signedAmount,
-          reason: reason.trim(),
-        } as any);
+        console.error("[AdjustDriverWallet] RPC Error:", error);
+        throw new Error(error.message || "Falha ao processar ajuste no backend.");
       }
 
+      if (data && typeof data === "object" && (data as any).success === false) {
+        throw new Error((data as any).message || "Falha ao aplicar ajuste no backend.");
+      }
+
+      const opLabel = operation === "add" ? "Crédito" : "Débito";
       toast.success(
-        `Ajuste de R$ ${amountVal.toFixed(2)} (${
-          operation === "add" ? "Crédito" : "Débito"
-        }) aplicado à carteira de ${selectedDriverName}!`
+        `Ajuste de ${formatCurrency(amountVal)} (${opLabel}) aplicado com sucesso à carteira de ${selectedDriverName}!`
       );
 
-      // Invalidate queries to update all financial views
+      // Invalidate queries to update all financial views across the app immediately
       queryClient.invalidateQueries({ queryKey: ["admin-financial-data"] });
       queryClient.invalidateQueries({ queryKey: ["admin-driver-earnings"] });
       queryClient.invalidateQueries({ queryKey: ["admin-drivers"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-drivers-financial"] });
       queryClient.invalidateQueries({ queryKey: ["admin-driver-balance", selectedDriverId] });
       queryClient.invalidateQueries({ queryKey: ["my-earnings"] });
+      queryClient.invalidateQueries({ queryKey: ["driver-earnings-list"] });
 
       onSuccess?.();
       onOpenChange(false);
@@ -239,7 +207,7 @@ export const AdjustDriverWalletModal: React.FC<AdjustDriverWalletModalProps> = (
             <Label className="text-xs font-semibold flex items-center gap-1">
               <UserCheck className="w-3.5 h-3.5 text-muted-foreground" /> Motorista
             </Label>
-            <Select value={selectedDriverId} onValueChange={setSelectedDriverId}>
+            <Select value={selectedDriverId} onValueChange={setSelectedDriverId} disabled={submitting}>
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Selecione o motorista..." />
               </SelectTrigger>
@@ -260,6 +228,7 @@ export const AdjustDriverWalletModal: React.FC<AdjustDriverWalletModalProps> = (
               <Button
                 type="button"
                 variant={operation === "add" ? "default" : "outline"}
+                disabled={submitting}
                 className={`h-11 justify-center gap-2 font-semibold ${
                   operation === "add"
                     ? "bg-emerald-600 hover:bg-emerald-700 text-white"
@@ -273,6 +242,7 @@ export const AdjustDriverWalletModal: React.FC<AdjustDriverWalletModalProps> = (
               <Button
                 type="button"
                 variant={operation === "subtract" ? "default" : "outline"}
+                disabled={submitting}
                 className={`h-11 justify-center gap-2 font-semibold ${
                   operation === "subtract"
                     ? "bg-rose-600 hover:bg-rose-700 text-white"
@@ -285,18 +255,43 @@ export const AdjustDriverWalletModal: React.FC<AdjustDriverWalletModalProps> = (
             </div>
           </div>
 
-          {/* Campo de Valor */}
+          {/* Campo de Valor com suporte a BRL */}
           <div className="space-y-1.5">
-            <Label className="text-xs font-semibold">Valor do Ajuste (R$)</Label>
+            <div className="flex items-center justify-between">
+              <Label className="text-xs font-semibold">Valor do Ajuste (R$)</Label>
+              {amountVal > 0 && (
+                <Badge variant="secondary" className="text-[11px] font-semibold text-primary">
+                  Valor reconhecido: {formatCurrency(amountVal)}
+                </Badge>
+              )}
+            </div>
             <Input
-              type="number"
-              step="0.01"
-              min="0.01"
+              type="text"
+              inputMode="decimal"
+              pattern="[0-9.,]*"
               placeholder="0,00"
               value={amountInput}
               onChange={(e) => setAmountInput(e.target.value)}
               className="text-lg font-bold"
+              disabled={submitting}
             />
+            {/* Botões de Atalho / Presets Rápidos */}
+            <div className="flex flex-wrap items-center gap-1.5 pt-1">
+              <span className="text-[11px] text-muted-foreground mr-1">Atalhos:</span>
+              {[10, 50, 100, 500].map((preset) => (
+                <Button
+                  key={preset}
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={submitting}
+                  className="h-7 text-xs px-2.5 font-medium hover:bg-primary/10 hover:text-primary"
+                  onClick={() => setAmountInput(preset.toFixed(2).replace(".", ","))}
+                >
+                  + R$ {preset},00
+                </Button>
+              ))}
+            </div>
           </div>
 
           {/* Motivo / Descrição Obrigatório */}
@@ -309,6 +304,7 @@ export const AdjustDriverWalletModal: React.FC<AdjustDriverWalletModalProps> = (
               placeholder="Ex.: Corridas realizadas durante indisponibilidade do sistema; ajuste de taxa; etc."
               value={reason}
               onChange={(e) => setReason(e.target.value)}
+              disabled={submitting}
             />
           </div>
 
@@ -376,7 +372,7 @@ export const AdjustDriverWalletModal: React.FC<AdjustDriverWalletModalProps> = (
           <Button
             type="button"
             onClick={handleAdjust}
-            disabled={submitting || !selectedDriverId || amountVal <= 0 || isDebitExceeded}
+            disabled={submitting || !selectedDriverId || amountVal <= 0 || !reason.trim() || isDebitExceeded}
             className={
               operation === "add"
                 ? "bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"

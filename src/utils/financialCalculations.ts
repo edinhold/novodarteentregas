@@ -8,6 +8,48 @@ export const formatCurrency = (val: number | null | undefined): string => {
   }).format(num);
 };
 
+/**
+ * Safely parses Brazilian real currency strings, numbers, or formatted values into a precise 2-decimal number.
+ * Examples:
+ *  - "10" -> 10
+ *  - "10,50" -> 10.5
+ *  - "50,50" -> 50.5
+ *  - "1.250,75" -> 1250.75
+ *  - "1250,75" -> 1250.75
+ *  - "0,01" -> 0.01
+ *  - "R$ 1.250,75" -> 1250.75
+ */
+export const parseBRLToNumber = (val: string | number | null | undefined): number => {
+  if (val === null || val === undefined) return 0;
+  if (typeof val === "number") return isNaN(val) ? 0 : Math.round(val * 100) / 100;
+
+  let str = String(val).trim();
+  if (!str) return 0;
+
+  // Remove currency symbols and invalid characters
+  str = str.replace(/R\$\s?/gi, "").replace(/[^\d.,-]/g, "");
+  if (!str) return 0;
+
+  // If contains both dot and comma (e.g. 1.250,75 or 1,250.75)
+  if (str.includes(".") && str.includes(",")) {
+    if (str.lastIndexOf(",") > str.lastIndexOf(".")) {
+      // BRL format: 1.250,75 -> 1250.75
+      str = str.replace(/\./g, "").replace(",", ".");
+    } else {
+      // US format: 1,250.75 -> 1250.75
+      str = str.replace(/,/g, "");
+    }
+  } else if (str.includes(",")) {
+    // BRL simple format: 10,50 -> 10.50
+    str = str.replace(",", ".");
+  }
+
+  const num = parseFloat(str);
+  if (isNaN(num) || !isFinite(num)) return 0;
+  return Math.round(num * 100) / 100;
+};
+
+
 export const formatDateTime = (dateStr: string | null | undefined): string => {
   if (!dateStr) return "—";
   try {

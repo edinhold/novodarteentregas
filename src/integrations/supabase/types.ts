@@ -1798,13 +1798,13 @@ export type Database = {
       }
       admin_adjust_driver_wallet: {
         Args: {
-          p_adjustment_type: string
           p_amount: number
           p_driver_id: string
-          p_internal_notes?: string
+          p_idempotency_key?: string
+          p_operation: string
           p_reason: string
         }
-        Returns: string
+        Returns: Json
       }
       admin_cleanup_financials: {
         Args: {
