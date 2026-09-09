@@ -708,6 +708,7 @@ const DriverPanel = () => {
     .filter((e: any) => isThisMonth(new Date(e.created_at)))
     .reduce((sum: number, e: any) => sum + Number(e.amount), 0);
 
+  const weekdayNames = ["Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado"];
   const pendingBalance = earnings
     .filter((e: any) => e.status === "pending")
     .reduce((sum: number, e: any) => sum + Number(e.amount), 0);
@@ -1073,29 +1074,26 @@ const DriverPanel = () => {
                         <CardTitle className="text-base flex items-center gap-2"><Wallet className="w-4 h-4" /> Solicitar Saque</CardTitle>
                       </CardHeader>
                       <CardContent className="space-y-2">
-                        {(() => {
-                          const weekdayNames = ["Domingo","Segunda-feira","Terça-feira","Quarta-feira","Quinta-feira","Sexta-feira","Sábado"];
-                          return isPaymentDay ? (
-                            <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-3 text-center space-y-1">
-                              <p className="text-sm font-bold text-emerald-600 dark:text-emerald-400">🎉 Hoje é {weekdayNames[paymentDay]} (Dia Oficial de Saque)!</p>
-                              <p className="text-xs text-muted-foreground">
-                                Solicitação isenta da taxa de adiantamento! Cobrada apenas a taxa de manutenção de <strong>R$ {fixedFee.toFixed(2)}</strong>.
-                              </p>
-                            </div>
-                          ) : (
-                            <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 text-center space-y-1">
-                              <p className="text-xs font-semibold text-amber-700 dark:text-amber-400">
-                                ⚡ Solicitação de Adiantamento
-                              </p>
-                              <p className="text-xs text-muted-foreground">
-                                Fora de <strong>{weekdayNames[paymentDay]}</strong> (dia oficial de saque), é cobrada a taxa de adiantamento de <strong>{earlyFeePercent}%</strong>.
-                              </p>
-                              <p className="text-[11px] text-muted-foreground italic pt-0.5">
-                                No dia oficial ({weekdayNames[paymentDay]}), a taxa é de apenas R$ {fixedFee.toFixed(2)} (manutenção).
-                              </p>
-                            </div>
-                          );
-                        })()}
+                        {isPaymentDay ? (
+                          <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-3 text-center space-y-1">
+                            <p className="text-sm font-bold text-emerald-600 dark:text-emerald-400">🎉 Hoje é {weekdayNames[paymentDay]} (Dia Oficial de Saque)!</p>
+                            <p className="text-xs text-muted-foreground">
+                              Solicitação isenta da taxa de adiantamento! Cobrada apenas a taxa de manutenção de <strong>R$ {fixedFee.toFixed(2)}</strong>.
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 text-center space-y-1">
+                            <p className="text-xs font-semibold text-amber-700 dark:text-amber-400">
+                              ⚡ Solicitação de Adiantamento
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              Fora de <strong>{weekdayNames[paymentDay]}</strong> (dia oficial de saque), é cobrada a taxa de adiantamento de <strong>{earlyFeePercent}%</strong>.
+                            </p>
+                            <p className="text-[11px] text-muted-foreground italic pt-0.5">
+                              No dia oficial ({weekdayNames[paymentDay]}), a taxa é de apenas R$ {fixedFee.toFixed(2)} (manutenção).
+                            </p>
+                          </div>
+                        )}
                         <div className="bg-background rounded-lg p-3 space-y-1 border">
                           <div className="flex justify-between text-sm">
                             <span>Saldo disponível</span>
