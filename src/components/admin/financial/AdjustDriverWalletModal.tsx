@@ -223,6 +223,8 @@ export const AdjustDriverWalletModal: React.FC<AdjustDriverWalletModalProps> = (
       // Invalidate queries to update all financial views across the app immediately
       queryClient.invalidateQueries({ queryKey: ["admin-financial-data"] });
       queryClient.invalidateQueries({ queryKey: ["admin-driver-earnings"] });
+      queryClient.invalidateQueries({ queryKey: ["financial-driver-earnings"] });
+      queryClient.invalidateQueries({ queryKey: ["financial-withdrawals"] });
       queryClient.invalidateQueries({ queryKey: ["admin-drivers"] });
       queryClient.invalidateQueries({ queryKey: ["admin-drivers-financial"] });
       queryClient.invalidateQueries({ queryKey: ["admin-driver-balance", selectedDriverId] });

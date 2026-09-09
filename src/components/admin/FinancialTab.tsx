@@ -292,10 +292,10 @@ export const FinancialTab = () => {
     },
   });
 
-  // Inscrever no Realtime do Supabase para atualizar antecipações automaticamente
+  // Inscrever no Realtime do Supabase para atualizar antecipações e lançamentos de motoristas automaticamente
   useEffect(() => {
     const channel = supabase
-      .channel("financial-tab-realtime-withdrawals")
+      .channel("financial-tab-realtime")
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "withdrawal_requests" },
@@ -303,6 +303,15 @@ export const FinancialTab = () => {
           console.log("[Financeiro:realtime]", "Atualização recebida na tabela withdrawal_requests");
           queryClient.invalidateQueries({ queryKey: ["financial-withdrawals"] });
           queryClient.invalidateQueries({ queryKey: ["financial-driver-earnings"] });
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "driver_earnings" },
+        () => {
+          console.log("[Financeiro:realtime]", "Atualização recebida na tabela driver_earnings");
+          queryClient.invalidateQueries({ queryKey: ["financial-driver-earnings"] });
+          queryClient.invalidateQueries({ queryKey: ["financial-withdrawals"] });
         }
       )
       .subscribe();
@@ -425,8 +434,10 @@ export const FinancialTab = () => {
       // 3. Atualização das telas
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["financial-withdrawals"] }),
+        queryClient.invalidateQueries({ queryKey: ["financial-driver-earnings"] }),
         queryClient.invalidateQueries({ queryKey: ["admin-withdrawals"] }),
         queryClient.invalidateQueries({ queryKey: ["my-withdrawals"] }),
+        queryClient.invalidateQueries({ queryKey: ["my-earnings"] }),
       ]);
     } catch (err: any) {
       console.error("[Financeiro:erro_negar_antecipacao]", err);
@@ -789,7 +800,18 @@ export const FinancialTab = () => {
 
       const userOrIdList = [driverObj.id, driverObj.user_id];
 
-      // Total líquido de entregas efetuadas acumulado (todos os períodos)
+      // Busca os lançamentos em driver_earnings vinculados a este motorista
+      const myEarnings = driverEarnings.filter((e) => userOrIdList.includes(e.driver_id));
+
+      if (myEarnings.length > 0) {
+        // Saldo pendente acumulado = soma dos lançamentos com status 'pending' (incluindo entregas e ajustes manuais do admin)
+        const pendingSum = myEarnings
+          .filter((e) => e.status === "pending")
+          .reduce((sum, e) => sum + Number(e.amount || 0), 0);
+        return Math.max(0, pendingSum);
+      }
+
+      // Fallback para entregas legadas sem lançamentos em driver_earnings
       const myRides = deliveryRequests.filter(
         (r) => userOrIdList.includes(r.driver_id || "") && r.status === "delivered"
       );
@@ -818,7 +840,7 @@ export const FinancialTab = () => {
 
       return Math.max(0, netGenerated - totalPaid - totalPending);
     },
-    [driverMap, deliveryRequests, earningsByDeliveryMap, appFeePercentConfig, withdrawals]
+    [driverMap, driverEarnings, deliveryRequests, earningsByDeliveryMap, appFeePercentConfig, withdrawals]
   );
 
   // 7. CÁLCULO DOS 10 INDICADORES FINANCEIROS (Formulas Oficiais)
