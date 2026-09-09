@@ -17,9 +17,6 @@ const SUPABASE_PUBLISHABLE_KEY =
     ? rawKey.trim()
     : 'sb_publishable_xp0FiNgyQFvsdy9SXeGnSA_iUehC_FO';
 
-// Import the supabase client like this:
-// import { supabase } from "@/integrations/supabase/client";
-
 export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
   auth: {
     storage: brokeredPreviewStorage() || localStorage,
@@ -28,69 +25,42 @@ export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABL
   }
 });
 
-// Proxy supabase.functions.invoke to internal router, then HTTP /functions/v1/* endpoint, then SDK fallback
+// Proxy supabase.functions.invoke: prefer real Supabase Edge Function API, fallback to local functionsRouter
 const originalInvoke = supabase.functions.invoke.bind(supabase.functions);
+
 supabase.functions.invoke = async function (functionName: string, options?: any) {
-  // 1. Internal server functionsRouter execution for instant performance without network failures
+  // 1. Try real Supabase Edge Function execution first
+  try {
+    const res = await originalInvoke(functionName, options);
+    if (res && (!res.error || !String(res.error.message || res.error).includes("Failed to send a request"))) {
+      if (res.data) {
+        return res;
+      }
+    }
+  } catch (invokeErr: any) {
+    console.warn(`[EdgeFunction:${functionName}] Chamada remota indisponível, usando roteador local:`, invokeErr?.message);
+  }
+
+  // 2. Fallback to local server functionsRouter execution
   try {
     const session = (await supabase.auth.getSession()).data?.session;
     const authHeader = session?.access_token ? `Bearer ${session.access_token}` : undefined;
     const result = await handleEdgeFunction(functionName, options?.body || {}, authHeader);
 
     if (result && typeof result.status === "number") {
-      if (result.body && result.body.success === false) {
-        const errorMsg = result.body.error || result.body.message || "Operação recusada.";
-        return { data: result.body, error: { message: errorMsg } };
-      }
       return { data: result.body, error: null };
     }
   } catch (routerErr: any) {
-    console.warn(`[EdgeFunction:${functionName}] Erro no roteador interno:`, routerErr);
-    return {
-      data: { success: false, error: routerErr?.message || "Erro no processamento da solicitação." },
-      error: { message: routerErr?.message || "Erro no processamento da solicitação." },
-    };
+    console.warn(`[EdgeFunction:${functionName}] Erro no roteador local:`, routerErr);
   }
 
-  // 2. HTTP fetch to /functions/v1/
-  try {
-    const session = (await supabase.auth.getSession()).data?.session;
-    const authHeader = session?.access_token ? `Bearer ${session.access_token}` : undefined;
-    const res = await fetch(`/functions/v1/${functionName}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(authHeader ? { Authorization: authHeader } : {}),
-        ...(options?.headers || {}),
-      },
-      body: options?.body ? JSON.stringify(options.body) : JSON.stringify({}),
-    });
-    if (res.ok) {
-      const data = await res.json().catch(() => null);
-      return { data, error: null };
-    }
-  } catch (fetchErr) {
-    console.warn(`[EdgeFunction:${functionName}] HTTP fetch indisponível:`, fetchErr);
-  }
-
-  // 3. Fallback to original invoke with graceful error handling
-  try {
-    const res = await originalInvoke(functionName, options);
-    if (res?.error) {
-      const msg = res.error.message || String(res.error);
-      if (msg.includes("Failed to send a request") || msg.includes("Edge Function returned") || msg.includes("NOT_FOUND")) {
-        return {
-          data: { success: true, fallback: true, message: `Função ${functionName} executada via fallback.` },
-          error: null,
-        };
-      }
-    }
-    return res;
-  } catch (invokeErr: any) {
-    console.warn(`[EdgeFunction:${functionName}] Exceção no SDK invoke:`, invokeErr?.message);
-    return {
-      data: { success: true, fallback: true, message: `Função ${functionName} executada via fallback.` },
-      error: null,
-    };
-  }
+  return {
+    data: {
+      success: false,
+      edge_function_ok: false,
+      code: "ERRO_CONEXAO",
+      message: `Não foi possível comunicar com a Edge Function ${functionName}.`,
+    },
+    error: { message: `Não foi possível comunicar com a Edge Function ${functionName}.` },
+  };
 };

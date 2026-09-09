@@ -85,11 +85,11 @@ export async function initPush(): Promise<boolean> {
         isInitialized = true;
         console.log("[OneSignal:initialized]", { appId: ONESIGNAL_APP_ID });
 
-        // Handler ao clicar na notificação
         OneSignal.Notifications.addEventListener("click", (event: any) => {
           console.log("[OneSignal:notification_click]", event);
           const notificationData = event.notification?.data;
-          const rota = notificationData?.rota || "/entregador";
+          const pedidoId = notificationData?.pedido_id;
+          const rota = notificationData?.rota || (pedidoId ? `/entregador?pedido=${pedidoId}` : "/entregador");
           if (typeof window !== "undefined" && window.location) {
             window.location.href = rota;
           }

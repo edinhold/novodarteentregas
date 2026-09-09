@@ -325,6 +325,22 @@ export async function handleEdgeFunction(
       ttl: 120,
     };
 
+    if (!ONESIGNAL_APP_API_KEY) {
+      return {
+        status: 200,
+        body: {
+          success: false,
+          edge_function_ok: true,
+          onesignal_accepted: false,
+          code: "API_KEY_MISSING",
+          message: "REST API Key do OneSignal não configurada (ONESIGNAL_APP_API_KEY). Configure a chave nas variáveis de ambiente do backend.",
+          request_id: requestId,
+          recipients_requested: subIds.length,
+          recipients_found: 0,
+        },
+      };
+    }
+
     try {
       const osRes = await fetch(ONESIGNAL_API, {
         method: "POST",
@@ -362,6 +378,7 @@ export async function handleEdgeFunction(
           request_id: requestId,
           recipients_requested: subIds.length,
           recipients_found: osData?.recipients ?? (ok ? subIds.length : 0),
+          onesignal_notification_id: osData?.id || null,
         },
       };
     } catch (osErr: any) {
@@ -370,6 +387,7 @@ export async function handleEdgeFunction(
         body: {
           success: false,
           edge_function_ok: true,
+          onesignal_accepted: false,
           code: "ERRO_ONESIGNAL",
           message: `Falha ao conectar com OneSignal: ${osErr.message}`,
           request_id: requestId,

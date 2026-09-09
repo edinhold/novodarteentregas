@@ -17,8 +17,14 @@ export class PushError extends Error {
 }
 
 export function loadConfig(): OneSignalConfig {
-  const appId = Deno.env.get("ONESIGNAL_APP_ID")?.trim() || "4f68f47f-63ee-4326-8f98-e63514f2b154";
-  const apiKey = Deno.env.get("ONESIGNAL_APP_API_KEY")?.trim() || Deno.env.get("ONESIGNAL_REST_API_KEY")?.trim() || "";
+  const appId =
+    Deno.env.get("ONESIGNAL_APP_ID")?.trim() ||
+    Deno.env.get("VITE_ONESIGNAL_APP_ID")?.trim() ||
+    "4f68f47f-63ee-4326-8f98-e63514f2b154";
+  const apiKey =
+    Deno.env.get("ONESIGNAL_APP_API_KEY")?.trim() ||
+    Deno.env.get("ONESIGNAL_REST_API_KEY")?.trim() ||
+    "";
   return { appId, apiKey };
 }
 
@@ -29,20 +35,39 @@ export function mask(value?: string | null): string {
 
 export function humanize(code?: string): string {
   switch (code) {
-    case "NAO_AUTENTICADO": return "Sessão expirada. Entre novamente.";
-    case "SEM_MOTORISTAS_ONLINE": return "Nenhum motorista online e disponível no momento.";
-    case "SEM_INSCRICOES": return "Os motoristas online não possuem dispositivos com notificações ativas.";
-    case "PEDIDO_INDISPONIVEL": return "O pedido já foi aceito ou cancelado.";
-    default: return "Falha ao enviar notificação.";
+    case "NAO_AUTENTICADO":
+      return "Sessão expirada. Entre novamente.";
+    case "SEM_MOTORISTAS_ONLINE":
+      return "Nenhum motorista online e disponível no momento.";
+    case "SEM_INSCRICOES":
+      return "Os motoristas online não possuem dispositivos com notificações ativas.";
+    case "PEDIDO_INDISPONIVEL":
+      return "O pedido já foi aceito ou cancelado.";
+    case "API_KEY_MISSING":
+      return "REST API Key do OneSignal não configurada no servidor (ONESIGNAL_APP_API_KEY).";
+    default:
+      return "Falha ao enviar notificação.";
   }
 }
 
 export async function sendNotification(
   cfg: OneSignalConfig,
-  payload: Record<string, unknown>,
-  platform = "all"
+  payload: Record<string, unknown>
 ) {
   const requested = (payload.include_subscription_ids as string[] | undefined)?.length ?? 0;
+
+  if (!cfg.apiKey) {
+    return {
+      ok: false,
+      status: 401,
+      notification_id: null,
+      recipients: 0,
+      raw: "ONESIGNAL_APP_API_KEY ausente ou não configurada no servidor/Edge Function.",
+      error_code: "API_KEY_MISSING",
+      error_message: "REST API Key do OneSignal não configurada nas variáveis de ambiente do backend.",
+    };
+  }
+
   try {
     const res = await fetch(ONESIGNAL_API, {
       method: "POST",
@@ -52,24 +77,31 @@ export async function sendNotification(
       },
       body: JSON.stringify(payload),
     });
+
     const osData = await res.json().catch(() => ({}));
-    const ok = res.ok && !!osData?.id && (!osData.errors || osData.errors.length === 0);
+    const hasError = !res.ok || (osData.errors && osData.errors.length > 0);
+    const ok = res.ok && !!osData?.id && !hasError;
+    const recipients = osData?.recipients ?? (ok ? requested : 0);
+    const firstErr = Array.isArray(osData?.errors) ? osData.errors[0] : typeof osData?.errors === "object" ? JSON.stringify(osData.errors) : null;
 
     return {
       ok,
       status: res.status,
-      notification_id: osData?.id,
-      recipients: osData?.recipients ?? (ok ? requested : 0),
+      notification_id: osData?.id || null,
+      recipients: typeof recipients === "number" ? recipients : 0,
       raw: JSON.stringify(osData).slice(0, 1000),
-      error_code: ok ? null : (osData.errors?.[0] ?? `HTTP ${res.status}`),
+      error_code: ok ? null : (firstErr ?? `HTTP_${res.status}`),
+      error_message: ok ? null : (firstErr ?? `OneSignal HTTP ${res.status}`),
     };
   } catch (err: any) {
     return {
       ok: false,
       status: 0,
+      notification_id: null,
       recipients: 0,
       raw: err?.message || String(err),
       error_code: "ERRO_CONEXAO",
+      error_message: err?.message || "Falha de conexão com a API do OneSignal.",
     };
   }
 }

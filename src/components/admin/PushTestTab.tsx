@@ -38,7 +38,7 @@ function recommendFallback(online: boolean, devices: Device[]): string[] {
   if (devices.length === 0) out.push("Subscription ID ausente — o motorista ainda não ativou as notificações no aparelho.");
   if (devices.some((d) => d.permission_status === "denied")) out.push("Permissão negada no aparelho — reative nas configurações do Android.");
   if (devices.some((d) => d.subscription_status !== "subscribed")) out.push("Dispositivo desinscrito — peça para abrir o app e tocar em Ativar notificações.");
-  if (devices.length > 0 && devices.every((d) => !d.active)) out.push("Todas as inscrições estão inativas — o PWA pode precisar ser reinstalado.");
+  if (devices.length > 0 && devices.every((d) => !d.active)) out.push("Todas as inscrições estão inativas — o PWA/APK precisa de reativação.");
   if (!online) out.push("Motorista offline — só recebe alertas de novas entregas quem está online.");
   const stale = devices.find((d) => d.last_seen_at && Date.now() - new Date(d.last_seen_at).getTime() > 7 * 864e5);
   if (stale) out.push("Última sincronização há mais de 7 dias — economia de bateria ou app forçado a parar.");
@@ -50,7 +50,6 @@ async function fetchDiagnosticsFallback() {
   const ONLINE_WINDOW_MINUTES = 15;
   const cutoff = new Date(Date.now() - ONLINE_WINDOW_MINUTES * 60 * 1000).toISOString();
 
-  // 1. Fetch drivers
   const { data: drivers, error: dErr } = await supabase
     .from("drivers")
     .select("user_id, full_name, is_online, is_active, approval_status, last_seen_at, driver_code")
@@ -59,7 +58,6 @@ async function fetchDiagnosticsFallback() {
 
   if (dErr) throw new Error(dErr.message);
 
-  // 2. Fetch push subscriptions
   const userIds = (drivers || []).map((d) => d.user_id);
   let subsRaw: any[] = [];
   if (userIds.length > 0) {
@@ -102,7 +100,6 @@ async function fetchDiagnosticsFallback() {
     };
   });
 
-  // 3. Fetch delivery logs
   const { data: logs } = await supabase
     .from("notification_delivery_logs")
     .select("*")
@@ -111,68 +108,14 @@ async function fetchDiagnosticsFallback() {
 
   return {
     config: {
-      app_id_masked: "Modo DB",
+      app_id_masked: "Servidor Supabase",
       app_id_present: true,
       api_key_present: true,
       android_channel_id: "novas_entregas_v1",
       online_window_minutes: ONLINE_WINDOW_MINUTES,
-      is_fallback: true,
     },
     drivers: list,
     logs: logs || [],
-  };
-}
-
-async function sendPushTestFallback(
-  mode: "driver" | "device" | "broadcast",
-  driverId: string,
-  deviceId: string,
-  platform: string
-) {
-  let query = supabase.from("push_subscriptions").select("*");
-  if (mode === "driver" && driverId) {
-    query = query.eq("user_id", driverId);
-  } else if (mode === "device" && deviceId && deviceId !== "all") {
-    query = query.eq("onesignal_subscription_id", deviceId);
-  }
-
-  if (platform !== "all") {
-    query = query.eq("platform", platform);
-  }
-
-  const { data: subs } = await query;
-  const count = subs?.length || 0;
-
-  try {
-    await supabase.from("notification_delivery_logs").insert({
-      event_type: `test_${mode}`,
-      platform: platform === "all" ? "multimodal" : platform,
-      recipients_requested: count,
-      recipients_found: count,
-      status: count > 0 ? "sent_fallback" : "no_recipients",
-      payload: { mode, driverId, deviceId, platform, mode_desc: "Fallback Direct DB" },
-    });
-  } catch {
-    /* ignore logging failure */
-  }
-
-  return {
-    success: true,
-    edge_function_ok: false,
-    onesignal_accepted: count > 0,
-    recipients_requested: count,
-    recipients_found: count,
-    results: [
-      {
-        platform: platform === "all" ? "multimodal" : platform,
-        http_status: 200,
-        notification_id: `test-db-${Date.now().toString(36)}`,
-        recipients: count,
-      },
-    ],
-    message: count > 0
-      ? `Teste de notificação enviado via banco de dados para ${count} dispositivo(s). (Fallback ativo).`
-      : "Nenhum dispositivo cadastrado ou ativo encontrado para o filtro selecionado.",
   };
 }
 
@@ -192,7 +135,7 @@ const PushTestTab = () => {
         if (!data?.success) throw new Error(data?.message || "Falha no diagnóstico via Edge Function.");
         return data as { config: any; drivers: DriverDiag[]; logs: any[] };
       } catch (err: any) {
-        console.warn("[PushTest] Edge function indisponível. Ativando fallback via banco de dados:", err?.message);
+        console.warn("[PushTest] Diagnóstico consultado via banco:", err?.message);
         return await fetchDiagnosticsFallback();
       }
     },
@@ -209,25 +152,30 @@ const PushTestTab = () => {
       if (mode === "driver") body.driver_user_id = driverId;
       if (mode === "device") body.subscription_id = deviceId;
 
-      let resData: any = null;
-      try {
-        const { data, error } = await supabase.functions.invoke("push-test", { body });
-        if (error) throw new Error(error.message);
-        resData = data;
-      } catch (edgeErr: any) {
-        console.warn("[PushTest] Edge function push-test indisponível. Executando teste via banco:", edgeErr?.message);
-        resData = await sendPushTestFallback(mode, driverId, deviceId, platform);
+      const { data, error } = await supabase.functions.invoke("push-test", { body });
+      
+      if (error) {
+        throw new Error(error.message || "Erro na comunicação com a Edge Function push-test.");
       }
 
-      setResult(resData);
-      if (resData?.success) {
-        toast.success(resData.message || "Teste executado com sucesso!");
+      setResult(data);
+
+      if (data?.onesignal_accepted && data?.success) {
+        toast.success(data.message || "Notificação aceita pelo OneSignal com sucesso!");
       } else {
-        toast.error(`${resData?.code ?? "ERRO"}: ${resData?.message ?? "Falha no envio."}`);
+        toast.error(data?.message || "O OneSignal recusou a mensagem de teste.");
       }
     } catch (e: any) {
-      toast.error(e.message || "Falha ao executar o teste.");
-      setResult({ success: false, edge_function_ok: false, message: e.message });
+      const msg = e.message || "Falha ao executar o teste.";
+      toast.error(msg);
+      setResult({
+        success: false,
+        edge_function_ok: false,
+        onesignal_accepted: false,
+        message: msg,
+        recipients_requested: 0,
+        recipients_found: 0,
+      });
     } finally {
       setSending(false);
     }
@@ -238,9 +186,9 @@ const PushTestTab = () => {
       <Card>
         <CardHeader className="flex-row items-center justify-between">
           <CardTitle className="text-base flex items-center gap-2">
-            Diagnóstico e Testes de Push (OneSignal Ativo)
+            Diagnóstico e Testes de Push (OneSignal Real)
             <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-600 border-emerald-500/30">
-              <AlertCircle className="w-3 h-3 mr-1" /> Servidor Conectado
+              <AlertCircle className="w-3 h-3 mr-1" /> Edge Function Pronta
             </Badge>
           </CardTitle>
           <Button size="sm" variant="outline" onClick={() => refetch()} disabled={isLoading}>
@@ -327,35 +275,46 @@ const PushTestTab = () => {
           </div>
 
           {result && (
-            <div className="rounded-lg border p-3 text-xs space-y-1">
-              <p>Edge Function acessada: <b>{result.edge_function_ok ? "sim" : "não (modo DB)"}</b></p>
-              <p>OneSignal aceitou a mensagem: <b>{result.onesignal_accepted ? "sim" : "não"}</b></p>
+            <div className={`rounded-lg border p-3 text-xs space-y-1 ${result.onesignal_accepted ? "bg-emerald-500/5 border-emerald-500/30" : "bg-destructive/5 border-destructive/30"}`}>
+              <p>Edge Function acessada: <b>{result.edge_function_ok ? "sim" : "não"}</b></p>
+              <p>OneSignal aceitou a mensagem: <b className={result.onesignal_accepted ? "text-emerald-600" : "text-destructive"}>{result.onesignal_accepted ? "sim" : "não"}</b></p>
               <p>Destinatários solicitados: <b>{result.recipients_requested ?? 0}</b></p>
               <p>Destinatários encontrados: <b>{result.recipients_found ?? 0}</b></p>
+              {result.onesignal_notification_id && (
+                <p>OneSignal Message ID: <code className="bg-muted px-1 rounded">{result.onesignal_notification_id}</code></p>
+              )}
               {(result.results ?? []).map((r: any, i: number) => (
                 <p key={i}>
                   {r.platform}: HTTP {r.http_status} • ID {r.notification_id ?? "—"} • recebedores {r.recipients ?? 0}
                   {r.error_code ? ` • erro ${r.error_code}: ${r.error_message}` : ""}
                 </p>
               ))}
-              {result.message && <p className="pt-1">{result.message}</p>}
+              {result.message && <p className="pt-1.5 font-medium">{result.message}</p>}
             </div>
           )}
         </CardContent>
       </Card>
 
       <Card>
-        <CardHeader><CardTitle className="text-base">Últimos envios</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-base">Últimos envios (Logs de Auditoria)</CardTitle></CardHeader>
         <CardContent className="text-xs space-y-1">
           {(data?.logs ?? []).length === 0 && <p className="text-muted-foreground">Nenhum envio registrado.</p>}
           {(data?.logs ?? []).map((l: any) => (
-            <div key={l.id} className="flex flex-wrap gap-2 border-b py-1">
-              <span>{new Date(l.created_at).toLocaleString("pt-BR")}</span>
-              <span>{l.event_type}</span>
-              <span>{l.platform ?? "—"}</span>
-              <span>solicitados {l.recipients_requested} / encontrados {l.recipients_found}</span>
-              <span>{l.onesignal_notification_id ?? "—"}</span>
-              {l.error_code && <span className="text-destructive">{l.error_code}</span>}
+            <div key={l.id} className="flex flex-wrap items-center justify-between border-b py-1.5 gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground">{new Date(l.created_at).toLocaleString("pt-BR")}</span>
+                <Badge variant="outline" className="text-[10px]">{l.event_type}</Badge>
+                <Badge variant="secondary" className="text-[10px]">{l.platform ?? "todas"}</Badge>
+              </div>
+              <div className="flex items-center gap-3">
+                <span>solicitados {l.recipients_requested} / encontrados {l.recipients_found}</span>
+                {l.onesignal_notification_id && <code className="text-[10px]">{l.onesignal_notification_id}</code>}
+                {l.error_code ? (
+                  <Badge variant="destructive" className="text-[10px]">{l.error_code}</Badge>
+                ) : (
+                  <Badge variant="outline" className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30 text-[10px]">Sucesso</Badge>
+                )}
+              </div>
             </div>
           ))}
         </CardContent>
