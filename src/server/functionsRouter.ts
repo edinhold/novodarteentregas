@@ -256,14 +256,28 @@ export async function handleEdgeFunction(
     const mode: string = reqBody?.mode ?? "driver";
     const platformFilter: string = reqBody?.platform ?? "all";
 
-    let subs: any[] = [];
+    let subs: Array<{ onesignal_subscription_id: string; platform: string; user_id: string }> = [];
+
     if (mode === "device" && reqBody?.subscription_id) {
-      const { data } = await supabase
+      const { data: subData } = await supabase
         .from("push_subscriptions")
         .select("onesignal_subscription_id, platform, user_id")
         .eq("onesignal_subscription_id", reqBody.subscription_id)
         .maybeSingle();
-      if (data) subs = [data];
+
+      if (subData) {
+        subs = [subData];
+      } else {
+        const { data: devData } = await supabase
+          .from("driver_push_devices")
+          .select("subscription_id, platform, driver_id")
+          .eq("subscription_id", reqBody.subscription_id)
+          .maybeSingle();
+
+        if (devData && devData.subscription_id) {
+          subs = [{ onesignal_subscription_id: devData.subscription_id, platform: devData.platform, user_id: devData.driver_id }];
+        }
+      }
     } else if (mode === "broadcast") {
       const cutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString();
       const { data: onlineDrivers } = await supabase
@@ -276,22 +290,35 @@ export async function handleEdgeFunction(
 
       const ids = (onlineDrivers ?? []).map((d) => d.user_id);
       if (ids.length > 0) {
-        const { data } = await supabase
-          .from("push_subscriptions")
-          .select("onesignal_subscription_id, platform, user_id")
-          .in("user_id", ids)
-          .eq("active", true)
-          .eq("subscription_status", "subscribed");
-        subs = data ?? [];
+        const { data: s1 } = await supabase.from("push_subscriptions").select("onesignal_subscription_id, platform, user_id").in("user_id", ids).eq("active", true);
+        const { data: d1 } = await supabase.from("driver_push_devices").select("subscription_id, platform, driver_id").in("driver_id", ids).eq("active", true);
+
+        const map = new Map<string, any>();
+        for (const dev of d1 ?? []) {
+          if (dev.subscription_id) map.set(dev.driver_id, { onesignal_subscription_id: dev.subscription_id, platform: dev.platform || "web_pwa", user_id: dev.driver_id });
+        }
+        for (const sub of s1 ?? []) {
+          if (sub.onesignal_subscription_id && !map.has(sub.user_id)) {
+            map.set(sub.user_id, { onesignal_subscription_id: sub.onesignal_subscription_id, platform: sub.platform || "web_pwa", user_id: sub.user_id });
+          }
+        }
+        subs = Array.from(map.values());
       }
     } else if (reqBody?.driver_user_id) {
-      const { data } = await supabase
-        .from("push_subscriptions")
-        .select("onesignal_subscription_id, platform, user_id")
-        .eq("user_id", reqBody.driver_user_id)
-        .eq("active", true)
-        .eq("subscription_status", "subscribed");
-      subs = data ?? [];
+      const uid = reqBody.driver_user_id;
+      const { data: s1 } = await supabase.from("push_subscriptions").select("onesignal_subscription_id, platform, user_id").eq("user_id", uid).eq("active", true);
+      const { data: d1 } = await supabase.from("driver_push_devices").select("subscription_id, platform, driver_id").eq("driver_id", uid).eq("active", true);
+
+      const map = new Map<string, any>();
+      for (const dev of d1 ?? []) {
+        if (dev.subscription_id) map.set(dev.driver_id, { onesignal_subscription_id: dev.subscription_id, platform: dev.platform || "web_pwa", user_id: dev.driver_id });
+      }
+      for (const sub of s1 ?? []) {
+        if (sub.onesignal_subscription_id && !map.has(sub.user_id)) {
+          map.set(sub.user_id, { onesignal_subscription_id: sub.onesignal_subscription_id, platform: sub.platform || "web_pwa", user_id: sub.user_id });
+        }
+      }
+      subs = Array.from(map.values());
     }
 
     if (platformFilter !== "all") {
@@ -306,8 +333,11 @@ export async function handleEdgeFunction(
         body: {
           success: false,
           edge_function_ok: true,
+          onesignal_accepted: false,
+          recipients_requested: 0,
+          recipients_found: 0,
           code: "SEM_INSCRICOES",
-          message: "Nenhum dispositivo com notificações ativas encontrado para o teste selecionado.",
+          message: "Nenhum dispositivo ativado encontrado para o motorista/filtro selecionado. Peça para o motorista abrir o aplicativo no aparelho e ativar as Notificações Push.",
           request_id: requestId,
         },
       };
