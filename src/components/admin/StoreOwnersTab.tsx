@@ -4,7 +4,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Trash2, LogIn } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Trash2, LogIn, KeyRound, Eye, EyeOff, Lock, Loader2, CheckCircle } from "lucide-react";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 import DeleteConfirm from "./DeleteConfirm";
@@ -18,6 +20,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 
 const StoreOwnersTab = () => {
   const queryClient = useQueryClient();
@@ -26,6 +36,14 @@ const StoreOwnersTab = () => {
   const [deleting, setDeleting] = useState(false);
   const [impersonateTarget, setImpersonateTarget] = useState<{ ownerId: string; name: string } | null>(null);
   const [impersonating, setImpersonating] = useState(false);
+
+  // Password Reset Modal State for Store Owners
+  const [passwordModalOpen, setPasswordModalOpen] = useState(false);
+  const [targetStoreOwner, setTargetStoreOwner] = useState<{ ownerId: string; name: string } | null>(null);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [savingPassword, setSavingPassword] = useState(false);
 
   const { data: restaurants = [] } = useQuery({
     queryKey: ["admin-store-owners"],
@@ -128,6 +146,55 @@ const StoreOwnersTab = () => {
     }
   };
 
+  const openPasswordModal = (store: { owner_id: string; name: string }) => {
+    if (!store.owner_id) {
+      return toast.error("Esta loja não possui um proprietário associado.");
+    }
+    setTargetStoreOwner({ ownerId: store.owner_id, name: store.name });
+    setNewPassword("");
+    setConfirmPassword("");
+    setShowPassword(false);
+    setPasswordModalOpen(true);
+  };
+
+  const handleSavePassword = async () => {
+    if (!targetStoreOwner) return;
+    if (!newPassword || newPassword.trim().length < 6) {
+      return toast.error("A nova senha deve ter pelo menos 6 caracteres.");
+    }
+    if (newPassword !== confirmPassword) {
+      return toast.error("As senhas digitadas não coincidem.");
+    }
+
+    setSavingPassword(true);
+    try {
+      const { data, error } = await supabase.rpc("admin_set_user_password", {
+        p_target_user_id: targetStoreOwner.ownerId,
+        p_new_password: newPassword.trim(),
+      });
+
+      if (error) {
+        console.error("[StoreOwnersTab] RPC admin_set_user_password error:", error);
+        throw new Error(error.message || "Erro ao alterar a senha da loja.");
+      }
+
+      if (data && typeof data === "object" && (data as any).success === false) {
+        throw new Error((data as any).message || "Falha ao alterar senha.");
+      }
+
+      toast.success(`Senha do proprietário da loja ${targetStoreOwner.name} alterada com sucesso!`);
+      setPasswordModalOpen(false);
+      setTargetStoreOwner(null);
+      setNewPassword("");
+      setConfirmPassword("");
+    } catch (err: any) {
+      console.error("[StoreOwnersTab] Exception changing store password:", err);
+      toast.error(err.message || "Erro ao redefinir a senha da loja.");
+    } finally {
+      setSavingPassword(false);
+    }
+  };
+
   return (
     <>
       <Card>
@@ -142,7 +209,7 @@ const StoreOwnersTab = () => {
                 <TableHead>Categoria</TableHead>
                 <TableHead>Endereço</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead className="w-40 text-right">Ações</TableHead>
+                <TableHead className="w-48 text-right">Ações</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -167,6 +234,15 @@ const StoreOwnersTab = () => {
                       >
                         <LogIn className="w-4 h-4" />
                         <span className="hidden sm:inline">Acessar Painel</span>
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-primary hover:text-primary hover:bg-primary/10"
+                        title="Trocar Senha do Proprietário"
+                        onClick={() => openPasswordModal({ owner_id: r.owner_id!, name: r.name })}
+                      >
+                        <KeyRound className="w-4 h-4" />
                       </Button>
                       <Button
                         variant="ghost"
@@ -209,6 +285,89 @@ const StoreOwnersTab = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Password Reset Modal Dialog for Store Owners */}
+      <Dialog open={passwordModalOpen} onOpenChange={setPasswordModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-lg font-bold">
+              <KeyRound className="w-5 h-5 text-primary" /> Alterar Senha da Loja
+            </DialogTitle>
+            <DialogDescription>
+              Definir uma nova senha de acesso para o proprietário de {targetStoreOwner?.name}. Não é necessária a senha atual.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="store-new-password">Nova Senha *</Label>
+              <div className="relative">
+                <Input
+                  id="store-new-password"
+                  type={showPassword ? "text" : "password"}
+                  placeholder="No mínimo 6 caracteres"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  disabled={savingPassword}
+                  autoFocus
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="absolute right-0 top-0 h-full px-3 py-2 text-muted-foreground hover:text-foreground"
+                  onClick={() => setShowPassword(!showPassword)}
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </Button>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="store-confirm-password">Confirmar Nova Senha *</Label>
+              <Input
+                id="store-confirm-password"
+                type={showPassword ? "text" : "password"}
+                placeholder="Repita a nova senha"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                disabled={savingPassword}
+              />
+            </div>
+
+            <div className="bg-muted/50 rounded-lg p-3 text-xs text-muted-foreground flex items-start gap-2 border">
+              <Lock className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+              <span>
+                A nova senha será aplicada imediatamente. O proprietário da loja poderá fazer login utilizando a nova senha fornecida aqui.
+              </span>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setPasswordModalOpen(false)}
+              disabled={savingPassword}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              onClick={handleSavePassword}
+              disabled={savingPassword || !newPassword || newPassword.trim().length < 6 || newPassword !== confirmPassword}
+              className="bg-primary font-semibold text-white"
+            >
+              {savingPassword ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <CheckCircle className="w-4 h-4 mr-2" />
+              )}
+              Salvar Nova Senha
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 };

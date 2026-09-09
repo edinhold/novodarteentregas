@@ -6,8 +6,17 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Wallet, Trash2, Eye, Check, X } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Wallet, Trash2, Eye, Check, X, KeyRound, EyeOff, Lock, Loader2, CheckCircle } from "lucide-react";
 import { toast } from "sonner";
 import { AdjustDriverWalletModal } from "./financial/AdjustDriverWalletModal";
 
@@ -21,9 +30,25 @@ const DriversTab = () => {
   const [adjustDriverId, setAdjustDriverId] = useState<string | null>(null);
   const [adjustModalOpen, setAdjustModalOpen] = useState(false);
 
+  // Password Reset Modal State
+  const [passwordModalOpen, setPasswordModalOpen] = useState(false);
+  const [targetDriver, setTargetDriver] = useState<{ userId: string; name: string } | null>(null);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [savingPassword, setSavingPassword] = useState(false);
+
   const openAdjustFor = (driverId: string | null) => {
     setAdjustDriverId(driverId);
     setAdjustModalOpen(true);
+  };
+
+  const openPasswordModal = (driver: { user_id: string; full_name: string }) => {
+    setTargetDriver({ userId: driver.user_id, name: driver.full_name });
+    setNewPassword("");
+    setConfirmPassword("");
+    setShowPassword(false);
+    setPasswordModalOpen(true);
   };
 
   const { data: drivers = [] } = useQuery({
@@ -107,6 +132,43 @@ const DriversTab = () => {
     }
   };
 
+  const handleSavePassword = async () => {
+    if (!targetDriver) return;
+    if (!newPassword || newPassword.trim().length < 6) {
+      return toast.error("A nova senha deve ter pelo menos 6 caracteres.");
+    }
+    if (newPassword !== confirmPassword) {
+      return toast.error("As senhas digitadas não coincidem.");
+    }
+
+    setSavingPassword(true);
+    try {
+      const { data, error } = await supabase.rpc("admin_set_user_password", {
+        p_target_user_id: targetDriver.userId,
+        p_new_password: newPassword.trim(),
+      });
+
+      if (error) {
+        console.error("[DriversTab] RPC admin_set_user_password error:", error);
+        throw new Error(error.message || "Erro ao alterar a senha do motorista.");
+      }
+
+      if (data && typeof data === "object" && (data as any).success === false) {
+        throw new Error((data as any).message || "Falha ao alterar senha.");
+      }
+
+      toast.success(`Senha do motorista ${targetDriver.name} alterada com sucesso!`);
+      setPasswordModalOpen(false);
+      setTargetDriver(null);
+      setNewPassword("");
+      setConfirmPassword("");
+    } catch (err: any) {
+      console.error("[DriversTab] Exception changing driver password:", err);
+      toast.error(err.message || "Erro ao redefinir a senha do motorista.");
+    } finally {
+      setSavingPassword(false);
+    }
+  };
 
   // Realtime: auto-update earnings when a driver finishes a delivery
   useEffect(() => {
@@ -145,7 +207,7 @@ const DriversTab = () => {
                 <TableHead>Placa</TableHead>
                 <TableHead>Saldo Atual</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead className="w-28 text-right">Ações</TableHead>
+                <TableHead className="w-32 text-right">Ações</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -183,6 +245,15 @@ const DriversTab = () => {
                         onClick={() => openAdjustFor(d.id)}
                       >
                         <Wallet className="w-4 h-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-primary hover:text-primary hover:bg-primary/10"
+                        title="Trocar Senha do Motorista"
+                        onClick={() => openPasswordModal(d)}
+                      >
+                        <KeyRound className="w-4 h-4" />
                       </Button>
                       {approval !== "approved" && (
                         <Button variant="ghost" size="icon" className="h-8 w-8 text-green-600 hover:text-green-700" title="Aprovar" onClick={() => handleApproval(d.id, "approved", d.full_name)}>
@@ -253,26 +324,123 @@ const DriversTab = () => {
                 <p>Atualização: {new Date(viewDriver.updated_at).toLocaleString("pt-BR")}</p>
                 <p className="font-mono text-[10px]">ID: {viewDriver.user_id}</p>
               </div>
-              <div className="bg-muted/50 rounded-lg p-3 flex items-center justify-between">
+              <div className="bg-muted/50 rounded-lg p-3 flex items-center justify-between gap-2">
                 <div>
                   <p className="text-xs text-muted-foreground">Saldo Atual (A Receber)</p>
                   <p className="text-xl font-extrabold text-accent">R$ {getDriverEarnings(viewDriver.id).toFixed(2)}</p>
                 </div>
-                <Button
-                  size="sm"
-                  variant="default"
-                  className="gap-1 font-medium"
-                  onClick={() => {
-                    const id = viewDriver.id;
-                    setViewDriver(null);
-                    openAdjustFor(id);
-                  }}
-                >
-                  <Wallet className="w-3.5 h-3.5" /> Ajustar
-                </Button>
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1 font-medium text-xs border-primary/30 text-primary"
+                    onClick={() => {
+                      const driver = viewDriver;
+                      setViewDriver(null);
+                      openPasswordModal(driver);
+                    }}
+                  >
+                    <KeyRound className="w-3.5 h-3.5" /> Trocar Senha
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="default"
+                    className="gap-1 font-medium text-xs"
+                    onClick={() => {
+                      const id = viewDriver.id;
+                      setViewDriver(null);
+                      openAdjustFor(id);
+                    }}
+                  >
+                    <Wallet className="w-3.5 h-3.5" /> Ajustar
+                  </Button>
+                </div>
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Password Reset Modal Dialog for Driver */}
+      <Dialog open={passwordModalOpen} onOpenChange={setPasswordModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-lg font-bold">
+              <KeyRound className="w-5 h-5 text-primary" /> Alterar Senha do Motorista
+            </DialogTitle>
+            <DialogDescription>
+              Definir uma nova senha de acesso para {targetDriver?.name}. Não é necessária a senha atual.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="driver-new-password">Nova Senha *</Label>
+              <div className="relative">
+                <Input
+                  id="driver-new-password"
+                  type={showPassword ? "text" : "password"}
+                  placeholder="No mínimo 6 caracteres"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  disabled={savingPassword}
+                  autoFocus
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="absolute right-0 top-0 h-full px-3 py-2 text-muted-foreground hover:text-foreground"
+                  onClick={() => setShowPassword(!showPassword)}
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </Button>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="driver-confirm-password">Confirmar Nova Senha *</Label>
+              <Input
+                id="driver-confirm-password"
+                type={showPassword ? "text" : "password"}
+                placeholder="Repita a nova senha"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                disabled={savingPassword}
+              />
+            </div>
+
+            <div className="bg-muted/50 rounded-lg p-3 text-xs text-muted-foreground flex items-start gap-2 border">
+              <Lock className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+              <span>
+                A nova senha será aplicada imediatamente. O motorista poderá fazer login utilizando a nova senha fornecida aqui.
+              </span>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setPasswordModalOpen(false)}
+              disabled={savingPassword}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              onClick={handleSavePassword}
+              disabled={savingPassword || !newPassword || newPassword.trim().length < 6 || newPassword !== confirmPassword}
+              className="bg-primary font-semibold text-white"
+            >
+              {savingPassword ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <CheckCircle className="w-4 h-4 mr-2" />
+              )}
+              Salvar Nova Senha
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </>

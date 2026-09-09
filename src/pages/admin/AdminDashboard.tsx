@@ -22,7 +22,6 @@ import CreditsTab from "@/components/admin/CreditsTab";
 import FinancialTab from "@/components/admin/FinancialTab";
 import AdminsTab from "@/components/admin/AdminsTab";
 import ChatTab from "@/components/admin/ChatTab";
-import PasswordResetTab from "@/components/admin/PasswordResetTab";
 import PrivacyPolicyTab from "@/components/admin/PrivacyPolicyTab";
 import PushTestTab from "@/components/admin/PushTestTab";
 
@@ -303,7 +302,6 @@ const AdminDashboard = () => {
                     <TabsTrigger value="financial"><DollarSign className="w-4 h-4 mr-1" /></TabsTrigger>
                     <TabsTrigger value="admins"><ShieldCheck className="w-4 h-4 mr-1" /></TabsTrigger>
                     <TabsTrigger value="chat"><MessageSquare className="w-4 h-4 mr-1" /></TabsTrigger>
-                    <TabsTrigger value="password-reset"><KeyRound className="w-4 h-4 mr-1" /></TabsTrigger>
                     <TabsTrigger value="push"><Bell className="w-4 h-4 mr-1" /></TabsTrigger>
                     <TabsTrigger value="privacy"><Shield className="w-4 h-4 mr-1" /></TabsTrigger>
 
@@ -453,7 +451,6 @@ const AdminDashboard = () => {
           <TabsContent value="financial"><FinancialTab /></TabsContent>
           <TabsContent value="admins"><AdminsTab /></TabsContent>
           <TabsContent value="chat"><ChatTab /></TabsContent>
-          <TabsContent value="password-reset"><PasswordResetTab /></TabsContent>
           <TabsContent value="push"><PushTestTab /></TabsContent>
           <TabsContent value="privacy"><PrivacyPolicyTab /></TabsContent>
 

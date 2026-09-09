@@ -68,7 +68,6 @@ const AppSidebar = ({ role, currentTab, onTabChange }: AppSidebarProps) => {
           { id: "financial", label: "Financeiro", icon: DollarSign },
           { id: "admins", label: "Admins", icon: ShieldCheck },
           { id: "chat", label: "Chat", icon: MessageSquare },
-          { id: "password-reset", label: "Senhas", icon: KeyRound },
           { id: "push", label: "Notificações", icon: Bell },
           { id: "privacy", label: "Privacidade", icon: Shield },
         ];
