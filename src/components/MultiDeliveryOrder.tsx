@@ -334,8 +334,10 @@ const MultiDeliveryOrder = ({ restaurant, userId }: Props) => {
     if (!mapContainerRef.current) return;
     if (!mapInstanceRef.current && !(mapContainerRef.current as any)._leaflet_id) {
       const map = L.map(mapContainerRef.current).setView([-15.5454, -54.2958], 13);
-      L.tileLayer(MAP_LAYERS.osm.url, {
-        attribution: MAP_LAYERS.osm.attribution,
+      const tileUrl = MAP_LAYERS.streets?.url || MAP_LAYERS.osm?.url || "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
+      const tileAttr = MAP_LAYERS.streets?.attribution || MAP_LAYERS.osm?.attribution || '&copy; OpenStreetMap';
+      L.tileLayer(tileUrl, {
+        attribution: tileAttr,
         maxZoom: 19,
       }).addTo(map);
       mapInstanceRef.current = map;
