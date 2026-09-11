@@ -285,10 +285,12 @@ export const FinancialTab = () => {
   });
 
   const { data: deliveryConfig } = useQuery({
-    queryKey: ["financial-delivery-config"],
+    queryKey: ["delivery-config"],
     queryFn: async () => {
       const { data } = await supabase.from("delivery_config").select("*").limit(1).maybeSingle();
-      return data;
+      if (data) return data;
+      const { data: rpcData } = await (supabase as any).rpc("get_public_delivery_config");
+      return Array.isArray(rpcData) ? rpcData[0] : rpcData;
     },
   });
 

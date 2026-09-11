@@ -239,14 +239,17 @@ const DriverPanel = () => {
   const { data: deliveryConfig } = useQuery({
     queryKey: ["delivery-config"],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data: rpcData, error: rpcError } = await (supabase as any).rpc("get_public_delivery_config");
+      if (!rpcError && rpcData) {
+        const item = Array.isArray(rpcData) ? rpcData[0] : rpcData;
+        if (item) return item;
+      }
+      const { data } = await supabase
         .from("delivery_config")
         .select("*")
         .limit(1)
         .maybeSingle();
-      if (!error && data) return data;
-      const { data: rpcData } = await (supabase as any).rpc("get_public_delivery_config");
-      return Array.isArray(rpcData) ? rpcData[0] : rpcData;
+      return data;
     },
   });
 
@@ -640,7 +643,11 @@ const DriverPanel = () => {
     try {
       const { error } = await (supabase as any).rpc("request_withdrawal");
       if (error) throw error;
-      toast.success(`Saque solicitado com sucesso!`);
+      toast.success(
+        isPaymentDay
+          ? `Solicitação de saque enviada! (Taxa de manutenção: R$ ${fixedFee.toFixed(2)})`
+          : `Solicitação de antecipação enviada com sucesso! (Taxa de adiantamento: ${earlyFeePercent}%)`
+      );
       queryClient.invalidateQueries({ queryKey: ["my-withdrawals"] });
       queryClient.invalidateQueries({ queryKey: ["my-earnings"] });
     } catch (err: any) {
@@ -715,7 +722,9 @@ const DriverPanel = () => {
   const paymentDay = Number((deliveryConfig as any)?.payment_day ?? 3);
   const isPaymentDay = new Date().getDay() === paymentDay;
   const fixedFee = Number((deliveryConfig as any)?.withdrawal_fixed_fee ?? 1.00);
-  const earlyFeePercent = Number((deliveryConfig as any)?.early_withdrawal_fee_percent ?? 10);
+  const earlyFeePercent = (deliveryConfig as any)?.early_withdrawal_fee_percent !== undefined && (deliveryConfig as any)?.early_withdrawal_fee_percent !== null
+    ? Number((deliveryConfig as any).early_withdrawal_fee_percent)
+    : 10;
   const feeAmountPreview = isPaymentDay ? fixedFee : (pendingBalance * earlyFeePercent) / 100;
   const netPreview = Math.max(pendingBalance - feeAmountPreview, 0);
 
