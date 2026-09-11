@@ -25,13 +25,31 @@ import {
   Clock,
   CheckCircle2,
   AlertTriangle,
+  Search,
+  Check,
+  Map as MapIcon,
 } from "lucide-react";
 import {
   geocodeAddress,
+  searchAddressSuggestions,
   calculateMultiStopRoute,
   isValidCoordinate,
   MapboxMultiStopRouteResult,
+  MapboxParsedAddress,
 } from "@/services/mapbox";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+import { MAP_LAYERS } from "@/config/maps";
+import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
+import markerIcon from "leaflet/dist/images/marker-icon.png";
+import markerShadow from "leaflet/dist/images/marker-shadow.png";
+
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: markerIcon2x,
+  iconUrl: markerIcon,
+  shadowUrl: markerShadow,
+});
 
 const MAX_STOPS = 10;
 
@@ -62,11 +80,13 @@ interface Props {
   userId: string;
 }
 
-// Geocodificação com tratamento seguro de erros
+// Geocodificação inteligente com fallback para Primavera do Leste - MT
 async function safeGeocode(address: string): Promise<{ lat: number; lng: number } | null> {
   if (!address || address.trim().length < 3) return null;
+  const cleanAddr = address.trim();
+
   try {
-    const parsed = await geocodeAddress(address.trim());
+    const parsed = await geocodeAddress(cleanAddr);
     if (parsed?.coordinates && isValidCoordinate(parsed.coordinates.latitude, parsed.coordinates.longitude)) {
       return {
         lat: parsed.coordinates.latitude,
@@ -74,7 +94,18 @@ async function safeGeocode(address: string): Promise<{ lat: number; lng: number 
       };
     }
   } catch (err) {
-    console.warn("[MultiDelivery] Falha na geocodificação de endereço:", address, err);
+    // Fallback: busca por sugestões caso a geocodificação direta estrita falhe por conta de complementos
+    try {
+      const suggestions = await searchAddressSuggestions(cleanAddr, { limit: 1 });
+      if (suggestions.length > 0 && suggestions[0].coordinates) {
+        return {
+          lat: suggestions[0].coordinates.latitude,
+          lng: suggestions[0].coordinates.longitude,
+        };
+      }
+    } catch (sugErr) {
+      console.warn("[MultiDelivery] Falha no fallback de geocodificação:", cleanAddr, sugErr);
+    }
   }
   return null;
 }
@@ -86,6 +117,18 @@ const MultiDeliveryOrder = ({ restaurant, userId }: Props) => {
   const [submitting, setSubmitting] = useState(false);
   const [calculating, setCalculating] = useState(false);
   const [routeResult, setRouteResult] = useState<MapboxMultiStopRouteResult | null>(null);
+
+  // Estado de busca de endereço por parada para Autocomplete
+  const [activeSearchIdx, setActiveSearchIdx] = useState<number | null>(null);
+  const [suggestionsMap, setSuggestionsMap] = useState<Record<number, MapboxParsedAddress[]>>({});
+  const [searchingMap, setSearchingMap] = useState<Record<number, boolean>>({});
+
+  // Refs de mapa Leaflet para renderizar prévia da rota
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+  const mapInstanceRef = useRef<L.Map | null>(null);
+  const polylineRef = useRef<L.Polyline | null>(null);
+  const markersRef = useRef<L.Marker[]>([]);
+  const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Contador de requisições para prevenir race condition
   const calcRequestIdRef = useRef(0);
@@ -200,12 +243,60 @@ const MultiDeliveryOrder = ({ restaurant, userId }: Props) => {
   const balance = Number(credits?.balance ?? 0);
   const insufficient = totalOperationCost > balance;
 
-  // Atualiza um campo da parada e invalida a rota antiga
+  // Atualiza um campo da parada e reseta coordenadas velhas caso o endereço texto seja editado manualmente
   const updateStop = (idx: number, patch: Partial<StopItem>) => {
     setRouteResult(null);
     setStops((prev) =>
-      prev.map((s, i) => (i === idx ? { ...s, ...patch } : s))
+      prev.map((s, i) => {
+        if (i !== idx) return s;
+        const updated = { ...s, ...patch };
+        if (patch.delivery_address !== undefined && patch.lat === undefined && patch.lng === undefined) {
+          updated.lat = null;
+          updated.lng = null;
+        }
+        return updated;
+      })
     );
+  };
+
+  // Autocomplete debocado por parada
+  const handleAddressInputChange = (idx: number, text: string) => {
+    updateStop(idx, { delivery_address: text });
+
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+
+    if (text.trim().length < 3) {
+      setActiveSearchIdx(null);
+      setSuggestionsMap((prev) => ({ ...prev, [idx]: [] }));
+      setSearchingMap((prev) => ({ ...prev, [idx]: false }));
+      return;
+    }
+
+    setActiveSearchIdx(idx);
+    setSearchingMap((prev) => ({ ...prev, [idx]: true }));
+
+    searchTimeoutRef.current = setTimeout(async () => {
+      try {
+        const suggestions = await searchAddressSuggestions(text, { limit: 5 });
+        setSuggestionsMap((prev) => ({ ...prev, [idx]: suggestions }));
+      } catch (e) {
+        console.warn("[MultiDelivery] Autocomplete error:", e);
+        setSuggestionsMap((prev) => ({ ...prev, [idx]: [] }));
+      } finally {
+        setSearchingMap((prev) => ({ ...prev, [idx]: false }));
+      }
+    }, 350);
+  };
+
+  const selectSuggestion = (idx: number, item: MapboxParsedAddress) => {
+    updateStop(idx, {
+      delivery_address: item.fullAddress,
+      lat: item.coordinates.latitude,
+      lng: item.coordinates.longitude,
+    });
+    setActiveSearchIdx(null);
+    setSuggestionsMap((prev) => ({ ...prev, [idx]: [] }));
+    toast.success(`📍 Parada ${idx + 1} localizada: ${item.street}${item.number ? ", " + item.number : ""}`);
   };
 
   const addStop = () => {
@@ -220,6 +311,11 @@ const MultiDeliveryOrder = ({ restaurant, userId }: Props) => {
     if (stops.length <= 1) return;
     setRouteResult(null);
     setStops((prev) => prev.filter((_, i) => i !== idx));
+    setSuggestionsMap((prev) => {
+      const next = { ...prev };
+      delete next[idx];
+      return next;
+    });
   };
 
   const moveStop = (fromIdx: number, toIdx: number) => {
@@ -232,6 +328,92 @@ const MultiDeliveryOrder = ({ restaurant, userId }: Props) => {
       return updated;
     });
   };
+
+  // Renderização do Mapa Leaflet da Rota Multi-Paradas
+  useEffect(() => {
+    if (!mapContainerRef.current) return;
+    if (!mapInstanceRef.current && !(mapContainerRef.current as any)._leaflet_id) {
+      const map = L.map(mapContainerRef.current).setView([-15.5454, -54.2958], 13);
+      L.tileLayer(MAP_LAYERS.osm.url, {
+        attribution: MAP_LAYERS.osm.attribution,
+        maxZoom: 19,
+      }).addTo(map);
+      mapInstanceRef.current = map;
+    }
+
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    // Limpa marcadores e linhas anteriores
+    markersRef.current.forEach((m) => m.remove());
+    markersRef.current = [];
+    if (polylineRef.current) {
+      polylineRef.current.remove();
+      polylineRef.current = null;
+    }
+
+    const bounds: [number, number][] = [];
+
+    // 1. Marcador da Loja (Origem)
+    if (
+      restaurant?.latitude != null &&
+      restaurant?.longitude != null &&
+      isValidCoordinate(Number(restaurant.latitude), Number(restaurant.longitude))
+    ) {
+      const storeLatLng: [number, number] = [Number(restaurant.latitude), Number(restaurant.longitude)];
+      const storeMarker = L.marker(storeLatLng, {
+        icon: L.icon({
+          iconUrl:
+            "data:image/svg+xml," +
+            encodeURIComponent(
+              `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="%23e53935" stroke="white" stroke-width="1.5"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3" fill="white"/></svg>`
+            ),
+          iconSize: [32, 32],
+          iconAnchor: [16, 32],
+        }),
+      })
+        .bindPopup(`<b>Loja (Coleta Única):</b> ${restaurant.name || "Sua Loja"}`)
+        .addTo(map);
+
+      markersRef.current.push(storeMarker);
+      bounds.push(storeLatLng);
+    }
+
+    // 2. Marcadores das Paradas (Destinos)
+    stops.forEach((s, i) => {
+      if (s.lat != null && s.lng != null && isValidCoordinate(s.lat, s.lng)) {
+        const stopLatLng: [number, number] = [s.lat, s.lng];
+        const stopMarker = L.marker(stopLatLng, {
+          icon: L.divIcon({
+            className: "custom-stop-marker",
+            html: `<div style="background-color: #22c55e; color: white; border: 2px solid white; border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 12px; box-shadow: 0 2px 6px rgba(0,0,0,0.3);">${i + 1}</div>`,
+            iconSize: [28, 28],
+            iconAnchor: [14, 14],
+          }),
+        })
+          .bindPopup(`<b>Parada ${i + 1}:</b> ${s.customer_name || "Cliente"}<br/>${s.delivery_address}`)
+          .addTo(map);
+
+        markersRef.current.push(stopMarker);
+        bounds.push(stopLatLng);
+      }
+    });
+
+    // 3. Traçado Polylines da rota Mapbox
+    if (routeResult?.geometry && routeResult.geometry.length > 0) {
+      const poly = L.polyline(routeResult.geometry, {
+        color: "#2563eb",
+        weight: 5,
+        opacity: 0.8,
+        lineCap: "round",
+      }).addTo(map);
+      polylineRef.current = poly;
+    }
+
+    if (bounds.length > 0) {
+      map.fitBounds(L.latLngBounds(bounds), { padding: [40, 40] });
+    }
+  }, [restaurant, stops, routeResult]);
 
   // CÁLCULO UNIFICADO DA ROTA COMPLETA VIA MAPBOX
   const calculateAllDistances = useCallback(async () => {
@@ -336,7 +518,7 @@ const MultiDeliveryOrder = ({ restaurant, userId }: Props) => {
     if (!restaurant) return toast.error("Cadastre sua loja primeiro");
     if (!restaurant.address) return toast.error("Defina o endereço de coleta da loja");
 
-    const valid = stops.filter(s => s.delivery_address.trim() && s.customer_name.trim());
+    const valid = stops.filter((s) => s.delivery_address.trim() && s.customer_name.trim());
     if (valid.length === 0) {
       return toast.error("Preencha cliente e endereço de pelo menos uma parada");
     }
@@ -401,7 +583,7 @@ const MultiDeliveryOrder = ({ restaurant, userId }: Props) => {
             <Route className="w-6 h-6 text-primary" /> Multi Entregas (Operação Única)
           </CardTitle>
           <p className="text-sm text-muted-foreground">
-            Monte uma rota unificada com até {MAX_STOPS} paradas. Um único motorista realiza toda a coleta na loja e segue a sequência logística com preço otimizado.
+            Monte uma rota unificada com até {MAX_STOPS} paradas em Primavera do Leste - MT. Um único motorista realiza a coleta na loja e segue a sequência logística com preço otimizado.
           </p>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -409,7 +591,7 @@ const MultiDeliveryOrder = ({ restaurant, userId }: Props) => {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border bg-muted/40 p-4">
             <div className="text-sm space-y-1">
               <div className="font-semibold flex items-center gap-2">
-                <MapPin className="w-4 h-4 text-red-5-00" />
+                <MapPin className="w-4 h-4 text-red-500" />
                 Coleta Única: {restaurant?.name || "—"}
               </div>
               <div className="text-muted-foreground text-xs truncate">
@@ -427,130 +609,199 @@ const MultiDeliveryOrder = ({ restaurant, userId }: Props) => {
           </div>
 
           {/* Cards de Paradas Sequenciais */}
-          {stops.map((s, idx) => (
-            <Card key={s.id} className="border border-border/80 shadow-sm relative transition-all">
-              <CardContent className="pt-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Badge className="gap-1 bg-primary text-primary-foreground font-semibold">
-                      <Package className="w-3.5 h-3.5" /> Parada {idx + 1}
-                    </Badge>
-                    {idx === 0 && (
-                      <span className="text-xs text-muted-foreground font-medium">
-                        (Trecho 1: Loja ➔ Destino 1)
-                      </span>
-                    )}
-                    {idx > 0 && (
-                      <span className="text-xs text-muted-foreground font-medium">
-                        (Trecho {idx + 1}: Parada {idx} ➔ Destino {idx + 1})
-                      </span>
-                    )}
-                  </div>
+          {stops.map((s, idx) => {
+            const hasCoords = s.lat != null && s.lng != null;
+            const currentSuggestions = suggestionsMap[idx] || [];
+            const isSearchingThis = searchingMap[idx];
+            const isDropdownOpen = activeSearchIdx === idx && currentSuggestions.length > 0;
 
-                  <div className="flex items-center gap-2">
-                    {/* Botões de reordenamento */}
-                    <div className="flex items-center gap-1">
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-7 w-7"
-                        disabled={idx === 0}
-                        onClick={() => moveStop(idx, idx - 1)}
-                        title="Mover para cima"
-                      >
-                        <ArrowUp className="w-3.5 h-3.5" />
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-7 w-7"
-                        disabled={idx === stops.length - 1}
-                        onClick={() => moveStop(idx, idx + 1)}
-                        title="Mover para baixo"
-                      >
-                        <ArrowDown className="w-3.5 h-3.5" />
-                      </Button>
+            return (
+              <Card key={s.id} className="border border-border/80 shadow-sm relative transition-all">
+                <CardContent className="pt-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Badge className="gap-1 bg-primary text-primary-foreground font-semibold">
+                        <Package className="w-3.5 h-3.5" /> Parada {idx + 1}
+                      </Badge>
+
+                      {hasCoords ? (
+                        <Badge variant="outline" className="bg-emerald-500/10 text-emerald-700 border-emerald-300 gap-1 text-[10px]">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Endereço Localizado
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="bg-amber-500/10 text-amber-700 border-amber-300 gap-1 text-[10px]">
+                          <Search className="w-3 h-3 text-amber-600" /> Digite para buscar
+                        </Badge>
+                      )}
+
+                      {idx === 0 && (
+                        <span className="text-xs text-muted-foreground font-medium">
+                          (Trecho 1: Loja ➔ Destino 1)
+                        </span>
+                      )}
+                      {idx > 0 && (
+                        <span className="text-xs text-muted-foreground font-medium">
+                          (Trecho {idx + 1}: Parada {idx} ➔ Destino {idx + 1})
+                        </span>
+                      )}
                     </div>
 
-                    <div className="text-right">
-                      <span className="text-xs text-muted-foreground block">Rateio estimado</span>
-                      <span className="text-sm font-bold text-foreground">
-                        R$ {stopCostBreakdown[idx]?.toFixed(2) ?? "0.00"}
-                      </span>
+                    <div className="flex items-center gap-2">
+                      {/* Botões de reordenamento */}
+                      <div className="flex items-center gap-1">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7"
+                          disabled={idx === 0}
+                          onClick={() => moveStop(idx, idx - 1)}
+                          title="Mover para cima"
+                        >
+                          <ArrowUp className="w-3.5 h-3.5" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7"
+                          disabled={idx === stops.length - 1}
+                          onClick={() => moveStop(idx, idx + 1)}
+                          title="Mover para baixo"
+                        >
+                          <ArrowDown className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
+
+                      <div className="text-right">
+                        <span className="text-xs text-muted-foreground block">Rateio estimado</span>
+                        <span className="text-sm font-bold text-foreground">
+                          R$ {stopCostBreakdown[idx]?.toFixed(2) ?? "0.00"}
+                        </span>
+                      </div>
+
+                      {stops.length > 1 && (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8 text-destructive hover:bg-destructive/10"
+                          onClick={() => removeStop(idx)}
+                          title="Remover parada"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      )}
                     </div>
-
-                    {stops.length > 1 && (
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-8 w-8 text-destructive hover:bg-destructive/10"
-                        onClick={() => removeStop(idx)}
-                        title="Remover parada"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    )}
                   </div>
-                </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <Label className="flex items-center gap-1 text-xs">
-                      <User className="w-3 h-3 text-muted-foreground" /> Nome do Cliente *
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label className="flex items-center gap-1 text-xs">
+                        <User className="w-3 h-3 text-muted-foreground" /> Nome do Cliente *
+                      </Label>
+                      <Input
+                        value={s.customer_name}
+                        onChange={(e) => updateStop(idx, { customer_name: e.target.value })}
+                        placeholder="Ex.: Maria Souza"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="flex items-center gap-1 text-xs">
+                        <Phone className="w-3 h-3 text-muted-foreground" /> Telefone (WhatsApp)
+                      </Label>
+                      <Input
+                        value={s.customer_phone}
+                        onChange={(e) => updateStop(idx, { customer_phone: e.target.value })}
+                        placeholder="(66) 99999-0000"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Campo de Endereço com Autocomplete Inteligente */}
+                  <div className="space-y-1 relative">
+                    <Label className="flex items-center justify-between text-xs">
+                      <span className="flex items-center gap-1">
+                        <MapPin className="w-3 h-3 text-muted-foreground" /> Endereço de Entrega *
+                      </span>
+                      {isSearchingThis && (
+                        <span className="text-[10px] text-primary flex items-center gap-1">
+                          <Loader2 className="w-3 h-3 animate-spin" /> Buscando no mapa...
+                        </span>
+                      )}
                     </Label>
-                    <Input
-                      value={s.customer_name}
-                      onChange={(e) => updateStop(idx, { customer_name: e.target.value })}
-                      placeholder="Ex.: Maria Souza"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="flex items-center gap-1 text-xs">
-                      <Phone className="w-3 h-3 text-muted-foreground" /> Telefone (WhatsApp)
-                    </Label>
-                    <Input
-                      value={s.customer_phone}
-                      onChange={(e) => updateStop(idx, { customer_phone: e.target.value })}
-                      placeholder="(66) 99999-0000"
-                    />
-                  </div>
-                </div>
 
-                <div className="space-y-1">
-                  <Label className="flex items-center gap-1 text-xs">
-                    <MapPin className="w-3 h-3 text-muted-foreground" /> Endereço de Entrega *
-                  </Label>
-                  <Input
-                    value={s.delivery_address}
-                    onChange={(e) => updateStop(idx, { delivery_address: e.target.value })}
-                    placeholder="Rua, número, bairro em Primavera do Leste - MT"
-                  />
-                </div>
+                    <div className="relative">
+                      <Input
+                        value={s.delivery_address}
+                        onChange={(e) => handleAddressInputChange(idx, e.target.value)}
+                        onFocus={() => {
+                          if (currentSuggestions.length > 0) setActiveSearchIdx(idx);
+                        }}
+                        placeholder="Digite rua, número, bairro em Primavera do Leste - MT..."
+                      />
 
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="space-y-1">
-                    <Label className="text-xs">Dist. Trecho (km)</Label>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={s.distance_km}
-                      onChange={(e) => updateStop(idx, { distance_km: e.target.value })}
-                      placeholder="0.00"
-                    />
+                      {/* Dropdown de sugestões de endereço Mapbox */}
+                      {isDropdownOpen && (
+                        <div className="absolute left-0 right-0 top-full mt-1 z-50 bg-background border rounded-lg shadow-xl overflow-hidden max-h-60 overflow-y-auto">
+                          <div className="p-1.5 bg-muted/40 text-[10px] font-semibold text-muted-foreground border-b flex items-center justify-between">
+                            <span>Sugestões em Primavera do Leste - MT</span>
+                            <span>Selecione uma opção</span>
+                          </div>
+                          {currentSuggestions.map((item, sugIdx) => (
+                            <button
+                              key={item.mapboxId || sugIdx}
+                              type="button"
+                              onClick={() => selectSuggestion(idx, item)}
+                              className="w-full text-left p-2.5 hover:bg-accent transition-colors border-b last:border-b-0 flex items-start gap-2 text-xs"
+                            >
+                              <MapPin className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+                              <div>
+                                <p className="font-semibold text-foreground">{item.fullAddress}</p>
+                                <p className="text-[10px] text-muted-foreground">
+                                  {item.street} {item.number ? `, ${item.number}` : ""} — {item.neighborhood}
+                                </p>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  <div className="space-y-1 col-span-2">
-                    <Label className="text-xs">Observação / Ponto de Referência</Label>
-                    <Input
-                      value={s.notes}
-                      onChange={(e) => updateStop(idx, { notes: e.target.value })}
-                      placeholder="Ex.: entregar para recepção, portão branco"
-                    />
+
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Dist. Trecho (km)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={s.distance_km}
+                        onChange={(e) => updateStop(idx, { distance_km: e.target.value })}
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div className="space-y-1 col-span-2">
+                      <Label className="text-xs">Observação / Ponto de Referência</Label>
+                      <Input
+                        value={s.notes}
+                        onChange={(e) => updateStop(idx, { notes: e.target.value })}
+                        placeholder="Ex.: entregar para recepção, portão branco"
+                      />
+                    </div>
                   </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                </CardContent>
+              </Card>
+            );
+          })}
+
+          {/* Mapa de Prévia da Rota Multi-Entregas */}
+          <div className="space-y-2 pt-2">
+            <Label className="flex items-center gap-1.5 text-xs font-semibold">
+              <MapIcon className="w-4 h-4 text-primary" /> Visualização do Mapa e Prévia da Rota
+            </Label>
+            <div
+              ref={mapContainerRef}
+              className="w-full h-64 rounded-xl border bg-muted shadow-inner overflow-hidden z-0"
+            />
+          </div>
 
           {/* Botões de Ação */}
           <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
