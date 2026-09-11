@@ -3,7 +3,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { playUrgentNotification } from "@/lib/notificationSound";
-
+import { cancelDeliveryNotification } from "@/lib/push";
 import { toast } from "sonner";
 
 
@@ -323,6 +323,7 @@ export function useDeliveryOverlay({ standby, timeoutMs = 30000, onAccepted }: O
         p_request_id: delivery.id,
       });
       if (error) throw error;
+      void cancelDeliveryNotification(delivery.id);
 
 
 

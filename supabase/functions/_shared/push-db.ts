@@ -46,14 +46,11 @@ export interface OnlineDriver {
 }
 
 export async function fetchOnlineDrivers(svc: SupabaseClient): Promise<OnlineDriver[]> {
-  const cutoff = new Date(Date.now() - ONLINE_WINDOW_MINUTES * 60 * 1000).toISOString();
   const { data, error } = await svc
     .from("drivers")
     .select("id, user_id, full_name, is_online, is_active, approval_status, last_seen_at, suspended_until")
     .eq("is_active", true)
-    .eq("approval_status", "approved")
-    .eq("is_online", true)
-    .gte("last_seen_at", cutoff);
+    .eq("approval_status", "approved");
 
   if (error) throw error;
 

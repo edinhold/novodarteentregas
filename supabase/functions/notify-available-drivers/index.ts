@@ -105,6 +105,7 @@ Deno.serve(async (req) => {
         evento_id: eventKey,
       },
       url: `${APP_BASE_URL}/entregador?pedido=${pedidoId}`,
+      collapse_id: `nova_entrega:${pedidoId}`,
       priority: 10,
       ttl: 300,
       content_available: true,

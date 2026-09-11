@@ -105,3 +105,28 @@ export async function sendNotification(
     };
   }
 }
+
+export async function cancelNotification(
+  cfg: OneSignalConfig,
+  notificationId: string
+) {
+  if (!cfg.apiKey || !notificationId) {
+    return { ok: false, message: "API Key ou Notification ID não informado." };
+  }
+
+  try {
+    const url = `https://api.onesignal.com/notifications/${notificationId}?app_id=${encodeURIComponent(cfg.appId)}`;
+    const res = await fetch(url, {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        Authorization: `Key ${cfg.apiKey}`,
+      },
+    });
+
+    const osData = await res.json().catch(() => ({}));
+    return { ok: res.ok, status: res.status, data: osData };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || String(err) };
+  }
+}

@@ -1017,6 +1017,7 @@ export async function handleEdgeFunction(
         evento_id: `nova_entrega:${pedidoId}`,
       },
       url: `${APP_BASE_URL}/entregador?pedido=${pedidoId}`,
+      collapse_id: `nova_entrega:${pedidoId}`,
       priority: 10,
       ttl: 300,
       content_available: true,
@@ -1094,6 +1095,74 @@ export async function handleEdgeFunction(
         },
       };
     }
+  }
+
+  // 8. cancel-delivery-notification (Remoção da notificação do OneSignal quando o pedido é aceito ou cancelado)
+  if (functionName === "cancel-delivery-notification") {
+    const pedidoId = reqBody?.pedido_id;
+    if (!pedidoId) {
+      return {
+        status: 200,
+        body: { success: false, code: "PARAMETRO_INVALIDO", message: "Informe pedido_id.", request_id: requestId },
+      };
+    }
+
+    console.log("[CancelDeliveryNotification:start]", { pedidoId, requestId });
+
+    const { data: job } = await supabase
+      .from("notification_jobs")
+      .select("id, status, onesignal_notification_id")
+      .eq("event_key", `nova_entrega:${pedidoId}`)
+      .maybeSingle();
+
+    const { data: log } = await supabase
+      .from("notification_delivery_logs")
+      .select("onesignal_notification_id")
+      .eq("pedido_id", pedidoId)
+      .not("onesignal_notification_id", "is", null)
+      .order("created_at", { ascending: false })
+      .maybeSingle();
+
+    const osNotificationId = job?.onesignal_notification_id || log?.onesignal_notification_id;
+    let osCancelled = false;
+
+    if (osNotificationId && ONESIGNAL_APP_API_KEY) {
+      try {
+        const cancelUrl = `https://api.onesignal.com/notifications/${osNotificationId}?app_id=${encodeURIComponent(ONESIGNAL_APP_ID)}`;
+        const cancelRes = await fetch(cancelUrl, {
+          method: "DELETE",
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            Authorization: `Key ${ONESIGNAL_APP_API_KEY}`,
+          },
+        });
+        osCancelled = cancelRes.ok;
+        console.log("[CancelDeliveryNotification:onesignal_delete]", { pedidoId, osNotificationId, ok: cancelRes.ok });
+      } catch (err: any) {
+        console.warn("[CancelDeliveryNotification:onesignal_error]", { pedidoId, error: err?.message });
+      }
+    }
+
+    if (job) {
+      await supabase
+        .from("notification_jobs")
+        .update({
+          status: "cancelled",
+          processed_at: new Date().toISOString(),
+          last_error: "Notificação cancelada após aceite/cancelamento da corrida.",
+        })
+        .eq("id", job.id);
+    }
+
+    return {
+      status: 200,
+      body: {
+        success: true,
+        onesignal_cancelled: osCancelled,
+        message: "Notificação de entrega cancelada com sucesso.",
+        request_id: requestId,
+      },
+    };
   }
 
   // 5. admin-recharge-store (Recarga Direta vinculada à LOJA)
