@@ -66,6 +66,9 @@ export default defineConfig(({ mode }) => ({
       },
     }),
   ].filter(Boolean),
+  build: {
+    outDir: "dist",
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
