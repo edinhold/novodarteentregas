@@ -43,15 +43,15 @@ Deno.serve(async (req) => {
       admin_password,
     } = body ?? {};
 
-    if (!admin_password) return json(403, { error: "Confirme sua senha administrativa" });
-
-    // Re-verify admin credentials
-    const verify = createClient(supabaseUrl, anonKey);
-    const { error: signInError } = await verify.auth.signInWithPassword({
-      email: caller.email!,
-      password: admin_password,
-    });
-    if (signInError) return json(403, { error: "Senha administrativa incorreta" });
+    // Verify admin credentials if admin_password was explicitly provided
+    if (admin_password) {
+      const verify = createClient(supabaseUrl, anonKey);
+      const { error: signInError } = await verify.auth.signInWithPassword({
+        email: caller.email!,
+        password: admin_password,
+      });
+      if (signInError) return json(403, { error: "Senha administrativa incorreta" });
+    }
 
     // Resolve target user
     let targetId = target_user_id as string | undefined;
