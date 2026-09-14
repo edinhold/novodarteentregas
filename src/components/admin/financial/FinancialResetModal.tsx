@@ -14,6 +14,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { FinancialBackupService } from "@/services/FinancialBackupService";
+import { ConfirmAdminPasswordModal } from "@/components/admin/ConfirmAdminPasswordModal";
 
 interface FinancialResetModalProps {
   open: boolean;
@@ -33,6 +34,7 @@ export const FinancialResetModal: React.FC<FinancialResetModalProps> = ({
   const [isBackupLoading, setIsBackupLoading] = useState(false);
   const [backupExecuted, setBackupExecuted] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
+  const [showPasswordConfirm, setShowPasswordConfirm] = useState(false);
 
   const handleBackup = async () => {
     setIsBackupLoading(true);
@@ -48,12 +50,15 @@ export const FinancialResetModal: React.FC<FinancialResetModalProps> = ({
     }
   };
 
-  const handleReset = async () => {
+  const handleReset = () => {
     if (confirmationInput.trim() !== REQUIRED_CONFIRMATION_TEXT) {
       toast.error(`Digite exatamente "${REQUIRED_CONFIRMATION_TEXT}" para confirmar.`);
       return;
     }
+    setShowPasswordConfirm(true);
+  };
 
+  const executeReset = async () => {
     setIsResetting(true);
     try {
       let resetDone = false;
@@ -255,6 +260,16 @@ export const FinancialResetModal: React.FC<FinancialResetModalProps> = ({
           </Button>
         </div>
       </DialogContent>
+
+      <ConfirmAdminPasswordModal
+        open={showPasswordConfirm}
+        onOpenChange={setShowPasswordConfirm}
+        title="Validar Reinício do Financeiro"
+        description="Digite sua senha de administrador para autorizar o reinício e arquivamento dos dados financeiros."
+        actionLabel="Autorizar Reinício Financeiro"
+        onConfirm={executeReset}
+        loading={isResetting}
+      />
     </Dialog>
   );
 };

@@ -10,6 +10,7 @@ import { Trash2, LogIn, KeyRound, Eye, EyeOff, Lock, Loader2, CheckCircle } from
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 import DeleteConfirm from "./DeleteConfirm";
+import { ConfirmAdminPasswordModal } from "./ConfirmAdminPasswordModal";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -54,7 +55,33 @@ const StoreOwnersTab = () => {
     },
   });
 
-  const handleDelete = async () => {
+  // Password Confirmation Dialog State
+  const [adminPasswordAction, setAdminPasswordAction] = useState<{
+    open: boolean;
+    title: string;
+    description: string;
+    actionLabel: string;
+    onConfirm: () => void | Promise<void>;
+  }>({
+    open: false,
+    title: "",
+    description: "",
+    actionLabel: "",
+    onConfirm: () => {},
+  });
+
+  const handleDelete = () => {
+    if (!deleteId) return;
+    setAdminPasswordAction({
+      open: true,
+      title: "Confirmar Exclusão de Loja/Lojista",
+      description: `Digite sua senha de administrador para excluir permanentemente a loja "${deleteId.name}".`,
+      actionLabel: "Autorizar Exclusão",
+      onConfirm: executeDelete,
+    });
+  };
+
+  const executeDelete = async () => {
     if (!deleteId) return;
     setDeleting(true);
     try {
@@ -157,7 +184,7 @@ const StoreOwnersTab = () => {
     setPasswordModalOpen(true);
   };
 
-  const handleSavePassword = async () => {
+  const handleSavePassword = () => {
     if (!targetStoreOwner) return;
     if (!newPassword || newPassword.trim().length < 6) {
       return toast.error("A nova senha deve ter pelo menos 6 caracteres.");
@@ -166,6 +193,17 @@ const StoreOwnersTab = () => {
       return toast.error("As senhas digitadas não coincidem.");
     }
 
+    setAdminPasswordAction({
+      open: true,
+      title: "Validar Alteração de Senha de Lojista",
+      description: `Digite sua senha de administrador para redefinir a senha de acesso da loja "${targetStoreOwner.name}".`,
+      actionLabel: "Autorizar Nova Senha",
+      onConfirm: executeSavePassword,
+    });
+  };
+
+  const executeSavePassword = async () => {
+    if (!targetStoreOwner) return;
     setSavingPassword(true);
     try {
       const { data, error } = await supabase.rpc("admin_set_user_password", {
@@ -368,6 +406,15 @@ const StoreOwnersTab = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmAdminPasswordModal
+        open={adminPasswordAction.open}
+        onOpenChange={(open) => setAdminPasswordAction((prev) => ({ ...prev, open }))}
+        title={adminPasswordAction.title}
+        description={adminPasswordAction.description}
+        actionLabel={adminPasswordAction.actionLabel}
+        onConfirm={adminPasswordAction.onConfirm}
+      />
     </>
   );
 };

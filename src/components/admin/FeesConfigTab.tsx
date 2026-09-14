@@ -10,6 +10,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import { Settings, MessageCircle, Ruler, Calendar, DollarSign, Flame } from "lucide-react";
 
+import { ConfirmAdminPasswordModal } from "@/components/admin/ConfirmAdminPasswordModal";
+
 const DAYS_OF_WEEK = [
   { value: "0", label: "Domingo" },
   { value: "1", label: "Segunda-feira" },
@@ -23,6 +25,7 @@ const DAYS_OF_WEEK = [
 const FeesConfigTab = () => {
   const queryClient = useQueryClient();
   const [loading, setLoading] = useState(false);
+  const [showPasswordConfirm, setShowPasswordConfirm] = useState(false);
   const [form, setForm] = useState({
     base_fee: "5",
     fee_per_km: "1.5",
@@ -68,7 +71,20 @@ const FeesConfigTab = () => {
     }
   }, [config]);
 
-  const handleSave = async () => {
+  const handleSave = () => {
+    if (!config) return;
+    const minKmVal = isNaN(parseFloat(form.min_km)) ? 0 : Math.max(0, parseFloat(form.min_km));
+    const maxKmVal = isNaN(parseFloat(form.max_km)) ? 0 : Math.max(0, parseFloat(form.max_km));
+
+    if (maxKmVal > 0 && minKmVal > maxKmVal) {
+      toast.error("Km mínimo não pode ser maior que o máximo");
+      return;
+    }
+
+    setShowPasswordConfirm(true);
+  };
+
+  const executeSave = async () => {
     if (!config) return;
     setLoading(true);
     try {
@@ -81,12 +97,6 @@ const FeesConfigTab = () => {
       const paymentDayVal = isNaN(parseInt(form.payment_day, 10)) ? 3 : parseInt(form.payment_day, 10);
       const appFeePerDeliveryVal = isNaN(parseFloat(form.app_fee_per_delivery)) ? 2 : Math.max(0, parseFloat(form.app_fee_per_delivery));
       const dynamicFeePerKmVal = isNaN(parseFloat(form.dynamic_fee_per_km)) ? 0 : Math.max(0, parseFloat(form.dynamic_fee_per_km));
-      
-      if (maxKmVal > 0 && minKmVal > maxKmVal) {
-        toast.error("Km mínimo não pode ser maior que o máximo");
-        setLoading(false);
-        return;
-      }
 
       const { error } = await supabase.from("delivery_config").update({
         base_fee: baseFeeVal,
@@ -104,11 +114,11 @@ const FeesConfigTab = () => {
         dynamic_fee_per_km: dynamicFeePerKmVal,
       } as any).eq("id", config.id);
       if (error) throw error;
-      toast.success("Configuração salva!");
+      toast.success("Configuração de taxas salva com sucesso!");
       queryClient.invalidateQueries({ queryKey: ["delivery-config"] });
       queryClient.invalidateQueries({ queryKey: ["financial-delivery-config"] });
     } catch (err: any) {
-      toast.error(err.message || "Erro ao salvar");
+      toast.error(err.message || "Erro ao salvar configuração");
     } finally {
       setLoading(false);
     }
@@ -263,6 +273,16 @@ const FeesConfigTab = () => {
           {loading ? "Salvando..." : "Salvar Configuração"}
         </Button>
       </CardContent>
+
+      <ConfirmAdminPasswordModal
+        open={showPasswordConfirm}
+        onOpenChange={setShowPasswordConfirm}
+        title="Validar Alteração nas Taxas do Sistema"
+        description="Digite sua senha de administrador para autorizar as alterações de valores e regras de precificação."
+        actionLabel="Autorizar e Salvar Taxas"
+        onConfirm={executeSave}
+        loading={loading}
+      />
     </Card>
   );
 };

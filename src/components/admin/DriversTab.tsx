@@ -21,6 +21,7 @@ import { toast } from "sonner";
 import { AdjustDriverWalletModal } from "./financial/AdjustDriverWalletModal";
 
 import DeleteConfirm from "./DeleteConfirm";
+import { ConfirmAdminPasswordModal } from "./ConfirmAdminPasswordModal";
 
 const DriversTab = () => {
   const queryClient = useQueryClient();
@@ -73,7 +74,33 @@ const DriversTab = () => {
     return earnings.filter((e) => e.driver_id === driverId).reduce((sum, e) => sum + Number(e.amount), 0);
   };
 
-  const handleDelete = async () => {
+  // Password Confirmation Dialog State
+  const [adminPasswordAction, setAdminPasswordAction] = useState<{
+    open: boolean;
+    title: string;
+    description: string;
+    actionLabel: string;
+    onConfirm: () => void | Promise<void>;
+  }>({
+    open: false,
+    title: "",
+    description: "",
+    actionLabel: "",
+    onConfirm: () => {},
+  });
+
+  const handleDelete = () => {
+    if (!deleteId) return;
+    setAdminPasswordAction({
+      open: true,
+      title: `Confirmar Exclusão de Motorista`,
+      description: `Digite sua senha de administrador para excluir permanentemente a conta do motorista "${deleteId.name}".`,
+      actionLabel: "Autorizar Exclusão",
+      onConfirm: executeDelete,
+    });
+  };
+
+  const executeDelete = async () => {
     if (!deleteId) return;
     setDeleting(true);
     try {
@@ -118,7 +145,18 @@ const DriversTab = () => {
     }
   };
 
-  const handleApproval = async (driverId: string, status: "approved" | "rejected", name: string) => {
+  const handleApproval = (driverId: string, status: "approved" | "rejected", name: string) => {
+    const actionText = status === "approved" ? "aprovar" : "rejeitar";
+    setAdminPasswordAction({
+      open: true,
+      title: `Validar Alteração de Status`,
+      description: `Digite sua senha de administrador para ${actionText} o cadastro do motorista "${name}".`,
+      actionLabel: `Autorizar ${status === "approved" ? "Aprovação" : "Rejeição"}`,
+      onConfirm: () => executeApproval(driverId, status, name),
+    });
+  };
+
+  const executeApproval = async (driverId: string, status: "approved" | "rejected", name: string) => {
     try {
       const { error } = await supabase
         .from("drivers")
@@ -132,7 +170,7 @@ const DriversTab = () => {
     }
   };
 
-  const handleSavePassword = async () => {
+  const handleSavePassword = () => {
     if (!targetDriver) return;
     if (!newPassword || newPassword.trim().length < 6) {
       return toast.error("A nova senha deve ter pelo menos 6 caracteres.");
@@ -141,6 +179,17 @@ const DriversTab = () => {
       return toast.error("As senhas digitadas não coincidem.");
     }
 
+    setAdminPasswordAction({
+      open: true,
+      title: "Validar Alteração de Senha",
+      description: `Digite sua senha de administrador para alterar a senha do motorista "${targetDriver.name}".`,
+      actionLabel: "Autorizar Nova Senha",
+      onConfirm: executeSavePassword,
+    });
+  };
+
+  const executeSavePassword = async () => {
+    if (!targetDriver) return;
     setSavingPassword(true);
     try {
       const { data, error } = await supabase.rpc("admin_set_user_password", {
@@ -443,6 +492,15 @@ const DriversTab = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmAdminPasswordModal
+        open={adminPasswordAction.open}
+        onOpenChange={(open) => setAdminPasswordAction((prev) => ({ ...prev, open }))}
+        title={adminPasswordAction.title}
+        description={adminPasswordAction.description}
+        actionLabel={adminPasswordAction.actionLabel}
+        onConfirm={adminPasswordAction.onConfirm}
+      />
     </>
   );
 };

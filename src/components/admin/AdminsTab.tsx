@@ -31,6 +31,8 @@ import {
   Loader2,
 } from "lucide-react";
 
+import { ConfirmAdminPasswordModal } from "./ConfirmAdminPasswordModal";
+
 const AdminsTab = () => {
   const queryClient = useQueryClient();
   const [selectedUserId, setSelectedUserId] = useState("");
@@ -132,11 +134,40 @@ const AdminsTab = () => {
     return true;
   };
 
-  const handleAdd = async () => {
+  // Password Confirmation Dialog State
+  const [adminPasswordAction, setAdminPasswordAction] = useState<{
+    open: boolean;
+    title: string;
+    description: string;
+    actionLabel: string;
+    onConfirm: () => void | Promise<void>;
+  }>({
+    open: false,
+    title: "",
+    description: "",
+    actionLabel: "",
+    onConfirm: () => {},
+  });
+
+  const handleAdd = () => {
     if (!selectedUserId) {
       toast.error("Selecione uma pessoa / motorista");
       return;
     }
+    const target = drivers.find((d: any) => d.user_id === selectedUserId);
+    const targetName = target?.full_name || "o usuário selecionado";
+
+    setAdminPasswordAction({
+      open: true,
+      title: "Validar Concessão de Privilégio Admin",
+      description: `Digite sua senha de administrador para conceder permissão total de administrador para "${targetName}".`,
+      actionLabel: "Autorizar Concessão Admin",
+      onConfirm: executeAdd,
+    });
+  };
+
+  const executeAdd = async () => {
+    if (!selectedUserId) return;
     setLoading(true);
     try {
       await assignAdminRole(selectedUserId);
@@ -151,12 +182,23 @@ const AdminsTab = () => {
     }
   };
 
-  const handleRemove = async (roleId: string, userId: string) => {
+  const handleRemove = async (roleId: string, userId: string, adminName: string = "Administrador") => {
     const { data: { session } } = await supabase.auth.getSession();
     if (session?.user.id === userId) {
       toast.error("Você não pode remover a si mesmo como administrador");
       return;
     }
+
+    setAdminPasswordAction({
+      open: true,
+      title: "Validar Remoção de Administrador",
+      description: `Digite sua senha para remover o privilégio de administrador de "${adminName}".`,
+      actionLabel: "Autorizar Remoção Admin",
+      onConfirm: () => executeRemove(roleId),
+    });
+  };
+
+  const executeRemove = async (roleId: string) => {
     setRemoving(roleId);
     try {
       const { error } = await supabase.from("user_roles").delete().eq("id", roleId);
@@ -170,7 +212,17 @@ const AdminsTab = () => {
     }
   };
 
-  const handleApproveRequest = async (request: any) => {
+  const handleApproveRequest = (request: any) => {
+    setAdminPasswordAction({
+      open: true,
+      title: "Validar Aprovação de Administrador",
+      description: `Digite sua senha de administrador para aprovar a solicitação de "${request.full_name}".`,
+      actionLabel: "Autorizar Aprovação",
+      onConfirm: () => executeApproveRequest(request),
+    });
+  };
+
+  const executeApproveRequest = async (request: any) => {
     setApproving(request.id);
     try {
       // Assign admin role with direct DB fallback
@@ -240,7 +292,7 @@ const AdminsTab = () => {
   };
 
   // Execute password change for specific admin (without requiring current password)
-  const handleSavePassword = async () => {
+  const handleSavePassword = () => {
     if (!targetAdmin) return;
     if (!newPassword || newPassword.trim().length < 6) {
       return toast.error("A nova senha deve ter pelo menos 6 caracteres.");
@@ -249,6 +301,17 @@ const AdminsTab = () => {
       return toast.error("As senhas digitadas não coincidem.");
     }
 
+    setAdminPasswordAction({
+      open: true,
+      title: "Validar Alteração de Senha de Admin",
+      description: `Digite sua senha de administrador para autorizar a redefinição de senha de "${targetAdmin.name}".`,
+      actionLabel: "Autorizar Nova Senha",
+      onConfirm: executeSavePassword,
+    });
+  };
+
+  const executeSavePassword = async () => {
+    if (!targetAdmin) return;
     setSavingPassword(true);
     try {
       const { data, error } = await supabase.rpc("admin_set_user_password", {
@@ -582,6 +645,15 @@ const AdminsTab = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmAdminPasswordModal
+        open={adminPasswordAction.open}
+        onOpenChange={(open) => setAdminPasswordAction((prev) => ({ ...prev, open }))}
+        title={adminPasswordAction.title}
+        description={adminPasswordAction.description}
+        actionLabel={adminPasswordAction.actionLabel}
+        onConfirm={adminPasswordAction.onConfirm}
+      />
     </div>
   );
 };

@@ -28,6 +28,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { ConfirmAdminPasswordModal } from "@/components/admin/ConfirmAdminPasswordModal";
+
 interface AdjustDriverWalletModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -49,6 +51,7 @@ export const AdjustDriverWalletModal: React.FC<AdjustDriverWalletModalProps> = (
   const [amountInput, setAmountInput] = useState<string>("");
   const [reason, setReason] = useState<string>("");
   const [submitting, setSubmitting] = useState<boolean>(false);
+  const [showPasswordConfirm, setShowPasswordConfirm] = useState<boolean>(false);
   const idempotencyKeyRef = useRef<string>("");
 
   // Fetch drivers list if not provided
@@ -133,7 +136,7 @@ export const AdjustDriverWalletModal: React.FC<AdjustDriverWalletModalProps> = (
     return found ? found.name : "Motorista selecionado";
   }, [driversOptions, selectedDriverId]);
 
-  const handleAdjust = async () => {
+  const handleAdjust = () => {
     if (!selectedDriverId) {
       return toast.error("Selecione um motorista para realizar o ajuste.");
     }
@@ -149,6 +152,10 @@ export const AdjustDriverWalletModal: React.FC<AdjustDriverWalletModalProps> = (
       );
     }
 
+    setShowPasswordConfirm(true);
+  };
+
+  const executeAdjust = async () => {
     setSubmitting(true);
     const key = idempotencyKeyRef.current || `adj-${Date.now()}`;
 
@@ -442,6 +449,16 @@ export const AdjustDriverWalletModal: React.FC<AdjustDriverWalletModalProps> = (
           </Button>
         </DialogFooter>
       </DialogContent>
+
+      <ConfirmAdminPasswordModal
+        open={showPasswordConfirm}
+        onOpenChange={setShowPasswordConfirm}
+        title={`Validar Ajuste na Carteira (${operation === "add" ? "Crédito" : "Débito"})`}
+        description={`Confirme sua senha para autorizar o ajuste de ${formatCurrency(amountVal)} na carteira de ${selectedDriverName}.`}
+        actionLabel="Autorizar Ajuste"
+        onConfirm={executeAdjust}
+        loading={submitting}
+      />
     </Dialog>
   );
 };

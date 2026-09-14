@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { Store, Loader2, Sparkles, ArrowRight, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
+import { ConfirmAdminPasswordModal } from "@/components/admin/ConfirmAdminPasswordModal";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -43,12 +44,14 @@ export const DirectRechargeModal: React.FC<DirectRechargeModalProps> = ({
   const [amount, setAmount] = useState("50");
   const [applyPromo, setApplyPromo] = useState(true);
   const [loading, setLoading] = useState(false);
-  const [idempotencyKey, setIdempotencyKey] = useState("");
+  const [showPasswordConfirm, setShowPasswordConfirm] = useState(false);
+  const [idempotencyKey, setIdempotencyKey] = useState<string>("");
 
   // Generate a fresh idempotency key every time modal is opened
   useEffect(() => {
     if (open) {
       setIdempotencyKey(crypto.randomUUID());
+      setShowPasswordConfirm(false);
     }
   }, [open]);
 
@@ -59,7 +62,7 @@ export const DirectRechargeModal: React.FC<DirectRechargeModalProps> = ({
   const totalCredited = val + bonus;
   const projectedBalance = currentBalance + totalCredited;
 
-  const handleConfirm = async () => {
+  const handleConfirm = () => {
     if (!selectedStore) {
       toast.error("Selecione a loja destinatária");
       return;
@@ -73,6 +76,11 @@ export const DirectRechargeModal: React.FC<DirectRechargeModalProps> = ({
       return;
     }
 
+    setShowPasswordConfirm(true);
+  };
+
+  const executeRecharge = async () => {
+    if (!selectedStore) return;
     setLoading(true);
     try {
       // 1. Send recharge request with idempotency key
@@ -262,6 +270,16 @@ export const DirectRechargeModal: React.FC<DirectRechargeModalProps> = ({
           </Button>
         </DialogFooter>
       </DialogContent>
+
+      <ConfirmAdminPasswordModal
+        open={showPasswordConfirm}
+        onOpenChange={setShowPasswordConfirm}
+        title="Validar Recarga Direta na Loja"
+        description={`Confirme sua senha para autorizar a inclusão de R$ ${totalCredited.toFixed(2)} em créditos para a loja "${selectedStore?.name}".`}
+        actionLabel="Autorizar Recarga"
+        onConfirm={executeRecharge}
+        loading={loading}
+      />
     </Dialog>
   );
 };

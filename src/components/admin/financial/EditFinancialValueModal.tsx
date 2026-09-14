@@ -17,6 +17,8 @@ import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { formatCurrency, formatDateTime } from "@/utils/financialCalculations";
 
+import { ConfirmAdminPasswordModal } from "@/components/admin/ConfirmAdminPasswordModal";
+
 export interface FinancialEditableItem {
   id: string;
   type:
@@ -56,6 +58,7 @@ export const EditFinancialValueModal: React.FC<EditFinancialValueModalProps> = (
   const [newValueInput, setNewValueInput] = useState<string>("");
   const [reasonInput, setReasonInput] = useState<string>("");
   const [showConfirmation, setShowConfirmation] = useState<boolean>(false);
+  const [showPasswordConfirm, setShowPasswordConfirm] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [currentAdmin, setCurrentAdmin] = useState<{ id: string; email: string } | null>(null);
 
@@ -68,6 +71,7 @@ export const EditFinancialValueModal: React.FC<EditFinancialValueModalProps> = (
         }
       });
       setShowConfirmation(false);
+      setShowPasswordConfirm(false);
     }
   }, [open]);
 
@@ -77,6 +81,7 @@ export const EditFinancialValueModal: React.FC<EditFinancialValueModalProps> = (
       setNewValueInput(String(item.currentValue || 0));
       setReasonInput("");
       setShowConfirmation(false);
+      setShowPasswordConfirm(false);
     }
   }, [item]);
 
@@ -111,9 +116,12 @@ export const EditFinancialValueModal: React.FC<EditFinancialValueModalProps> = (
     }
   };
 
-  const handleConfirmAndSave = async () => {
+  const handleConfirmAndSave = () => {
     if (!validateForm()) return;
+    setShowPasswordConfirm(true);
+  };
 
+  const executeConfirmAndSave = async () => {
     setIsSubmitting(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -463,6 +471,16 @@ export const EditFinancialValueModal: React.FC<EditFinancialValueModalProps> = (
           )}
         </div>
       </DialogContent>
+
+      <ConfirmAdminPasswordModal
+        open={showPasswordConfirm}
+        onOpenChange={setShowPasswordConfirm}
+        title="Validar Edição de Valor Financeiro"
+        description={`Confirme sua senha de administrador para autorizar a alteração do valor de ${formatCurrency(oldValue)} para ${formatCurrency(parsedNewValue)}.`}
+        actionLabel="Autorizar Alteração no Banco"
+        onConfirm={executeConfirmAndSave}
+        loading={isSubmitting}
+      />
     </Dialog>
   );
 };
