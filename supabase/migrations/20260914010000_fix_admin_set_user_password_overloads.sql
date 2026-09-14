@@ -10,7 +10,7 @@ CREATE OR REPLACE FUNCTION public.admin_set_user_password(
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, auth, extensions
+SET search_path = extensions, auth, public
 AS $$
 BEGIN
   -- Verify caller is admin if called within auth context
@@ -51,7 +51,7 @@ CREATE OR REPLACE FUNCTION public.admin_set_user_password(
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, auth, extensions
+SET search_path = extensions, auth, public
 AS $$
 BEGIN
   RETURN public.admin_set_user_password(p_target_user_id, p_new_password);
@@ -66,7 +66,7 @@ CREATE OR REPLACE FUNCTION public.admin_set_user_password(
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, auth, extensions
+SET search_path = extensions, auth, public
 AS $$
 BEGIN
   RETURN public.admin_set_user_password(p_target_user_id::UUID, p_new_password);
@@ -81,18 +81,17 @@ CREATE OR REPLACE FUNCTION public.admin_set_user_password(
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, auth, extensions
+SET search_path = extensions, auth, public
 AS $$
 BEGIN
   RETURN public.admin_set_user_password(p_target_user_id::UUID, p_new_password);
 END;
 $$;
 
--- Grant permissions to authenticated, anon, service_role across all overloads
-GRANT EXECUTE ON FUNCTION public.admin_set_user_password(UUID, TEXT) TO authenticated, anon, service_role;
-GRANT EXECUTE ON FUNCTION public.admin_set_user_password(TEXT, UUID) TO authenticated, anon, service_role;
-GRANT EXECUTE ON FUNCTION public.admin_set_user_password(TEXT, TEXT) TO authenticated, anon, service_role;
-GRANT EXECUTE ON FUNCTION public.admin_set_user_password(TEXT, TEXT) TO authenticated, anon, service_role;
+-- Grant permissions to authenticated and service_role across signature overloads
+GRANT EXECUTE ON FUNCTION public.admin_set_user_password(UUID, TEXT) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.admin_set_user_password(TEXT, UUID) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.admin_set_user_password(TEXT, TEXT) TO authenticated, service_role;
 
 -- Force PostgREST schema cache reload
 NOTIFY pgrst, 'reload schema';
