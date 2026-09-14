@@ -179,31 +179,50 @@ const DriversTab = () => {
       return toast.error("As senhas digitadas não coincidem.");
     }
 
-    setAdminPasswordAction({
-      open: true,
-      title: "Validar Alteração de Senha",
-      description: `Digite sua senha de administrador para alterar a senha do motorista "${targetDriver.name}".`,
-      actionLabel: "Autorizar Nova Senha",
-      onConfirm: executeSavePassword,
-    });
+    executeSavePassword();
   };
 
   const executeSavePassword = async () => {
     if (!targetDriver) return;
     setSavingPassword(true);
     try {
-      const { data, error } = await supabase.rpc("admin_set_user_password", {
-        p_target_user_id: targetDriver.userId,
-        p_new_password: newPassword.trim(),
-      });
+      let passwordChanged = false;
+      let lastErrorMessage = "";
 
-      if (error) {
-        console.error("[DriversTab] RPC admin_set_user_password error:", error);
-        throw new Error(error.message || "Erro ao alterar a senha do motorista.");
+      // Attempt 1: Call RPC admin_set_user_password
+      try {
+        const { data, error } = await supabase.rpc("admin_set_user_password", {
+          p_target_user_id: targetDriver.userId,
+          p_new_password: newPassword.trim(),
+        });
+
+        if (!error && data && (data as any).success !== false) {
+          passwordChanged = true;
+        } else {
+          lastErrorMessage = error?.message || (data as any)?.message || "";
+          console.warn("[DriversTab] RPC admin_set_user_password unavailable/error, attempting fallback:", lastErrorMessage);
+        }
+      } catch (rpcErr: any) {
+        console.warn("[DriversTab] RPC exception:", rpcErr?.message);
+        lastErrorMessage = rpcErr?.message || "";
       }
 
-      if (data && typeof data === "object" && (data as any).success === false) {
-        throw new Error((data as any).message || "Falha ao alterar senha.");
+      // Attempt 2: Fallback to Edge Function / functionsRouter admin-reset-user-password
+      if (!passwordChanged) {
+        const { data: edgeData, error: edgeError } = await supabase.functions.invoke("admin-reset-user-password", {
+          body: {
+            target_user_id: targetDriver.userId,
+            new_password: newPassword.trim(),
+            mode: "set_password",
+          },
+        });
+
+        if (!edgeError && edgeData && (edgeData as any).success !== false) {
+          passwordChanged = true;
+        } else {
+          const errMsg = edgeError?.message || (edgeData as any)?.error || lastErrorMessage || "Erro ao alterar a senha do motorista.";
+          throw new Error(errMsg);
+        }
       }
 
       toast.success(`Senha do motorista ${targetDriver.name} alterada com sucesso!`);

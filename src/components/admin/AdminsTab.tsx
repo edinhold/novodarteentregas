@@ -291,7 +291,7 @@ const AdminsTab = () => {
     setPasswordModalOpen(true);
   };
 
-  // Execute password change for specific admin (without requiring current password)
+  // Execute password change for specific admin (without requiring re-authentication confirmation)
   const handleSavePassword = () => {
     if (!targetAdmin) return;
     if (!newPassword || newPassword.trim().length < 6) {
@@ -301,31 +301,50 @@ const AdminsTab = () => {
       return toast.error("As senhas digitadas não coincidem.");
     }
 
-    setAdminPasswordAction({
-      open: true,
-      title: "Validar Alteração de Senha de Admin",
-      description: `Digite sua senha de administrador para autorizar a redefinição de senha de "${targetAdmin.name}".`,
-      actionLabel: "Autorizar Nova Senha",
-      onConfirm: executeSavePassword,
-    });
+    executeSavePassword();
   };
 
   const executeSavePassword = async () => {
     if (!targetAdmin) return;
     setSavingPassword(true);
     try {
-      const { data, error } = await supabase.rpc("admin_set_user_password", {
-        p_target_user_id: targetAdmin.userId,
-        p_new_password: newPassword.trim(),
-      });
+      let passwordChanged = false;
+      let lastErrorMessage = "";
 
-      if (error) {
-        console.error("[AdminsTab] RPC admin_set_user_password error:", error);
-        throw new Error(error.message || "Erro ao alterar a senha do administrador.");
+      // Attempt 1: Call RPC admin_set_user_password
+      try {
+        const { data, error } = await supabase.rpc("admin_set_user_password", {
+          p_target_user_id: targetAdmin.userId,
+          p_new_password: newPassword.trim(),
+        });
+
+        if (!error && data && (data as any).success !== false) {
+          passwordChanged = true;
+        } else {
+          lastErrorMessage = error?.message || (data as any)?.message || "";
+          console.warn("[AdminsTab] RPC admin_set_user_password unavailable/error, attempting fallback:", lastErrorMessage);
+        }
+      } catch (rpcErr: any) {
+        console.warn("[AdminsTab] RPC exception:", rpcErr?.message);
+        lastErrorMessage = rpcErr?.message || "";
       }
 
-      if (data && typeof data === "object" && (data as any).success === false) {
-        throw new Error((data as any).message || "Falha ao alterar senha.");
+      // Attempt 2: Fallback to Edge Function / functionsRouter admin-reset-user-password
+      if (!passwordChanged) {
+        const { data: edgeData, error: edgeError } = await supabase.functions.invoke("admin-reset-user-password", {
+          body: {
+            target_user_id: targetAdmin.userId,
+            new_password: newPassword.trim(),
+            mode: "set_password",
+          },
+        });
+
+        if (!edgeError && edgeData && (edgeData as any).success !== false) {
+          passwordChanged = true;
+        } else {
+          const errMsg = edgeError?.message || (edgeData as any)?.error || lastErrorMessage || "Erro ao alterar a senha do administrador.";
+          throw new Error(errMsg);
+        }
       }
 
       toast.success(`Senha de ${targetAdmin.name} alterada com sucesso!`);
