@@ -83,7 +83,7 @@ const DriverPanel = () => {
   }, []);
 
   // Get driver profile
-  const { data: driverProfile } = useQuery({
+  const { data: driverProfile, isLoading: isProfileLoading } = useQuery({
     queryKey: ["my-driver-profile", user?.id],
     queryFn: async () => {
       const { data, error } = await supabase.from("drivers").select("*").eq("user_id", user!.id).limit(1).maybeSingle();
@@ -730,10 +730,35 @@ const DriverPanel = () => {
 
 
 
-  if (loading || !user) {
+  if (loading || isProfileLoading || !user) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
-        <p className="text-muted-foreground">Verificando login...</p>
+        <p className="text-muted-foreground">Verificando dados do entregador...</p>
+      </div>
+    );
+  }
+
+  if (!driverProfile) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-6">
+        <Card className="max-w-md w-full">
+          <CardHeader>
+            <CardTitle className="text-center">Perfil de Entregador Não Encontrado</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 text-center">
+            <p className="text-muted-foreground text-sm">
+              Sua conta ainda não possui um cadastro completo como entregador. Conclua o seu cadastro para ter acesso às corridas.
+            </p>
+            <div className="flex flex-col gap-2 pt-2">
+              <Button onClick={() => navigate("/cadastro/entregador")}>
+                Completar Cadastro de Entregador
+              </Button>
+              <Button variant="outline" onClick={async () => { await supabase.auth.signOut(); navigate("/auth", { replace: true }); }}>
+                Sair
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     );
   }

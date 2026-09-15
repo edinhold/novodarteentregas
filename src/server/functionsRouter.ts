@@ -2172,17 +2172,24 @@ export async function handleEdgeFunction(
       try {
         const { data: { users }, error: listErr } = await supabase.auth.admin.listUsers();
         if (!listErr && users) {
-          const matchedUser = users.find((u) => (email && u.email?.toLowerCase() === email.toLowerCase()) || (phone && u.phone === phone));
+          const cleanPhone = phone ? phone.replace(/\D/g, "") : "";
+          const matchedUser = users.find((u) => {
+            const uEmailMatches = email && u.email?.toLowerCase() === email.toLowerCase();
+            const uPhoneRaw = u.phone ? u.phone.replace(/\D/g, "") : "";
+            const uPhoneMatches = cleanPhone && uPhoneRaw && (uPhoneRaw === cleanPhone || uPhoneRaw.endsWith(cleanPhone) || cleanPhone.endsWith(uPhoneRaw));
+            return uEmailMatches || uPhoneMatches;
+          });
           if (matchedUser) {
             const uid = matchedUser.id;
-            // Check if user has an ACTIVE store, ACTIVE driver, or ACTIVE role
+            // Check if user has an ACTIVE store, ACTIVE driver, or ADMIN role
             const [{ data: ownedStore }, { data: driverRow }, { data: roles }] = await Promise.all([
               supabase.from("restaurants").select("id").eq("owner_id", uid).maybeSingle(),
               supabase.from("drivers").select("id").eq("user_id", uid).maybeSingle(),
-              supabase.from("user_roles").select("id").eq("user_id", uid),
+              supabase.from("user_roles").select("role").eq("user_id", uid),
             ]);
 
-            const isActive = !!ownedStore || !!driverRow || (roles && roles.length > 0);
+            const isAdmin = roles?.some((r: any) => r.role === "admin");
+            const isActive = !!ownedStore || !!driverRow || isAdmin;
             if (isActive) {
               return {
                 status: 200,

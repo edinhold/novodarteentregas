@@ -53,12 +53,37 @@ const RegisterDriver = () => {
       return;
     }
     setLoading(true);
+
+    const cleanEmail = form.email.trim();
+    const cleanPhone = form.phone.trim();
+    const cleanCpf = form.cpf.trim();
+
     try {
+      // Pre-validation: Check if phone or CPF is already registered in drivers table
+      const digitsPhone = cleanPhone.replace(/\D/g, "");
+      const digitsCpf = cleanCpf.replace(/\D/g, "");
+
+      if (digitsPhone.length < 10) {
+        throw new Error("Informe um telefone válido com DDD (mínimo 10 dígitos).");
+      }
+
+      if (digitsPhone || digitsCpf) {
+        const queryFilter = `phone.eq.${cleanPhone},phone.eq.${digitsPhone}${digitsCpf ? `,cpf.eq.${cleanCpf},cpf.eq.${digitsCpf}` : ""}`;
+        const { data: existingDrivers } = await supabase
+          .from("drivers")
+          .select("phone, cpf")
+          .or(queryFilter);
+
+        if (existingDrivers && existingDrivers.length > 0) {
+          throw new Error("Este telefone ou CPF já está cadastrado no sistema.");
+        }
+      }
+
       const doSignUp = async () => {
         const res = await supabase.auth.signUp({
-          email: form.email,
+          email: cleanEmail,
           password: form.password,
-          options: { data: { full_name: form.fullName }, emailRedirectTo: window.location.origin },
+          options: { data: { full_name: form.fullName.trim() }, emailRedirectTo: window.location.origin },
         });
         if (res.error) throw res.error;
         return res.data;
@@ -70,7 +95,7 @@ const RegisterDriver = () => {
       } catch (signUpErr: any) {
         if (/already registered|user_already_exists|já cadastrado/i.test(signUpErr?.message || "")) {
           const { data: cleanRes } = await supabase.functions.invoke("clean-orphan-signup", {
-            body: { email: form.email, phone: form.phone },
+            body: { email: cleanEmail, phone: cleanPhone },
           });
           if (cleanRes?.active) {
             throw new Error("Este e-mail ou telefone já possui uma conta ativa no sistema.");
@@ -84,31 +109,74 @@ const RegisterDriver = () => {
           throw signUpErr;
         }
       }
-      if (data.user) {
+
+      let createdUserId: string | null = null;
+      if (data?.user) {
+        createdUserId = data.user.id;
+
+        if (data.session) {
+          try {
+            await supabase.auth.setSession(data.session);
+          } catch (sessionErr) {
+            console.warn("[RegisterDriver] setSession non-blocking warning:", sessionErr);
+          }
+        }
+
         let photoUrl: string | null = null;
 
-        // Upload photo
+        // Upload photo safely
         if (photoFile) {
-          const ext = photoFile.name.split(".").pop();
-          const path = `${data.user.id}/photo.${ext}`;
+          const ext = photoFile.name.split(".").pop() || "jpg";
+          const path = `${data.user.id}/photo_${Date.now()}.${ext}`;
           const { error: uploadError } = await supabase.storage
             .from("driver-photos")
             .upload(path, photoFile, { upsert: true });
-          if (!uploadError) {
+
+          if (uploadError) {
+            console.warn("[RegisterDriver] Storage upload warning:", uploadError.message);
+            toast.warning("Não foi possível enviar a foto agora, mas seu cadastro continuará.");
+          } else {
             const { data: urlData } = supabase.storage.from("driver-photos").getPublicUrl(path);
             photoUrl = urlData.publicUrl;
           }
         }
 
-        await supabase.from("profiles").update({ phone: form.phone }).eq("user_id", data.user.id);
-        await supabase.from("drivers").insert({
-          user_id: data.user.id, full_name: form.fullName, phone: form.phone,
-          cpf: form.cpf || null, vehicle_type: form.vehicleType, vehicle_plate: form.vehiclePlate || null,
-          pix_key: form.pixKey || null, pix_key_type: form.pixKeyType || null,
+        // Upsert profile
+        const { error: profileErr } = await supabase.from("profiles").upsert(
+          {
+            user_id: data.user.id,
+            phone: cleanPhone,
+            full_name: form.fullName.trim(),
+            role: "driver",
+          } as any,
+          { onConflict: "user_id" }
+        );
+        if (profileErr) console.warn("[RegisterDriver] Profile upsert warning:", profileErr.message);
+
+        // Insert driver profile
+        const { error: driverErr } = await supabase.from("drivers").insert({
+          user_id: data.user.id,
+          full_name: form.fullName.trim(),
+          phone: cleanPhone,
+          cpf: cleanCpf || null,
+          vehicle_type: form.vehicleType,
+          vehicle_plate: form.vehiclePlate ? form.vehiclePlate.trim() : null,
+          pix_key: form.pixKey ? form.pixKey.trim() : null,
+          pix_key_type: form.pixKeyType || null,
           photo_url: photoUrl,
         } as any);
-        await supabase.from("user_roles").insert({ user_id: data.user.id, role: "driver" as any });
+
+        if (driverErr) {
+          throw new Error(`Erro ao salvar dados do motorista: ${driverErr.message}`);
+        }
+
+        // Assign user role (trigger fallback)
+        await supabase
+          .from("user_roles")
+          .upsert({ user_id: data.user.id, role: "driver" as any }, { onConflict: "user_id,role" })
+          .then(() => {}, () => {});
       }
+
       toast.success("Cadastro de entregador realizado com sucesso!");
       navigate("/entregador");
     } catch (error: any) {
