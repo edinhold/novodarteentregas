@@ -101,6 +101,8 @@ const DriverGroupedDeliveries = ({ userId, hasActiveSingleRequest }: Props) => {
       queryClient.invalidateQueries({ queryKey: ["driver-active-group", userId] });
     } catch (e: any) {
       toast.error(e.message || "Não foi possível aceitar a rota");
+      queryClient.invalidateQueries({ queryKey: ["driver-pending-groups", userId] });
+      queryClient.invalidateQueries({ queryKey: ["driver-active-group", userId] });
     } finally {
       setBusy(null);
     }

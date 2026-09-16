@@ -341,9 +341,10 @@ export function useDeliveryOverlay({ standby, timeoutMs = 30000, onAccepted }: O
     } catch (err: any) {
       console.log("[DeliveryOverlay] Falha ao aceitar", err);
       const msg = String(err?.message ?? "");
-      if (/já foi assumida|já foi aceita|direcionada/i.test(msg)) {
-        toast.info("Esta entrega já foi aceita por outro motorista.");
+      if (/já foi assumida|já foi aceita|direcionada|cancelada/i.test(msg)) {
+        toast.info(msg || "Esta entrega já foi aceita por outro motorista ou cancelada pela loja.");
         queryClient.invalidateQueries({ queryKey: ["driver-pending-requests"] });
+        queryClient.invalidateQueries({ queryKey: ["driver-pending-groups"] });
         close();
         return;
       }

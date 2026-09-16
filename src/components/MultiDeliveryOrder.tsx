@@ -577,6 +577,20 @@ const MultiDeliveryOrder = ({ restaurant, userId }: Props) => {
     }
   };
 
+  const cancelGroup = async (groupId: string) => {
+    if (!confirm("Cancelar toda esta operação Multi Entregas (todas as paradas)? Os créditos serão devolvidos à sua loja.")) return;
+    try {
+      const { error } = await supabase.rpc("cancel_delivery_group", { p_group_id: groupId });
+      if (error) throw error;
+      toast.success("Operação Multi Entregas cancelada. Créditos devolvidos!");
+      queryClient.invalidateQueries({ queryKey: ["my-credits", userId] });
+      queryClient.invalidateQueries({ queryKey: ["my-delivery-groups", userId] });
+      queryClient.invalidateQueries({ queryKey: ["my-delivery-requests", userId] });
+    } catch (e: any) {
+      toast.error(e.message || "Erro ao cancelar operação");
+    }
+  };
+
   return (
     <div className="space-y-4">
       <Card>
@@ -939,7 +953,7 @@ const MultiDeliveryOrder = ({ restaurant, userId }: Props) => {
             {groups.map((g: any) => (
               <div
                 key={g.id}
-                className="flex items-center justify-between rounded-lg border p-3 bg-muted/20 hover:bg-muted/40 transition-colors"
+                className="flex items-center justify-between rounded-lg border p-3 bg-muted/20 hover:bg-muted/40 transition-colors flex-wrap gap-2"
               >
                 <div className="text-sm">
                   <div className="font-medium flex items-center gap-2">
@@ -954,21 +968,35 @@ const MultiDeliveryOrder = ({ restaurant, userId }: Props) => {
                     {new Date(g.created_at).toLocaleString("pt-BR")}
                   </div>
                 </div>
-                <Badge
-                  variant={
-                    g.status === "pending"
-                      ? "secondary"
+                <div className="flex items-center gap-2">
+                  <Badge
+                    variant={
+                      g.status === "pending"
+                        ? "secondary"
+                        : g.status === "accepted"
+                        ? "default"
+                        : "outline"
+                    }
+                  >
+                    {g.status === "pending"
+                      ? "Aguardando Motorista"
                       : g.status === "accepted"
-                      ? "default"
-                      : "outline"
-                  }
-                >
-                  {g.status === "pending"
-                    ? "Aguardando Motorista"
-                    : g.status === "accepted"
-                    ? "Em Andamento"
-                    : g.status}
-                </Badge>
+                      ? "Em Andamento"
+                      : g.status === "cancelled"
+                      ? "Cancelada"
+                      : g.status}
+                  </Badge>
+                  {g.status === "pending" && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 text-xs text-destructive hover:bg-destructive/10"
+                      onClick={() => cancelGroup(g.id)}
+                    >
+                      Cancelar
+                    </Button>
+                  )}
+                </div>
               </div>
             ))}
           </CardContent>

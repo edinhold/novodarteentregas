@@ -106,6 +106,7 @@ const StoreOwnerPanel = () => {
       toast.success("Corrida cancelada. Créditos devolvidos!");
       queryClient.invalidateQueries({ queryKey: ["my-delivery-requests", activeUserId] });
       queryClient.invalidateQueries({ queryKey: ["my-credits", activeUserId] });
+      queryClient.invalidateQueries({ queryKey: ["my-delivery-groups", activeUserId] });
       queryClient.invalidateQueries({ queryKey: ["assigned-driver-info"] });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Erro ao cancelar corrida";

@@ -1016,6 +1016,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
       toast.success("Corrida cancelada. Créditos devolvidos!");
       queryClient.invalidateQueries({ queryKey: ["my-delivery-requests"] });
       queryClient.invalidateQueries({ queryKey: ["my-credits"] });
+      queryClient.invalidateQueries({ queryKey: ["my-delivery-groups"] });
     } catch (err: any) {
       toast.error(err.message || "Erro ao cancelar corrida");
     }
