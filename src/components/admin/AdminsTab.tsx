@@ -311,22 +311,35 @@ const AdminsTab = () => {
       let passwordChanged = false;
       let lastErrorMessage = "";
 
-      // Attempt 1: Call RPC admin_set_user_password
-      try {
-        const { data, error } = await supabase.rpc("admin_set_user_password", {
-          p_target_user_id: targetAdmin.userId,
-          p_new_password: newPassword.trim(),
-        });
-
-        if (!error && data && (data as any).success !== false) {
+      // Attempt 0: If target is current logged-in user, use direct auth.updateUser
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      if (currentUser && currentUser.id === targetAdmin.userId) {
+        const { error: selfErr } = await supabase.auth.updateUser({ password: newPassword.trim() });
+        if (!selfErr) {
           passwordChanged = true;
         } else {
-          lastErrorMessage = error?.message || (data as any)?.message || "";
-          console.warn("[AdminsTab] RPC admin_set_user_password unavailable/error, attempting fallback:", lastErrorMessage);
+          lastErrorMessage = selfErr.message;
         }
-      } catch (rpcErr: any) {
-        console.warn("[AdminsTab] RPC exception:", rpcErr?.message);
-        lastErrorMessage = rpcErr?.message || "";
+      }
+
+      // Attempt 1: Call RPC admin_set_user_password
+      if (!passwordChanged) {
+        try {
+          const { data, error } = await supabase.rpc("admin_set_user_password", {
+            p_target_user_id: targetAdmin.userId,
+            p_new_password: newPassword.trim(),
+          });
+
+          if (!error && data && (data as any).success !== false) {
+            passwordChanged = true;
+          } else {
+            lastErrorMessage = error?.message || (data as any)?.message || lastErrorMessage;
+            console.warn("[AdminsTab] RPC admin_set_user_password unavailable/error, attempting fallback:", lastErrorMessage);
+          }
+        } catch (rpcErr: any) {
+          console.warn("[AdminsTab] RPC exception:", rpcErr?.message);
+          lastErrorMessage = rpcErr?.message || lastErrorMessage;
+        }
       }
 
       // Attempt 2: Fallback to Edge Function / functionsRouter admin-reset-user-password
@@ -342,7 +355,7 @@ const AdminsTab = () => {
         if (!edgeError && edgeData && (edgeData as any).success !== false) {
           passwordChanged = true;
         } else {
-          const errMsg = edgeError?.message || (edgeData as any)?.error || lastErrorMessage || "Erro ao alterar a senha do administrador.";
+          const errMsg = (edgeData as any)?.error || (edgeData as any)?.message || edgeError?.message || lastErrorMessage || "Erro ao alterar a senha do administrador.";
           throw new Error(errMsg);
         }
       }

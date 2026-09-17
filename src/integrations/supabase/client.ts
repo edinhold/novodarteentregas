@@ -32,10 +32,8 @@ supabase.functions.invoke = async function (functionName: string, options?: any)
   // 1. Try real Supabase Edge Function execution first
   try {
     const res = await originalInvoke(functionName, options);
-    if (res && (!res.error || !String(res.error.message || res.error).includes("Failed to send a request"))) {
-      if (res.data) {
-        return res;
-      }
+    if (res && !res.error && res.data) {
+      return res;
     }
   } catch (invokeErr: any) {
     console.warn(`[EdgeFunction:${functionName}] Chamada remota indisponível, usando roteador local:`, invokeErr?.message);
@@ -59,8 +57,8 @@ supabase.functions.invoke = async function (functionName: string, options?: any)
       success: false,
       edge_function_ok: false,
       code: "ERRO_CONEXAO",
-      message: `Não foi possível comunicar com a Edge Function ${functionName}.`,
+      message: `Não foi possível comunicar com a função ${functionName}.`,
     },
-    error: { message: `Não foi possível comunicar com a Edge Function ${functionName}.` },
+    error: null,
   };
 };
