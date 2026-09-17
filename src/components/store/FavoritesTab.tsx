@@ -19,7 +19,6 @@ const FavoritesTab = ({ restaurant }: FavoritesTabProps) => {
   const [search, setSearch] = useState("");
   const [adding, setAdding] = useState<string | null>(null);
   const { data: driverLocations = [] } = useDriverLocations();
-  const onlineUserIds = new Set(driverLocations.map((d: any) => d.user_id));
 
   const { data: favorites = [], isLoading } = useQuery({
     queryKey: ["favorite-drivers", restaurant?.id],
@@ -31,7 +30,7 @@ const FavoritesTab = ({ restaurant }: FavoritesTabProps) => {
           id,
           driver_id,
           is_default,
-          driver:drivers(id, user_id, full_name, driver_code, phone)
+          driver:drivers(id, user_id, full_name, driver_code, phone, is_active)
         `)
         .eq("restaurant_id", restaurant.id);
       
@@ -57,18 +56,45 @@ const FavoritesTab = ({ restaurant }: FavoritesTabProps) => {
     },
   });
 
-  const matches = useMemo(() => {
+  const isDriverOnline = (uidOrDid: string | null | undefined, driverObj?: any) => {
+    if (!uidOrDid && !driverObj) return false;
+    const uid = uidOrDid || driverObj?.user_id;
+    const did = driverObj?.id || driverObj?.driver_id || uidOrDid;
+
+    const inLoc = driverLocations.some((dl: any) => 
+      (uid && dl.user_id === uid) || 
+      (did && dl.driver_id === did) ||
+      (uid && dl.driver_id === uid) ||
+      (did && dl.user_id === did)
+    );
+    if (inLoc) return true;
+
+    if (driverObj?.is_active === true) return true;
+    const matchDriver = allDrivers.find((d: any) => (uid && d.user_id === uid) || (did && d.id === did));
+    if (matchDriver?.is_active === true) return true;
+
+    return false;
+  };
+
+  const availableCandidates = useMemo(() => {
     const term = search.trim().toLowerCase();
-    if (!term) return [];
     const favIds = new Set(favorites.map((f: any) => f.driver_id));
-    return allDrivers
-      .filter((d: any) =>
-        ((d.full_name || "").toLowerCase().includes(term) ||
-          (d.driver_code || "").toLowerCase().includes(term)) &&
-        !favIds.has(d.id)
-      )
-      .slice(0, 8);
-  }, [search, allDrivers, favorites]);
+    
+    let list = allDrivers.filter((d: any) => !favIds.has(d.id));
+
+    if (term) {
+      list = list.filter((d: any) =>
+        (d.full_name || "").toLowerCase().includes(term) ||
+        (d.driver_code || "").toLowerCase().includes(term)
+      );
+    }
+
+    return list.sort((a: any, b: any) => {
+      const aOnline = isDriverOnline(a.user_id || a.id, a) ? 1 : 0;
+      const bOnline = isDriverOnline(b.user_id || b.id, b) ? 1 : 0;
+      return bOnline - aOnline;
+    }).slice(0, 10);
+  }, [search, allDrivers, favorites, driverLocations]);
 
   const handleAddFavorite = async (driver: any) => {
     setAdding(driver.id);
@@ -145,24 +171,38 @@ const FavoritesTab = ({ restaurant }: FavoritesTabProps) => {
               />
             </div>
             <p className="text-xs text-muted-foreground">
-              Comece a digitar para ver os entregadores disponíveis e clique em adicionar.
+              {search.trim() ? "Resultados da busca por entregadores:" : "Entregadores cadastrados no sistema (Online em destaque):"}
             </p>
 
-            {search.trim() && (
-              <div className="mt-2 border border-border rounded-lg divide-y divide-border bg-card">
-                {matches.length === 0 ? (
-                  <div className="p-3 text-sm text-muted-foreground text-center">
-                    Nenhum entregador encontrado.
-                  </div>
-                ) : (
-                  matches.map((d: any) => (
+            <div className="mt-2 border border-border rounded-lg divide-y divide-border bg-card">
+              {availableCandidates.length === 0 ? (
+                <div className="p-3 text-sm text-muted-foreground text-center">
+                  {search.trim() ? "Nenhum entregador encontrado com este termo." : "Nenhum novo entregador disponível para adicionar."}
+                </div>
+              ) : (
+                availableCandidates.map((d: any) => {
+                  const online = isDriverOnline(d.user_id || d.id, d);
+                  return (
                     <div key={d.id} className="flex items-center justify-between p-3 hover:bg-muted/40">
                       <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold shrink-0">
-                          {d.full_name?.charAt(0) || <User className="w-4 h-4" />}
+                        <div className="relative">
+                          <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold shrink-0">
+                            {d.full_name?.charAt(0) || <User className="w-4 h-4" />}
+                          </div>
+                          <span
+                            className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-card ${online ? "bg-green-500" : "bg-slate-400"}`}
+                          />
                         </div>
                         <div className="min-w-0">
-                          <p className="text-sm font-medium truncate">{d.full_name}</p>
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm font-medium truncate">{d.full_name}</p>
+                            <Badge
+                              className={`text-[9px] py-0 h-3.5 px-1.5 gap-1 border-0 ${online ? "bg-green-500 text-white" : "bg-slate-400 text-white"}`}
+                            >
+                              <Circle className={`w-1.5 h-1.5 fill-current ${online ? "animate-pulse" : ""}`} />
+                              {online ? "Online" : "Offline"}
+                            </Badge>
+                          </div>
                           <p className="text-[11px] text-muted-foreground">{d.driver_code}</p>
                         </div>
                       </div>
@@ -176,10 +216,10 @@ const FavoritesTab = ({ restaurant }: FavoritesTabProps) => {
                         {adding === d.id ? "..." : "Adicionar"}
                       </Button>
                     </div>
-                  ))
-                )}
-              </div>
-            )}
+                  );
+                })
+              )}
+            </div>
           </div>
 
         </CardContent>
@@ -205,7 +245,7 @@ const FavoritesTab = ({ restaurant }: FavoritesTabProps) => {
           ) : (
             <div className="grid gap-3">
               {favorites.map((fav: any) => {
-                const isOnline = fav.driver?.user_id && onlineUserIds.has(fav.driver.user_id);
+                const isOnline = isDriverOnline(fav.driver?.user_id || fav.driver_id, fav.driver);
                 return (
                 <div 
                   key={fav.id} 

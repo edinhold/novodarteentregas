@@ -27,14 +27,14 @@ export const useDriverLocations = () => {
   return useQuery({
     queryKey: ["driver_locations"],
     queryFn: async () => {
-      // Only show drivers active in the last 10 minutes
-      const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      // Show drivers active in the last 30 minutes to prevent false offlines
+      const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
       const { data, error } = await supabase
         .from("driver_locations")
         .select("*")
-        .gte("updated_at", tenMinAgo);
+        .gte("updated_at", thirtyMinAgo);
       if (error) throw error;
-      return data;
+      return data || [];
     },
     refetchInterval: 15000, // fallback polling every 15s
   });
