@@ -145,22 +145,40 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
     enabled: !!restaurant?.id,
   });
 
-  // Auto-select default favorite driver when available
+  const { data: allDrivers = [] } = useQuery({
+    queryKey: ["all-radar-drivers"],
+    queryFn: async () => {
+      const { data, error } = await (supabase as any).rpc("get_radar_drivers");
+      if (error) return [];
+      return data || [];
+    },
+  });
+
+  const isDriverOnline = (uidOrDid: string | null | undefined) => {
+    if (!uidOrDid) return false;
+    return driverLocations.some((dl: any) => dl.user_id === uidOrDid || dl.driver_id === uidOrDid);
+  };
+
+  // Auto-select default favorite driver ONLY if online
   useEffect(() => {
     if (selectedDriverId) return;
     const def = favoriteDrivers.find((f: any) => f.is_default);
-    if (def && def.driver?.user_id) {
-      setSelectedDriverId(def.driver.user_id);
+    const defUid = def?.driver?.user_id;
+    const defDid = def?.driver_id;
+    if (defUid && (isDriverOnline(defUid) || isDriverOnline(defDid))) {
+      setSelectedDriverId(defUid);
     }
-  }, [favoriteDrivers]);
+  }, [favoriteDrivers, driverLocations]);
 
   // Determine if selected driver is currently online
-  const selectedDriverOnline = !!selectedDriverId && driverLocations.some((dl: any) => dl.user_id === selectedDriverId);
+  const selectedDriverOnline = !!selectedDriverId && isDriverOnline(selectedDriverId);
   const selectedDriverName = (() => {
     if (!selectedDriverId) return null;
-    const fav = favoriteDrivers.find((f: any) => f.driver?.user_id === selectedDriverId);
-    if (fav) return fav.driver?.full_name;
-    const dl = driverLocations.find((d: any) => d.user_id === selectedDriverId);
+    const fav = favoriteDrivers.find((f: any) => f.driver?.user_id === selectedDriverId || f.driver_id === selectedDriverId);
+    if (fav?.driver?.full_name) return fav.driver.full_name;
+    const dInfo = allDrivers.find((d: any) => d.user_id === selectedDriverId || d.id === selectedDriverId);
+    if (dInfo?.full_name) return dInfo.full_name;
+    const dl = driverLocations.find((d: any) => d.user_id === selectedDriverId || d.driver_id === selectedDriverId);
     return (dl as any)?.driver?.full_name || "Entregador";
   })();
   const gpsWatchRef = useRef<number | null>(null);
@@ -1381,26 +1399,40 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
             </Label>
             <div className="grid grid-cols-1 gap-2">
               <select 
-                className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+                className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm font-medium"
                 value={selectedDriverId || ""}
                 onChange={(e) => setSelectedDriverId(e.target.value || null)}
               >
-                <option value="">Qualquer entregador disponível</option>
-                <optgroup label="Seus Favoritos Online">
-                  {favoriteDrivers.filter((f: any) => driverLocations.some((dl: any) => dl.driver_id === f.driver_id)).map((f: any) => (
-                    <option key={f.driver_id} value={f.driver?.user_id}>
-                      ⭐ {f.driver?.full_name} ({f.driver?.driver_code})
-                    </option>
-                  ))}
-                </optgroup>
+                <option value="">Qualquer entregador disponível / online (Padrão)</option>
+                {favoriteDrivers.length > 0 && (
+                  <optgroup label="⭐ Seus Entregadores Favoritos">
+                    {favoriteDrivers.map((f: any) => {
+                      const uid = f.driver?.user_id || f.driver_id;
+                      const did = f.driver_id;
+                      const online = isDriverOnline(uid) || isDriverOnline(did);
+                      return (
+                        <option key={did || uid} value={uid || ""}>
+                          {f.is_default ? "★ " : "⭐ "}
+                          {f.driver?.full_name || "Entregador"} ({f.driver?.driver_code || "N/A"})
+                          {online ? " • 🟢 Online" : " • ⚪ Offline (Indisponível)"}
+                        </option>
+                      );
+                    })}
+                  </optgroup>
+                )}
                 <optgroup label="Outros Entregadores Online">
                   {driverLocations
-                    .filter((dl: any) => !favoriteDrivers.some((f: any) => f.driver_id === dl.driver_id))
-                    .map((dl: any) => (
-                      <option key={dl.driver_id} value={dl.user_id}>
-                        {dl.driver?.full_name || "Entregador"} ({dl.driver?.driver_code || "N/A"})
-                      </option>
-                    ))}
+                    .filter((dl: any) => !favoriteDrivers.some((f: any) => f.driver?.user_id === dl.user_id || f.driver_id === dl.driver_id || f.driver_id === dl.user_id))
+                    .map((dl: any) => {
+                      const dInfo = allDrivers.find((d: any) => d.user_id === dl.user_id || d.id === dl.driver_id);
+                      const name = dInfo?.full_name || (dl as any).driver?.full_name || "Entregador";
+                      const code = dInfo?.driver_code || (dl as any).driver?.driver_code || "N/A";
+                      return (
+                        <option key={dl.user_id || dl.id} value={dl.user_id}>
+                          🚴 {name} ({code}) • 🟢 Online
+                        </option>
+                      );
+                    })}
                 </optgroup>
               </select>
               {selectedDriverId && selectedDriverOnline && (
@@ -1409,23 +1441,23 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
                 </p>
               )}
               {selectedDriverId && !selectedDriverOnline && (
-                <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 flex items-start gap-2">
-                  <AlertTriangle className="w-3.5 h-3.5 text-amber-600 mt-0.5 shrink-0" />
+                <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2.5 flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
                   <div className="flex-1">
                     <p className="text-[11px] font-semibold text-amber-700 dark:text-amber-400">
-                      {selectedDriverName} está indisponível no momento
+                      {selectedDriverName} está offline / indisponível no momento
                     </p>
                     <p className="text-[10px] text-muted-foreground mt-0.5">
-                      Você pode chamar mesmo assim (será enviado quando ele voltar) ou liberar para qualquer entregador.
+                      Você pode manter o direcionamento (será enviado quando ele entrar) ou alterar para qualquer entregador online.
                     </p>
                     <Button
                       type="button"
                       size="sm"
                       variant="outline"
-                      className="h-6 px-2 mt-1 text-[10px]"
+                      className="h-7 px-2.5 mt-1.5 text-[11px] font-medium border-amber-500/40 text-amber-800 dark:text-amber-300 hover:bg-amber-500/20"
                       onClick={() => setSelectedDriverId(null)}
                     >
-                      Liberar para qualquer entregador
+                      Usar qualquer entregador online
                     </Button>
                   </div>
                 </div>

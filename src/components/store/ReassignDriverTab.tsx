@@ -34,6 +34,15 @@ const ReassignDriverTab = ({ restaurant, userId }: ReassignDriverTabProps) => {
     enabled: !!restaurant?.id,
   });
 
+  const { data: allDrivers = [] } = useQuery({
+    queryKey: ["all-radar-drivers"],
+    queryFn: async () => {
+      const { data, error } = await (supabase as any).rpc("get_radar_drivers");
+      if (error) return [];
+      return data || [];
+    },
+  });
+
   const { data: pendingRequests = [], isLoading } = useQuery({
     queryKey: ["pending-reassignable", userId],
     queryFn: async () => {
@@ -79,7 +88,10 @@ const ReassignDriverTab = ({ restaurant, userId }: ReassignDriverTabProps) => {
     };
   }, [userId, queryClient]);
 
-  const isOnline = (uid: string | null) => !!uid && driverLocations.some((d: any) => d.user_id === uid);
+  const isOnline = (uidOrDid: string | null) => {
+    if (!uidOrDid) return false;
+    return driverLocations.some((d: any) => d.user_id === uidOrDid || d.driver_id === uidOrDid);
+  };
 
   const handleSave = async (requestId: string) => {
     const targetUid = selections[requestId] || null;
@@ -151,38 +163,45 @@ const ReassignDriverTab = ({ restaurant, userId }: ReassignDriverTabProps) => {
                     <div className="space-y-1.5">
                       <Label className="text-[11px] font-semibold">Atribuir entregador</Label>
                       <select
-                        className="w-full h-9 px-2 rounded-md border border-input bg-background text-sm"
+                        className="w-full h-9 px-2 rounded-md border border-input bg-background text-sm font-medium"
                         value={currentSel}
                         onChange={(e) =>
                           setSelections((prev) => ({ ...prev, [r.id]: e.target.value }))
                         }
                       >
-                        <option value="">Qualquer entregador disponível</option>
-                        <optgroup label="⭐ Favoritos">
-                          {favoriteDrivers.map((f: any) => {
-                            const uid = f.driver?.user_id;
-                            const online = isOnline(uid);
-                            return (
-                              <option key={f.driver_id} value={uid || ""}>
-                                {f.is_default ? "★ " : ""}
-                                {f.driver?.full_name} ({f.driver?.driver_code})
-                                {online ? " • online" : " • offline"}
-                              </option>
-                            );
-                          })}
-                        </optgroup>
-                        <optgroup label="Outros online">
+                        <option value="">Qualquer entregador disponível / online</option>
+                        {favoriteDrivers.length > 0 && (
+                          <optgroup label="⭐ Seus Entregadores Favoritos">
+                            {favoriteDrivers.map((f: any) => {
+                              const uid = f.driver?.user_id || f.driver_id;
+                              const did = f.driver_id;
+                              const online = isOnline(uid) || isOnline(did);
+                              return (
+                                <option key={did || uid} value={uid || ""}>
+                                  {f.is_default ? "★ " : "⭐ "}
+                                  {f.driver?.full_name || "Entregador"} ({f.driver?.driver_code || "N/A"})
+                                  {online ? " • 🟢 Online" : " • ⚪ Offline"}
+                                </option>
+                              );
+                            })}
+                          </optgroup>
+                        )}
+                        <optgroup label="Outros Entregadores Online">
                           {driverLocations
                             .filter(
                               (dl: any) =>
-                                !favoriteDrivers.some((f: any) => f.driver?.user_id === dl.user_id)
+                                !favoriteDrivers.some((f: any) => f.driver?.user_id === dl.user_id || f.driver_id === dl.driver_id || f.driver_id === dl.user_id)
                             )
-                            .map((dl: any) => (
-                              <option key={dl.user_id} value={dl.user_id}>
-                                {(dl as any).driver?.full_name || "Entregador"} (
-                                {(dl as any).driver?.driver_code || "N/A"}) • online
-                              </option>
-                            ))}
+                            .map((dl: any) => {
+                              const dInfo = allDrivers.find((d: any) => d.user_id === dl.user_id || d.id === dl.driver_id);
+                              const name = dInfo?.full_name || (dl as any).driver?.full_name || "Entregador";
+                              const code = dInfo?.driver_code || (dl as any).driver?.driver_code || "N/A";
+                              return (
+                                <option key={dl.user_id || dl.id} value={dl.user_id}>
+                                  🚴 {name} ({code}) • 🟢 Online
+                                </option>
+                              );
+                            })}
                         </optgroup>
                       </select>
 
