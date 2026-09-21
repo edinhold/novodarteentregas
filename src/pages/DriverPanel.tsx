@@ -19,6 +19,7 @@ import { playNotificationSound, playUrgentNotification, playStandbyAlert, startS
 import DriverGPS from "@/components/driver/DriverGPS";
 import { useGPSTracking } from "@/hooks/useGPSTracking";
 import DriverNotificationSettings from "@/components/driver/DriverNotificationSettings";
+import DriverProfileSettings from "@/components/driver/DriverProfileSettings";
 import PushStatusCard from "@/components/driver/PushStatusCard";
 import { cancelDeliveryNotification } from "@/lib/push";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
@@ -1249,6 +1250,7 @@ const DriverPanel = () => {
                 </TabsContent>
 
                 <TabsContent value="settings" className="space-y-4 outline-none m-0">
+                  <DriverProfileSettings driverProfile={driverProfile} />
                   <PushStatusCard userId={user?.id} />
                   {/* Notification Settings */}
                   <DriverNotificationSettings />
