@@ -297,6 +297,9 @@ const DriverPanel = () => {
     }
   }, [user?.id]);
 
+  const activeRequestRef = useRef(activeRequest);
+  useEffect(() => { activeRequestRef.current = activeRequest; }, [activeRequest]);
+
   // Keep standby settings active for the whole driver panel (including mobile),
   // even when the settings tab is not mounted/open.
   useEffect(() => {
@@ -330,7 +333,7 @@ const DriverPanel = () => {
       window.removeEventListener("storage", handleStorage);
       stopStandbyMode();
     };
-  }, [notificationSettings]);
+  }, []);
 
   // Standby gate: beep only when there are deliveries available and the driver
   // is not already doing one.
@@ -355,7 +358,7 @@ const DriverPanel = () => {
 
   // Realtime
   useEffect(() => {
-    if (!user) return;
+    if (!user?.id) return;
     
     // Unlock audio context on first user interaction in the panel
     const handleFirstInteraction = () => {
@@ -435,8 +438,9 @@ const DriverPanel = () => {
         toast.success("💰 Novo ganho registrado!");
       })
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_messages" }, (payload: any) => {
-        if (activeRequest) {
-          queryClient.invalidateQueries({ queryKey: ["driver-chat", activeRequest.id] });
+        const curActive = activeRequestRef.current;
+        if (curActive) {
+          queryClient.invalidateQueries({ queryKey: ["driver-chat", curActive.id] });
           if (payload.new?.sender_id !== user.id) {
             playNotificationSound();
             toast("💬 Nova mensagem do lojista");
@@ -462,7 +466,7 @@ const DriverPanel = () => {
       window.removeEventListener("delivery-unavailable", handleUnavailable);
 
     };
-  }, [user, activeRequest?.id, driverProfile?.id]);
+  }, [user?.id, driverProfile?.id, queryClient]);
   
   // Keep driver active+online status synced while panel is open
   useEffect(() => {

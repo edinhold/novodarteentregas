@@ -241,9 +241,12 @@ export function useDeliveryOverlay({ standby, timeoutMs = 30000, onAccepted }: O
     }
   }, []);
 
+  const deliveryRef = useRef(delivery);
+  useEffect(() => { deliveryRef.current = delivery; }, [delivery]);
+
   // Realtime listener for new pending deliveries.
   useEffect(() => {
-    if (!user) return;
+    if (!user?.id) return;
     const channel = supabase
       .channel("delivery-overlay")
       .on(
@@ -255,7 +258,7 @@ export function useDeliveryOverlay({ standby, timeoutMs = 30000, onAccepted }: O
           if (row.driver_id && row.driver_id !== user.id) return;
           if (dismissedRef.current.has(row.id)) return;
           if (!standbyRef.current) return; // only when driver is standby/online
-          if (delivery) return; // prevent multiple overlays
+          if (deliveryRef.current) return; // prevent multiple overlays
 
           console.log("[DeliveryOverlay] Nova entrega recebida", row.id);
           startAlerts();
@@ -299,8 +302,9 @@ export function useDeliveryOverlay({ standby, timeoutMs = 30000, onAccepted }: O
         (payload: any) => {
           // If the currently-shown delivery was taken or cancelled, dismiss.
           const row = payload.new;
-          if (!row || !delivery) return;
-          if (row.id !== delivery.id) return;
+          const currentDelivery = deliveryRef.current;
+          if (!row || !currentDelivery) return;
+          if (row.id !== currentDelivery.id) return;
           if (row.status !== "pending" || (row.driver_id && row.driver_id !== user.id)) {
             toast.info("Esta entrega já foi aceita por outro motorista.");
             close();
@@ -315,7 +319,7 @@ export function useDeliveryOverlay({ standby, timeoutMs = 30000, onAccepted }: O
           if (!row) return;
           if (row.status !== "pending") {
             queryClient.invalidateQueries({ queryKey: ["driver-pending-groups"] });
-            if (delivery) {
+            if (deliveryRef.current) {
               close();
             }
           }
@@ -326,7 +330,7 @@ export function useDeliveryOverlay({ standby, timeoutMs = 30000, onAccepted }: O
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user, delivery, startAlerts, loadDelivery, close]);
+  }, [user?.id, startAlerts, loadDelivery, close, queryClient]);
 
   // Cleanup on unmount.
   useEffect(() => () => stopAlerts(), [stopAlerts]);

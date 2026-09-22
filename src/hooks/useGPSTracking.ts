@@ -95,7 +95,7 @@ export const useGPSTracking = (options: GPSTrackingOptions = {}) => {
     userIdRef.current = userId;
     driverIdRef.current = driverId;
     optionsRef.current = options;
-  }, [userId, driverId, options]);
+  }, [userId, driverId]);
 
   const classifyQuality = useCallback((acc: number) => {
     if (acc <= 5) return "excellent";
@@ -231,10 +231,8 @@ export const useGPSTracking = (options: GPSTrackingOptions = {}) => {
           }
         }
         
-        // If we were showing a connection error, clear it only after success
-        if (errorStatus?.includes("conexão")) {
-          setErrorStatus(null);
-        }
+        // Clear connection error if set
+        setErrorStatus((prev) => (prev?.includes("conexão") ? null : prev));
       } catch (e) {
         console.warn("[GPS] DB Sync failed, adding to queue:", e);
         // Add to in-memory queue and persist
@@ -248,7 +246,7 @@ export const useGPSTracking = (options: GPSTrackingOptions = {}) => {
         }
       }
     },
-    [saveIntervalMoving, saveIntervalStationary, errorStatus]
+    [saveIntervalMoving, saveIntervalStationary]
   );
 
   // ---------- Process raw GPS reading ----------
@@ -533,10 +531,13 @@ export const useGPSTracking = (options: GPSTrackingOptions = {}) => {
     }
   }, []);
 
+  const startTrackingRef = useRef(startTracking);
+  useEffect(() => { startTrackingRef.current = startTracking; }, [startTracking]);
+
   // Auto-start on mount or when userId becomes available
   useEffect(() => {
     if (userId && watchIdRef.current === null) {
-      startTracking();
+      startTrackingRef.current();
     }
     return () => {
       if (watchIdRef.current !== null) {
@@ -552,7 +553,7 @@ export const useGPSTracking = (options: GPSTrackingOptions = {}) => {
         restartTimeoutRef.current = null;
       }
     };
-  }, [userId, startTracking]);
+  }, [userId]);
 
   // Restart when tab becomes visible again (mobile browsers pause GPS in background)
   useEffect(() => {
@@ -561,7 +562,7 @@ export const useGPSTracking = (options: GPSTrackingOptions = {}) => {
         requestWakeLock();
         const sinceLast = Date.now() - lastReadingTsRef.current;
         if (sinceLast > 10_000) {
-          startTracking();
+          startTrackingRef.current();
         }
       }
     };
@@ -573,7 +574,7 @@ export const useGPSTracking = (options: GPSTrackingOptions = {}) => {
       window.removeEventListener("focus", onVisibility);
       window.removeEventListener("online", onVisibility);
     };
-  }, [userId, startTracking]);
+  }, [userId, requestWakeLock]);
 
 
   return {
