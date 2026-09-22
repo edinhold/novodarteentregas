@@ -302,7 +302,22 @@ export function useDeliveryOverlay({ standby, timeoutMs = 30000, onAccepted }: O
           if (!row || !delivery) return;
           if (row.id !== delivery.id) return;
           if (row.status !== "pending" || (row.driver_id && row.driver_id !== user.id)) {
+            toast.info("Esta entrega já foi aceita por outro motorista.");
             close();
+          }
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "delivery_groups" },
+        (payload: any) => {
+          const row = payload.new;
+          if (!row) return;
+          if (row.status !== "pending") {
+            queryClient.invalidateQueries({ queryKey: ["driver-pending-groups"] });
+            if (delivery) {
+              close();
+            }
           }
         }
       )

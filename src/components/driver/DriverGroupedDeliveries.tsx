@@ -97,12 +97,16 @@ const DriverGroupedDeliveries = ({ userId, hasActiveSingleRequest }: Props) => {
       const { error } = await supabase.rpc("accept_delivery_group", { p_group_id: groupId });
       if (error) throw error;
       toast.success("Rota aceita!");
-      queryClient.invalidateQueries({ queryKey: ["driver-pending-groups", userId] });
-      queryClient.invalidateQueries({ queryKey: ["driver-active-group", userId] });
+      queryClient.invalidateQueries({ queryKey: ["driver-pending-groups"] });
+      queryClient.invalidateQueries({ queryKey: ["driver-pending-requests"] });
+      queryClient.invalidateQueries({ queryKey: ["driver-active-group"] });
+      queryClient.invalidateQueries({ queryKey: ["driver-my-requests"] });
     } catch (e: any) {
       toast.error(e.message || "Não foi possível aceitar a rota");
-      queryClient.invalidateQueries({ queryKey: ["driver-pending-groups", userId] });
-      queryClient.invalidateQueries({ queryKey: ["driver-active-group", userId] });
+      queryClient.invalidateQueries({ queryKey: ["driver-pending-groups"] });
+      queryClient.invalidateQueries({ queryKey: ["driver-pending-requests"] });
+      queryClient.invalidateQueries({ queryKey: ["driver-active-group"] });
+      queryClient.invalidateQueries({ queryKey: ["driver-my-requests"] });
     } finally {
       setBusy(null);
     }

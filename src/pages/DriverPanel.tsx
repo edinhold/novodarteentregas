@@ -378,6 +378,7 @@ const DriverPanel = () => {
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "delivery_requests" }, (payload) => {
         console.log("New delivery request received:", payload);
         queryClient.invalidateQueries({ queryKey: ["driver-pending-requests"] });
+        queryClient.invalidateQueries({ queryKey: ["driver-pending-groups"] });
         
         // Use a timeout to ensure audio is ready and played clearly
         setTimeout(() => {
@@ -401,7 +402,9 @@ const DriverPanel = () => {
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "delivery_requests" }, (payload: any) => {
         console.log("Delivery request updated:", payload);
         queryClient.invalidateQueries({ queryKey: ["driver-pending-requests"] });
+        queryClient.invalidateQueries({ queryKey: ["driver-pending-groups"] });
         queryClient.invalidateQueries({ queryKey: ["driver-my-requests", user.id] });
+        queryClient.invalidateQueries({ queryKey: ["driver-active-group"] });
         queryClient.invalidateQueries({ queryKey: ["driver-completed-requests", user.id] });
         queryClient.invalidateQueries({ queryKey: ["my-earnings", driverProfile?.id] });
         
@@ -410,7 +413,20 @@ const DriverPanel = () => {
           if (payload.new?.driver_id === user.id) {
             playNotificationSound();
             toast.success("✅ Pedido confirmado para você!");
+          } else {
+            // Notificar que a corrida foi aceita por outro entregador
+            window.dispatchEvent(new CustomEvent("delivery-unavailable", { detail: { pedidoId: payload.new?.id } }));
           }
+        }
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "delivery_groups" }, (payload: any) => {
+        console.log("Delivery group changed:", payload);
+        queryClient.invalidateQueries({ queryKey: ["driver-pending-groups"] });
+        queryClient.invalidateQueries({ queryKey: ["driver-pending-requests"] });
+        queryClient.invalidateQueries({ queryKey: ["driver-active-group"] });
+        queryClient.invalidateQueries({ queryKey: ["driver-my-requests"] });
+        if (payload.new?.status === "accepted" && payload.new?.driver_id !== user.id) {
+          window.dispatchEvent(new CustomEvent("delivery-unavailable", { detail: { groupId: payload.new?.id } }));
         }
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "driver_earnings" }, () => {
@@ -436,8 +452,6 @@ const DriverPanel = () => {
         }
         if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
           console.error("Realtime connection issues:", status);
-          // Don't reload, Supabase will try to reconnect automatically
-          // Just show a subtle warning if it stays closed for too long
         }
       });
 
@@ -574,12 +588,15 @@ const DriverPanel = () => {
         setSearchParams({}, { replace: true });
       }
       queryClient.invalidateQueries({ queryKey: ["driver-pending-requests"] });
+      queryClient.invalidateQueries({ queryKey: ["driver-pending-groups"] });
       queryClient.invalidateQueries({ queryKey: ["driver-my-requests"] });
+      queryClient.invalidateQueries({ queryKey: ["driver-active-group"] });
     } catch (err: any) {
       const raw = err?.message || "Erro ao aceitar";
       const conflict = /já foi assumida|já foi aceita|direcionada|JA_ACEITO/i.test(raw);
       toast.error(conflict ? "Este chamado não está mais disponível (já foi aceito por outro motorista)." : raw);
       queryClient.invalidateQueries({ queryKey: ["driver-pending-requests"] });
+      queryClient.invalidateQueries({ queryKey: ["driver-pending-groups"] });
     } finally {
       setAcceptingId(null);
     }
