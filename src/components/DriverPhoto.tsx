@@ -44,11 +44,24 @@ export const DriverPhoto = ({ photoUrl, driverId, alt = "Foto do motorista", cla
       .createSignedUrl(path, 60 * 60)
       .then(({ data, error: err }) => {
         if (!active) return;
-        console.log("[DriverPhoto:Load]", { driverId, path, ok: !err });
         if (err || !data?.signedUrl) {
-          setError(true);
+          const { data: pubData } = supabase.storage.from("driver-photos").getPublicUrl(path);
+          if (pubData?.publicUrl) {
+            setResolved(pubData.publicUrl);
+          } else {
+            setError(true);
+          }
         } else {
           setResolved(data.signedUrl);
+        }
+      })
+      .catch(() => {
+        if (!active) return;
+        const { data: pubData } = supabase.storage.from("driver-photos").getPublicUrl(path);
+        if (pubData?.publicUrl) {
+          setResolved(pubData.publicUrl);
+        } else {
+          setError(true);
         }
       })
       .finally(() => active && setLoading(false));

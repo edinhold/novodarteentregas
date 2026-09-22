@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Layers, Truck, Package, Users, Search, Activity } from "lucide-react";
 import { MAP_LAYERS } from "@/config/maps";
 import MapErrorBoundary from "@/components/MapErrorBoundary";
+import { DriverPhoto } from "@/components/DriverPhoto";
 
 import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
 import markerIcon from "leaflet/dist/images/marker-icon.png";
@@ -67,7 +68,7 @@ const RealtimeMonitorContent = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("drivers")
-        .select("id, user_id, full_name, driver_code, vehicle_type, vehicle_plate, is_active, approval_status")
+        .select("id, user_id, full_name, driver_code, vehicle_type, vehicle_plate, is_active, approval_status, photo_url")
         .eq("approval_status", "approved");
       if (error) throw error;
       return data || [];
@@ -377,13 +378,21 @@ const RealtimeMonitorContent = () => {
           {filtered.map((d: any) => (
             <div key={d.user_id} className="p-3 border rounded-lg bg-card">
               <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="font-medium text-sm truncate">{d.full_name}</p>
-                  <p className="text-xs text-muted-foreground">{d.driver_code} • {d.vehicle_plate || "s/ placa"}</p>
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <DriverPhoto
+                    photoUrl={d.photo_url}
+                    driverId={d.user_id}
+                    alt={d.full_name}
+                    className="w-10 h-10 rounded-full shrink-0 border border-border object-cover"
+                  />
+                  <div className="min-w-0">
+                    <p className="font-medium text-sm truncate">{d.full_name}</p>
+                    <p className="text-xs text-muted-foreground">{d.driver_code} • {d.vehicle_plate || "s/ placa"}</p>
+                  </div>
                 </div>
                 <Badge
                   variant={d.status === "in_delivery" ? "destructive" : d.status === "available" ? "default" : "secondary"}
-                  className="text-[10px]"
+                  className="text-[10px] shrink-0"
                 >
                   {d.status === "in_delivery" ? "Entregando" : d.status === "available" ? "Online" : "Offline"}
                 </Badge>

@@ -282,6 +282,7 @@ const DriversTab = () => {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-12">Foto</TableHead>
                 <TableHead>Nome</TableHead>
                 <TableHead>Telefone</TableHead>
                 <TableHead>Veículo</TableHead>
@@ -296,6 +297,14 @@ const DriversTab = () => {
                 const approval = (d as any).approval_status || "approved";
                 return (
                 <TableRow key={d.id}>
+                  <TableCell className="w-12 pr-0">
+                    <DriverPhoto
+                      photoUrl={(d as any).photo_url}
+                      driverId={d.user_id}
+                      alt={d.full_name}
+                      className="w-9 h-9 rounded-full shrink-0 border border-border object-cover"
+                    />
+                  </TableCell>
                   <TableCell className="font-medium">{d.full_name}</TableCell>
                   <TableCell>{d.phone}</TableCell>
                   <TableCell className="capitalize">{d.vehicle_type}</TableCell>

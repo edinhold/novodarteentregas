@@ -170,6 +170,7 @@ export default function DriverProfileSettings({ driverProfile }: DriverProfileSe
             user_id: driverProfile.user_id,
             full_name: cleanFullName,
             phone: cleanPhone,
+            avatar_url: finalPhotoUrl,
             role: "driver",
             updated_at: new Date().toISOString(),
           } as any,
@@ -183,7 +184,7 @@ export default function DriverProfileSettings({ driverProfile }: DriverProfileSe
       // 3. Update auth metadata (optional, best effort)
       try {
         await supabase.auth.updateUser({
-          data: { full_name: cleanFullName, phone: cleanPhone },
+          data: { full_name: cleanFullName, phone: cleanPhone, avatar_url: finalPhotoUrl },
         });
       } catch (authErr) {
         console.warn("[DriverProfileSettings] Auth metadata update warning:", authErr);
@@ -193,9 +194,15 @@ export default function DriverProfileSettings({ driverProfile }: DriverProfileSe
       setPhotoFile(null);
       setPhotoPreview(null);
 
-      // Invalidate queries to refresh state across app
+      // Invalidate queries to refresh state across app (admin, store, and driver panels)
       queryClient.invalidateQueries({ queryKey: ["my-driver-profile"] });
       queryClient.invalidateQueries({ queryKey: ["my-driver-profile", driverProfile.user_id] });
+      queryClient.invalidateQueries({ queryKey: ["admin-drivers"] });
+      queryClient.invalidateQueries({ queryKey: ["monitor-drivers"] });
+      queryClient.invalidateQueries({ queryKey: ["favorite-drivers"] });
+      queryClient.invalidateQueries({ queryKey: ["all-radar-drivers"] });
+      queryClient.invalidateQueries({ queryKey: ["radar-drivers-favorites"] });
+      queryClient.invalidateQueries({ queryKey: ["assigned-driver-info"] });
     } catch (err: any) {
       console.error("[DriverProfileSettings] Error updating profile:", err);
       toast.error(err.message || "Erro ao atualizar dados do perfil.");

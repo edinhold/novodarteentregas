@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { Star, UserPlus, Trash2, Search, Code, User, BadgeCheck, Plus, Circle } from "lucide-react";
 import { useDriverLocations } from "@/hooks/useDriverLocations";
+import { DriverPhoto } from "@/components/DriverPhoto";
 
 interface FavoritesTabProps {
   restaurant: any;
@@ -30,7 +31,7 @@ const FavoritesTab = ({ restaurant }: FavoritesTabProps) => {
           id,
           driver_id,
           is_default,
-          driver:drivers(id, user_id, full_name, driver_code, phone, is_active)
+          driver:drivers(id, user_id, full_name, driver_code, phone, is_active, photo_url)
         `)
         .eq("restaurant_id", restaurant.id);
       
@@ -185,10 +186,13 @@ const FavoritesTab = ({ restaurant }: FavoritesTabProps) => {
                   return (
                     <div key={d.id} className="flex items-center justify-between p-3 hover:bg-muted/40">
                       <div className="flex items-center gap-3 min-w-0">
-                        <div className="relative">
-                          <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold shrink-0">
-                            {d.full_name?.charAt(0) || <User className="w-4 h-4" />}
-                          </div>
+                        <div className="relative shrink-0">
+                          <DriverPhoto
+                            photoUrl={d.photo_url}
+                            driverId={d.user_id || d.id}
+                            alt={d.full_name}
+                            className="w-9 h-9 rounded-full border border-border object-cover shrink-0"
+                          />
                           <span
                             className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-card ${online ? "bg-green-500" : "bg-slate-400"}`}
                           />
@@ -252,10 +256,13 @@ const FavoritesTab = ({ restaurant }: FavoritesTabProps) => {
                   className="flex items-center justify-between p-4 rounded-xl border border-border bg-card hover:border-primary/30 transition-all group"
                 >
                   <div className="flex items-center gap-3">
-                    <div className="relative">
-                      <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold">
-                        {fav.driver?.full_name?.charAt(0) || <User className="w-5 h-5" />}
-                      </div>
+                    <div className="relative shrink-0">
+                      <DriverPhoto
+                        photoUrl={fav.driver?.photo_url}
+                        driverId={fav.driver?.user_id || fav.driver_id}
+                        alt={fav.driver?.full_name}
+                        className="w-10 h-10 rounded-full border border-border object-cover shrink-0"
+                      />
                       <span
                         className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-card ${isOnline ? "bg-green-500" : "bg-slate-400"}`}
                         title={isOnline ? "Online" : "Offline"}
