@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Truck, DollarSign, MapPin, Navigation, Search, Route, Car, Bike, Footprints, Clock, Pencil, RotateCcw, AlertTriangle, Layers, Heart, Star, Code, XCircle, Loader2 } from "lucide-react";
+import { Truck, DollarSign, MapPin, Navigation, Search, Route, Car, Bike, Footprints, Clock, Pencil, RotateCcw, AlertTriangle, Layers, Heart, Star, Code, XCircle, Loader2, Wallet, PlusCircle } from "lucide-react";
 import ReportLocationButton from "@/components/ReportLocationButton";
 import ChatWidget from "@/components/ChatWidget";
 import { useDriverLocations } from "@/hooks/useDriverLocations";
@@ -113,9 +113,11 @@ interface CallDriverTabProps {
   requests: any[];
   activeRequest: any;
   chatMessages: any[];
+  credits?: any;
+  onNavigateTab?: (tab: string) => void;
 }
 
-const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages }: CallDriverTabProps) => {
+const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages, credits, onNavigateTab }: CallDriverTabProps) => {
   const queryClient = useQueryClient();
   const [callForm, setCallForm] = useState({ pickup: "", delivery: "", delivery_number: "", notes: "" });
   const [calling, setCalling] = useState(false);
@@ -1042,6 +1044,40 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
 
   return (
     <div className="space-y-4">
+      {/* Wallet Balance Banner (Carteira da Loja Altamente Visível) */}
+      <Card className="border border-emerald-500/30 bg-gradient-to-r from-emerald-500/10 via-emerald-500/5 to-background shadow-sm overflow-hidden relative">
+        <CardContent className="p-4 flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-xl bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 shadow-inner">
+              <Wallet className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  Saldo da Carteira da Loja
+                </span>
+                <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-600 border-emerald-300 font-bold">
+                  Créditos Disponíveis
+                </Badge>
+              </div>
+              <p className="text-2xl sm:text-3xl font-extrabold text-foreground tracking-tight mt-0.5">
+                R$ {Number(credits?.balance ?? 0).toFixed(2).replace(".", ",")}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold gap-1.5 shadow-sm"
+              onClick={() => onNavigateTab?.("credits")}
+            >
+              <PlusCircle className="w-4 h-4" /> Recarregar Créditos
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* GPS Status Bar */}
       {gpsStatus === "granted" && gpsAccuracy !== null && (
         <Card className={`border ${gpsAccuracy <= 15 ? "border-green-500/40 bg-green-500/5" : gpsAccuracy <= 50 ? "border-yellow-500/40 bg-yellow-500/5" : "border-orange-500/40 bg-orange-500/5"}`}>

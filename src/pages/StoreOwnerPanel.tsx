@@ -269,7 +269,15 @@ const StoreOwnerPanel = () => {
                   </TabsContent>
 
                   <TabsContent value="driver" className="mt-0 outline-none">
-                    <CallDriverTab user={user} restaurant={restaurant} requests={requests} activeRequest={activeRequest} chatMessages={chatMessages} />
+                    <CallDriverTab
+                      user={user}
+                      restaurant={restaurant}
+                      requests={requests}
+                      activeRequest={activeRequest}
+                      chatMessages={chatMessages}
+                      credits={credits}
+                      onNavigateTab={setActiveTab}
+                    />
                   </TabsContent>
 
                   <TabsContent value="multi" className="mt-0 outline-none">
