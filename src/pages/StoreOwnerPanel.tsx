@@ -128,6 +128,7 @@ const StoreOwnerPanel = () => {
         { event: "*", schema: "public", table: "delivery_requests", filter: `store_owner_id=eq.${activeUserId}` },
         (payload: { eventType: string; new?: Record<string, unknown>; old?: Record<string, unknown> }) => {
           queryClient.invalidateQueries({ queryKey: ["my-delivery-requests", activeUserId] });
+          queryClient.invalidateQueries({ queryKey: ["my-delivery-groups", activeUserId] });
           queryClient.invalidateQueries({ queryKey: ["assigned-driver-info"] });
 
           if (payload.eventType === "UPDATE") {
@@ -142,6 +143,24 @@ const StoreOwnerPanel = () => {
             }
             if (newStatus === "picked_up") toast.info("📦 Entregador coletou o pedido!");
             if (newStatus === "delivered") toast.success("✅ Entrega concluída!");
+          }
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "delivery_groups", filter: `store_owner_id=eq.${activeUserId}` },
+        (payload: { eventType: string; new?: Record<string, unknown>; old?: Record<string, unknown> }) => {
+          queryClient.invalidateQueries({ queryKey: ["my-delivery-groups", activeUserId] });
+          queryClient.invalidateQueries({ queryKey: ["my-delivery-requests", activeUserId] });
+          if (payload.eventType === "UPDATE") {
+            const newStatus = payload.new?.status as string | undefined;
+            const oldStatus = payload.old?.status as string | undefined;
+            if (newStatus === "accepted" && oldStatus === "pending") {
+              toast.success("🎉 Um entregador aceitou sua rota Multi Entregas!", { duration: 8000 });
+              if ("Notification" in window && Notification.permission === "granted") {
+                new Notification("Rota Multi Entregas Aceita!", { body: "Um entregador aceitou sua operação de multi entregas.", icon: "/favicon.ico" });
+              }
+            }
           }
         }
       )

@@ -415,6 +415,13 @@ const MultiDeliveryOrder = ({ restaurant, userId }: Props) => {
     if (bounds.length > 0) {
       map.fitBounds(L.latLngBounds(bounds), { padding: [40, 40] });
     }
+
+    return () => {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.remove();
+        mapInstanceRef.current = null;
+      }
+    };
   }, [restaurant, stops, routeResult]);
 
   // CÁLCULO UNIFICADO DA ROTA COMPLETA VIA MAPBOX
@@ -533,6 +540,13 @@ const MultiDeliveryOrder = ({ restaurant, userId }: Props) => {
 
     setSubmitting(true);
     try {
+      // Se a rota não foi otimizada ou alguma parada possui distância zerada, calcula automaticamente primeiro
+      const needsCalculation = !routeResult || stops.some((s) => s.delivery_address.trim() && (parseFloat(s.distance_km) <= 0 || s.lat == null));
+      if (needsCalculation) {
+        toast.info("Calculando e otimizando rota antes de criar a operação...");
+        await calculateAllDistances();
+      }
+
       const payload = stops.map((s) => ({
         delivery_address: s.delivery_address.trim(),
         customer_name: s.customer_name.trim(),
