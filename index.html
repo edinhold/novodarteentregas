@@ -54,6 +54,20 @@ div[style*="Edit with Lovable"],
           return false;
         }
       };
+      // Auto-recovery for dynamic module load errors on new PWA deployments
+      window.addEventListener('error', function (event) {
+        var msg = (event && event.message) || '';
+        var isChunkError = /Failed to fetch dynamically imported module|Loading chunk .* failed|error loading dynamically imported module|Importing a module script failed/i.test(msg);
+        if (isChunkError && !sessionStorage.getItem('chunk_reload_attempted')) {
+          sessionStorage.setItem('chunk_reload_attempted', 'true');
+          if ('caches' in window) {
+            caches.keys().then(function (names) {
+              names.forEach(function (name) { caches.delete(name); });
+            }).catch(function () {});
+          }
+          window.location.reload();
+        }
+      }, true);
     </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>

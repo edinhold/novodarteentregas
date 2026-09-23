@@ -67,8 +67,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // Fallback: infer from associated data (legacy accounts without a row in user_roles)
         const [{ data: driverProfile }, { data: ownedRest }] = await Promise.all([
-          supabase.from("drivers").select("id").eq("user_id", uid).maybeSingle(),
-          supabase.from("restaurants").select("id").eq("owner_id", uid).maybeSingle(),
+          supabase.from("drivers").select("id").or(`user_id.eq.${uid},id.eq.${uid}`).limit(1).maybeSingle(),
+          supabase.from("restaurants").select("id").eq("owner_id", uid).limit(1).maybeSingle(),
         ]);
         if (driverProfile) {
           await supabase.from("user_roles").insert({ user_id: uid, role: "driver" as any }).then(() => {}, () => {});
@@ -78,7 +78,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           await supabase.from("user_roles").insert({ user_id: uid, role: "store_owner" as any }).then(() => {}, () => {});
           return "store_owner";
         }
-      } catch {}
+      } catch (err) {
+        console.warn("[Auth] Erro na resolução de role:", err);
+      }
       return "customer";
     };
 
@@ -89,16 +91,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return;
       }
       setRoleLoading(true);
-      const suspended = await enforceSuspension();
-      if (suspended) {
-        setRole(null);
+      try {
+        const suspended = await enforceSuspension();
+        if (suspended) {
+          setRole(null);
+          return;
+        }
+        const resolved = await resolveRole(uid);
+        console.log("[Auth] Role carregada:", resolved);
+        setRole(resolved);
+      } catch (err) {
+        console.error("[Auth] Erro em handleUser:", err);
+      } finally {
         setRoleLoading(false);
-        return;
       }
-      const resolved = await resolveRole(uid);
-      console.log("[Auth] Role carregada:", resolved);
-      setRole(resolved);
-      setRoleLoading(false);
     };
 
 
