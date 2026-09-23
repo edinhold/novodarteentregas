@@ -23,6 +23,7 @@ import DriverProfileSettings from "@/components/driver/DriverProfileSettings";
 import PushStatusCard from "@/components/driver/PushStatusCard";
 import { cancelDeliveryNotification } from "@/lib/push";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
+import { safeFormatTime, safeFormatDateTime, isFutureDate } from "@/lib/utils";
 
 import ChatWidget from "@/components/ChatWidget";
 import AdminSupportPanel from "@/components/AdminSupportPanel";
@@ -602,9 +603,9 @@ const DriverPanel = () => {
   const acceptRequest = async (requestId: string) => {
     if (acceptingId) return;
 
-    const isSuspended = (driverProfile as any)?.suspended_until && new Date((driverProfile as any).suspended_until).getTime() > Date.now();
+    const isSuspended = isFutureDate((driverProfile as any)?.suspended_until);
     if (isSuspended) {
-      toast.error(`⚠️ Sua conta está bloqueada até ${new Date((driverProfile as any).suspended_until).toLocaleString("pt-BR")}. Você não pode aceitar novas entregas.`);
+      toast.error(`⚠️ Sua conta está bloqueada até ${safeFormatDateTime((driverProfile as any).suspended_until)}. Você não pode aceitar novas entregas.`);
       return;
     }
 
@@ -967,7 +968,7 @@ const DriverPanel = () => {
           </header>
 
           <main className="p-4 max-w-4xl mx-auto w-full">
-            {(driverProfile as any)?.suspended_until && new Date((driverProfile as any).suspended_until).getTime() > Date.now() ? (
+            {isFutureDate((driverProfile as any)?.suspended_until) ? (
               <Card className="mb-4 border-destructive/50 bg-destructive/10 shadow-sm animate-pulse">
                 <CardContent className="p-4 flex items-center gap-3">
                   <AlertTriangle className="w-6 h-6 text-destructive shrink-0" />
@@ -979,7 +980,7 @@ const DriverPanel = () => {
                     <p className="text-xs text-muted-foreground">
                       Sua conta está bloqueada até{" "}
                       <strong className="text-foreground font-semibold">
-                        {new Date((driverProfile as any).suspended_until).toLocaleString("pt-BR")}
+                        {safeFormatDateTime((driverProfile as any).suspended_until)}
                       </strong>{" "}
                       {(driverProfile as any).suspension_reason ? `(${ (driverProfile as any).suspension_reason })` : "por ter cancelado mais de 2 entregas aceitas"}. Você não poderá aceitar novas corridas até que o prazo expire ou um administrador desbloqueie sua conta.
                     </p>

@@ -19,6 +19,7 @@ import {
 import { Wallet, Trash2, Eye, Check, X, KeyRound, EyeOff, Lock, Unlock, ShieldCheck, Loader2, CheckCircle } from "lucide-react";
 import { toast } from "sonner";
 import { AdjustDriverWalletModal } from "./financial/AdjustDriverWalletModal";
+import { safeFormatTime, safeFormatDateTime, isFutureDate } from "@/lib/utils";
 
 import DeleteConfirm from "./DeleteConfirm";
 import { ConfirmAdminPasswordModal } from "./ConfirmAdminPasswordModal";
@@ -352,7 +353,7 @@ const DriversTab = () => {
             <TableBody>
               {drivers.map((d) => {
                 const approval = (d as any).approval_status || "approved";
-                const isSuspended = (d as any).suspended_until && new Date((d as any).suspended_until).getTime() > Date.now();
+                const isSuspended = isFutureDate((d as any).suspended_until);
                 const cancelCount = (d as any).cancellation_count || 0;
                 return (
                 <TableRow key={d.id}>
@@ -375,7 +376,7 @@ const DriversTab = () => {
                     <div className="flex flex-col gap-1">
                       {isSuspended ? (
                         <Badge variant="destructive" className="w-fit text-[10px] animate-pulse" title={(d as any).suspension_reason || "Bloqueado"}>
-                          Bloqueado até {new Date((d as any).suspended_until).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                          Bloqueado até {safeFormatTime((d as any).suspended_until)}
                         </Badge>
                       ) : (
                         <Badge variant={d.is_active ? "default" : "secondary"} className="w-fit">
@@ -501,8 +502,8 @@ const DriversTab = () => {
                 <InfoField label="Tipo PIX" value={viewDriver.pix_key_type || "—"} />
               </div>
               <div className="border-t pt-3 text-xs text-muted-foreground space-y-1">
-                <p>Cadastro: {new Date(viewDriver.created_at).toLocaleString("pt-BR")}</p>
-                <p>Atualização: {new Date(viewDriver.updated_at).toLocaleString("pt-BR")}</p>
+                <p>Cadastro: {safeFormatDateTime(viewDriver.created_at)}</p>
+                <p>Atualização: {safeFormatDateTime(viewDriver.updated_at)}</p>
                 <p className="font-mono text-[10px]">ID: {viewDriver.user_id}</p>
               </div>
               <div className="bg-muted/50 rounded-lg p-3 flex items-center justify-between gap-2">
@@ -537,11 +538,11 @@ const DriversTab = () => {
                   </Button>
                 </div>
               </div>
-              {((viewDriver as any).suspended_until && new Date((viewDriver as any).suspended_until).getTime() > Date.now()) || ((viewDriver as any).cancellation_count || 0) > 0 ? (
+              {isFutureDate((viewDriver as any).suspended_until) || ((viewDriver as any).cancellation_count || 0) > 0 ? (
                 <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 flex items-center justify-between gap-2">
                   <div className="space-y-0.5">
                     <p className="text-xs font-semibold text-amber-600 dark:text-amber-400">
-                      Status do Motorista: {(viewDriver as any).suspended_until && new Date((viewDriver as any).suspended_until).getTime() > Date.now() ? "Bloqueado / Suspenso" : "Atenção (Cancelamentos)"}
+                      Status do Motorista: {isFutureDate((viewDriver as any).suspended_until) ? "Bloqueado / Suspenso" : "Atenção (Cancelamentos)"}
                     </p>
                     <p className="text-[11px] text-muted-foreground">
                       {(viewDriver as any).suspension_reason || `Cancelamentos recentes: ${(viewDriver as any).cancellation_count || 0}`}
