@@ -46,11 +46,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const { data } = await (supabase as any).rpc("get_my_suspension");
         const row = Array.isArray(data) ? data[0] : data;
         if (row?.suspended_until && new Date(row.suspended_until).getTime() > Date.now()) {
-          const until = new Date(row.suspended_until).toLocaleString("pt-BR");
-          const reason = row.suspension_reason ? `\nMotivo: ${row.suspension_reason}` : "";
-          alert(`Sua conta está suspensa até ${until}.${reason}`);
-          await supabase.auth.signOut();
-          return true;
+          // A suspensão temporária é tratada visualmente pelo painel (DriverPanel)
+          // para exibir a mensagem e tempo restante sem causar loop de logout.
+          return false;
         }
       } catch {}
       return false;

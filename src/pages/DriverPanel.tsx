@@ -87,11 +87,38 @@ const DriverPanel = () => {
   const { data: driverProfile, isLoading: isProfileLoading } = useQuery({
     queryKey: ["my-driver-profile", user?.id],
     queryFn: async () => {
-      const { data, error } = await supabase.from("drivers").select("*").eq("user_id", user!.id).limit(1).maybeSingle();
-      if (error) return null;
-      return data;
+      if (!user?.id) return null;
+      const { data, error } = await supabase
+        .from("drivers")
+        .select("*")
+        .or(`user_id.eq.${user.id},id.eq.${user.id}`)
+        .limit(1)
+        .maybeSingle();
+
+      if (data) return data;
+
+      // Fallback auto-repair: Se a conta tem perfil mas não tinha registro na tabela drivers
+      try {
+        const { data: profile } = await supabase.from("profiles").select("full_name, phone").eq("user_id", user.id).maybeSingle();
+        const newDriver = {
+          user_id: user.id,
+          full_name: profile?.full_name || user.user_metadata?.full_name || "Motorista",
+          phone: profile?.phone || user.phone || "",
+          vehicle_type: "moto",
+          approval_status: "approved",
+          is_active: true,
+          is_online: false,
+        };
+        const { data: created, error: createErr } = await supabase.from("drivers").insert(newDriver as any).select("*").maybeSingle();
+        if (!createErr && created) return created;
+      } catch (err) {
+        console.warn("[DriverPanel] Auto-repair driver profile error:", err);
+      }
+
+      return null;
     },
-    enabled: !!user,
+    enabled: !!user?.id,
+    staleTime: 10000,
   });
 
   // Single instance of GPS tracking for the whole panel
@@ -481,7 +508,7 @@ const DriverPanel = () => {
           last_seen_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         })
-        .eq("user_id", user.id);
+        .or(`user_id.eq.${user.id},id.eq.${user.id}`);
     };
 
     setOnline(true);
@@ -777,10 +804,11 @@ const DriverPanel = () => {
 
 
 
-  if (loading || isProfileLoading || !user) {
+  if (loading || (isProfileLoading && !driverProfile)) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <p className="text-muted-foreground">Verificando dados do entregador...</p>
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center p-6 text-center">
+        <Loader2 className="w-8 h-8 animate-spin text-primary mb-3" />
+        <p className="text-muted-foreground text-sm font-medium">Verificando dados do entregador...</p>
       </div>
     );
   }
