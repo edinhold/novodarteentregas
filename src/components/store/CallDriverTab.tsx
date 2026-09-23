@@ -9,7 +9,10 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Truck, DollarSign, MapPin, Navigation, Search, Route, Car, Bike, Footprints, Clock, Pencil, RotateCcw, AlertTriangle, Layers, Heart, Star, Code, XCircle, Loader2, Wallet, PlusCircle } from "lucide-react";
+import { Truck, DollarSign, MapPin, Navigation, Search, Route, Car, Bike, Footprints, Clock, Pencil, RotateCcw, AlertTriangle, Layers, Heart, Star, Code, XCircle, Loader2, Wallet, PlusCircle, Trash2, Filter, History } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { isToday } from "date-fns";
 import ReportLocationButton from "@/components/ReportLocationButton";
 import ChatWidget from "@/components/ChatWidget";
 import { useDriverLocations } from "@/hooks/useDriverLocations";
@@ -132,6 +135,94 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
   const suggestionsRef = useRef<HTMLDivElement>(null);
   const { data: driverLocations = [] } = useDriverLocations();
   const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null);
+
+  // Delivery History Filter & Cleanup State
+  const [historyPeriodFilter, setHistoryPeriodFilter] = useState<"all" | "today" | "7days" | "15days" | "30days">("all");
+  const [clearHistoryModalOpen, setClearHistoryModalOpen] = useState(false);
+  const [selectedClearPeriod, setSelectedClearPeriod] = useState<"all" | "7days" | "15days" | "30days">("7days");
+  const [clearingHistory, setClearingHistory] = useState(false);
+  const [deletingRequestId, setDeletingRequestId] = useState<string | null>(null);
+
+  const handleDeleteSingleRequest = async (requestId: string) => {
+    if (!confirm("Deseja remover esta entrega do histórico da sua loja?")) return;
+    try {
+      setDeletingRequestId(requestId);
+      const { error } = await (supabase as any).rpc("hide_store_delivery_request", {
+        p_request_id: requestId,
+      });
+
+      if (error) {
+        const { error: updateErr } = await (supabase as any)
+          .from("delivery_requests")
+          .update({ hidden_by_store: true })
+          .eq("id", requestId);
+        if (updateErr) throw updateErr;
+      }
+
+      toast.success("Entrega removida do histórico.");
+      queryClient.invalidateQueries({ queryKey: ["my-delivery-requests"] });
+    } catch (err: any) {
+      toast.error(err.message || "Erro ao remover entrega");
+    } finally {
+      setDeletingRequestId(null);
+    }
+  };
+
+  const handleClearHistoryByPeriod = async () => {
+    try {
+      setClearingHistory(true);
+      let days: number | null = null;
+      let clearAll = false;
+
+      if (selectedClearPeriod === "all") {
+        clearAll = true;
+      } else if (selectedClearPeriod === "7days") {
+        days = 7;
+      } else if (selectedClearPeriod === "15days") {
+        days = 15;
+      } else if (selectedClearPeriod === "30days") {
+        days = 30;
+      }
+
+      const { data, error } = await (supabase as any).rpc("clear_store_delivery_history", {
+        p_days: days,
+        p_clear_all: clearAll,
+      });
+
+      if (error) throw error;
+
+      const count = typeof data === "number" ? data : 0;
+      toast.success(`Histórico limpo com sucesso! (${count} entregas removidas)`);
+      setClearHistoryModalOpen(false);
+      queryClient.invalidateQueries({ queryKey: ["my-delivery-requests"] });
+    } catch (err: any) {
+      toast.error(err.message || "Erro ao limpar histórico");
+    } finally {
+      setClearingHistory(false);
+    }
+  };
+
+  const visibleRequests = (requests || []).filter((r: any) => {
+    if (r.hidden_by_store) return false;
+    if (historyPeriodFilter === "all") return true;
+
+    const reqDate = new Date(r.created_at).getTime();
+    const now = Date.now();
+
+    if (historyPeriodFilter === "today") {
+      return isToday(new Date(r.created_at));
+    }
+    if (historyPeriodFilter === "7days") {
+      return now - reqDate <= 7 * 24 * 60 * 60 * 1000;
+    }
+    if (historyPeriodFilter === "15days") {
+      return now - reqDate <= 15 * 24 * 60 * 60 * 1000;
+    }
+    if (historyPeriodFilter === "30days") {
+      return now - reqDate <= 30 * 24 * 60 * 60 * 1000;
+    }
+    return true;
+  });
 
   const { data: favoriteDrivers = [] } = useQuery({
     queryKey: ["favorite-drivers", restaurant?.id],
@@ -1518,21 +1609,53 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
 
       {/* Delivery History */}
       <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Entregas Recentes</CardTitle>
+        <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <History className="w-4 h-4 text-primary" /> Entregas Recentes
+          </CardTitle>
+          <div className="flex flex-wrap items-center gap-2">
+            <Select value={historyPeriodFilter} onValueChange={(val: any) => setHistoryPeriodFilter(val)}>
+              <SelectTrigger className="w-[130px] h-8 text-xs">
+                <SelectValue placeholder="Filtrar" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas</SelectItem>
+                <SelectItem value="today">Hoje</SelectItem>
+                <SelectItem value="7days">Últimos 7 dias</SelectItem>
+                <SelectItem value="15days">Últimos 15 dias</SelectItem>
+                <SelectItem value="30days">Últimos 30 dias</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs text-destructive border-destructive/30 hover:bg-destructive/10 gap-1.5"
+              onClick={() => setClearHistoryModalOpen(true)}
+              title="Excluir entregas antigas por período"
+            >
+              <Trash2 className="w-3.5 h-3.5" /> Limpar Histórico
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
-          {requests.length === 0 ? (
-            <p className="text-muted-foreground text-center py-4">Nenhuma entrega solicitada</p>
+          {visibleRequests.length === 0 ? (
+            <p className="text-muted-foreground text-center py-6 text-sm">Nenhuma entrega no período selecionado</p>
           ) : (
             <div className="space-y-2">
-              {requests.map((r: any) => {
+              {visibleRequests.map((r: any) => {
                 const canCancel = ["pending", "accepted", "picked_up"].includes(r.status);
+                const isFinished = ["delivered", "cancelled"].includes(r.status);
                 return (
-                  <div key={r.id} className="p-3 rounded-lg bg-muted/50 space-y-1">
-                    <div className="flex justify-between items-center gap-2">
-                      <p className="text-sm font-bold">#{r.id.slice(0, 8)}</p>
+                  <div key={r.id} className="p-3 rounded-lg bg-muted/50 space-y-1 hover:bg-muted/70 transition-colors border border-border/40">
+                    <div className="flex justify-between items-center gap-2 flex-wrap">
                       <div className="flex items-center gap-2">
+                        <p className="text-sm font-bold">#{r.id.slice(0, 8)}</p>
+                        <span className="text-[11px] text-muted-foreground">
+                          {new Date(r.created_at).toLocaleString("pt-BR")}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
                         <Badge variant={r.status === "delivered" ? "default" : r.status === "cancelled" ? "destructive" : "secondary"}>
                           {statusLabels[r.status] || r.status}
                         </Badge>
@@ -1540,10 +1663,22 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
                           <Button
                             size="sm"
                             variant="destructive"
-                            className="h-7 px-2"
+                            className="h-7 px-2 text-xs"
                             onClick={() => handleCancelRequest(r.id)}
                           >
                             <XCircle className="w-3.5 h-3.5 mr-1" /> Cancelar
+                          </Button>
+                        )}
+                        {isFinished && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                            onClick={() => handleDeleteSingleRequest(r.id)}
+                            disabled={deletingRequestId === r.id}
+                            title="Apagar do histórico"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
                           </Button>
                         )}
                       </div>
@@ -1556,6 +1691,47 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
           )}
         </CardContent>
       </Card>
+
+      {/* Modal Limpar Histórico por Período */}
+      <Dialog open={clearHistoryModalOpen} onOpenChange={setClearHistoryModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <Trash2 className="w-5 h-5" /> Limpar Histórico de Entregas
+            </DialogTitle>
+            <DialogDescription>
+              Selecione o período das entregas concluídas e canceladas que deseja apagar do painel da sua loja.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-3">
+            <Label className="text-sm font-medium">Excluir do painel entregas finalizadas:</Label>
+            <Select value={selectedClearPeriod} onValueChange={(val: any) => setSelectedClearPeriod(val)}>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="7days">Com mais de 7 dias</SelectItem>
+                <SelectItem value="15days">Com mais de 15 dias</SelectItem>
+                <SelectItem value="30days">Com mais de 30 dias</SelectItem>
+                <SelectItem value="all">Todas as entregas concluídas e canceladas</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              💡 Esta ação oculta as entregas finalizadas do painel para mantê-lo limpo. Os relatórios e créditos permanecem inalterados.
+            </p>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setClearHistoryModalOpen(false)} disabled={clearingHistory}>
+              Voltar
+            </Button>
+            <Button variant="destructive" onClick={handleClearHistoryByPeriod} disabled={clearingHistory}>
+              {clearingHistory ? "Limpando..." : "Confirmar Exclusão"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

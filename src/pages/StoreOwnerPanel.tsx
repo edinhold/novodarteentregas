@@ -69,8 +69,9 @@ const StoreOwnerPanel = () => {
         .from("delivery_requests")
         .select("*")
         .eq("store_owner_id", activeUserId)
+        .or("hidden_by_store.eq.false,hidden_by_store.is.null")
         .order("created_at", { ascending: false })
-        .limit(20);
+        .limit(50);
       if (error) throw error;
       return (data || []) as ActiveDeliveryRequest[];
     },

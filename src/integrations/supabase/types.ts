@@ -434,6 +434,7 @@ export type Database = {
           geocode_confidence: string | null
           geocode_source: string | null
           group_id: string | null
+          hidden_by_store: boolean | null
           hidden_for_store: boolean | null
           id: string
           notes: string | null
