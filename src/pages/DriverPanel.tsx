@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { ArrowLeft, MapPin, Phone, MessageSquare, Send, Check, DollarSign, Key, Wallet, XCircle, Home, History, Settings, Map as MapIcon, Signal, SignalZero, Calendar, Radar, PanelLeft, AlertTriangle } from "lucide-react";
+import { ArrowLeft, MapPin, Phone, MessageSquare, Send, Check, CheckCircle, Unlock, DollarSign, Key, Wallet, XCircle, Home, History, Settings, Map as MapIcon, Signal, SignalZero, Calendar, Radar, PanelLeft, AlertTriangle } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
@@ -316,6 +316,42 @@ const DriverPanel = () => {
     };
   }, [driverProfile?.id, user?.id, queryClient]);
 
+  // Realtime listener para mudanças de status/bloqueio do motorista
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const channel = supabase
+      .channel(`driver-suspension-status-${user.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "drivers",
+          filter: `user_id=eq.${user.id}`,
+        },
+        (payload: any) => {
+          const oldUntil = payload.old?.suspended_until;
+          const newUntil = payload.new?.suspended_until;
+          const wasSuspended = oldUntil && new Date(oldUntil).getTime() > Date.now();
+          const isNowSuspended = newUntil && new Date(newUntil).getTime() > Date.now();
+
+          queryClient.invalidateQueries({ queryKey: ["my-driver-profile", user.id] });
+
+          if (wasSuspended && !isNowSuspended) {
+            toast.success("🎉 Sua conta foi DESBLOQUEADA pelo administrador! Você já pode aceitar novas entregas.", { duration: 10000 });
+          } else if (!wasSuspended && isNowSuspended) {
+            toast.error("⚠️ Sua conta foi suspensa/bloqueada pelo administrador.", { duration: 10000 });
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user?.id, queryClient]);
+
   // Request local notification permission (no push provider configured).
   useEffect(() => {
     if (!user?.id) return;
@@ -565,6 +601,13 @@ const DriverPanel = () => {
 
   const acceptRequest = async (requestId: string) => {
     if (acceptingId) return;
+
+    const isSuspended = (driverProfile as any)?.suspended_until && new Date((driverProfile as any).suspended_until).getTime() > Date.now();
+    if (isSuspended) {
+      toast.error(`⚠️ Sua conta está bloqueada até ${new Date((driverProfile as any).suspended_until).toLocaleString("pt-BR")}. Você não pode aceitar novas entregas.`);
+      return;
+    }
+
     setAcceptingId(requestId);
     try {
       console.log("[Delivery] Motorista tentando aceitar", requestId);
@@ -924,20 +967,42 @@ const DriverPanel = () => {
           </header>
 
           <main className="p-4 max-w-4xl mx-auto w-full">
-            {driverProfile?.suspended_until && new Date(driverProfile.suspended_until).getTime() > Date.now() && (
-              <Card className="mb-4 border-destructive/50 bg-destructive/10 shadow-sm">
+            {(driverProfile as any)?.suspended_until && new Date((driverProfile as any).suspended_until).getTime() > Date.now() ? (
+              <Card className="mb-4 border-destructive/50 bg-destructive/10 shadow-sm animate-pulse">
                 <CardContent className="p-4 flex items-center gap-3">
-                  <AlertTriangle className="w-6 h-6 text-destructive shrink-0 animate-pulse" />
-                  <div>
-                    <h4 className="font-bold text-destructive text-sm">Conta Bloqueada Temporariamente (2 Horas)</h4>
-                    <p className="text-xs text-muted-foreground mt-0.5">
+                  <AlertTriangle className="w-6 h-6 text-destructive shrink-0" />
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-2">
+                      <h4 className="font-bold text-destructive text-sm">🚫 Conta Bloqueada / Suspensa Temporariamente</h4>
+                      <Badge variant="destructive" className="text-[10px]">Bloqueado</Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
                       Sua conta está bloqueada até{" "}
                       <strong className="text-foreground font-semibold">
-                        {new Date(driverProfile.suspended_until).toLocaleString("pt-BR")}
+                        {new Date((driverProfile as any).suspended_until).toLocaleString("pt-BR")}
                       </strong>{" "}
-                      por ter cancelado mais de 2 entregas aceitas. Você não poderá aceitar novas corridas até que o prazo expire ou um administrador desbloqueie sua conta.
+                      {(driverProfile as any).suspension_reason ? `(${ (driverProfile as any).suspension_reason })` : "por ter cancelado mais de 2 entregas aceitas"}. Você não poderá aceitar novas corridas até que o prazo expire ou um administrador desbloqueie sua conta.
                     </p>
                   </div>
+                </CardContent>
+              </Card>
+            ) : (
+              <Card className="mb-4 border-green-500/30 bg-green-500/10 dark:bg-green-950/20 shadow-sm">
+                <CardContent className="p-3 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400 shrink-0" />
+                    <div>
+                      <h4 className="font-bold text-green-700 dark:text-green-400 text-xs flex items-center gap-1.5">
+                        Status do Entregador: Liberado e Ativo
+                      </h4>
+                      <p className="text-[11px] text-muted-foreground">
+                        Sua conta está liberada para receber e aceitar entregas normalmente.
+                      </p>
+                    </div>
+                  </div>
+                  <Badge variant="outline" className="bg-green-600 text-white border-green-600 text-[10px] shrink-0 font-medium">
+                    ✓ Liberado
+                  </Badge>
                 </CardContent>
               </Card>
             )}

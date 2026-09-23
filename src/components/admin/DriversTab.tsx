@@ -16,7 +16,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { Wallet, Trash2, Eye, Check, X, KeyRound, EyeOff, Lock, Loader2, CheckCircle } from "lucide-react";
+import { Wallet, Trash2, Eye, Check, X, KeyRound, EyeOff, Lock, Unlock, ShieldCheck, Loader2, CheckCircle } from "lucide-react";
 import { toast } from "sonner";
 import { AdjustDriverWalletModal } from "./financial/AdjustDriverWalletModal";
 
@@ -399,13 +399,13 @@ const DriversTab = () => {
                     <div className="flex items-center justify-end gap-1">
                       {isSuspended || cancelCount > 0 ? (
                         <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-50"
-                          title="Desbloquear / Zerar Cancelamentos"
+                          size="sm"
+                          variant="default"
+                          className="h-7 text-xs bg-green-600 hover:bg-green-700 text-white gap-1 font-semibold px-2 shrink-0"
+                          title="Desbloquear Motorista com Senha Admin"
                           onClick={() => handleUnsuspendDriver(d)}
                         >
-                          <CheckCircle className="w-4 h-4 text-green-600" />
+                          <Unlock className="w-3.5 h-3.5" /> Desbloquear
                         </Button>
                       ) : (
                         <Button
@@ -537,6 +537,44 @@ const DriversTab = () => {
                   </Button>
                 </div>
               </div>
+              {((viewDriver as any).suspended_until && new Date((viewDriver as any).suspended_until).getTime() > Date.now()) || ((viewDriver as any).cancellation_count || 0) > 0 ? (
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 flex items-center justify-between gap-2">
+                  <div className="space-y-0.5">
+                    <p className="text-xs font-semibold text-amber-600 dark:text-amber-400">
+                      Status do Motorista: {(viewDriver as any).suspended_until && new Date((viewDriver as any).suspended_until).getTime() > Date.now() ? "Bloqueado / Suspenso" : "Atenção (Cancelamentos)"}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">
+                      {(viewDriver as any).suspension_reason || `Cancelamentos recentes: ${(viewDriver as any).cancellation_count || 0}`}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    className="bg-green-600 hover:bg-green-700 text-white gap-1 font-semibold text-xs shrink-0"
+                    onClick={() => {
+                      const driver = viewDriver;
+                      setViewDriver(null);
+                      handleUnsuspendDriver(driver);
+                    }}
+                  >
+                    <Unlock className="w-3.5 h-3.5" /> Desbloquear
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex justify-end pt-1">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-amber-600 hover:text-amber-700 border-amber-300 gap-1 text-xs"
+                    onClick={() => {
+                      const driver = viewDriver;
+                      setViewDriver(null);
+                      handleSuspendDriver(driver);
+                    }}
+                  >
+                    <Lock className="w-3.5 h-3.5" /> Bloquear Motorista
+                  </Button>
+                </div>
+              )}
             </div>
           )}
         </DialogContent>
