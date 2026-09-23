@@ -264,10 +264,17 @@ const DriversTab = () => {
     return () => { supabase.removeChannel(channel); };
   }, [queryClient]);
 
-  const handleUnsuspendDriver = async (driver: any) => {
-    if (!confirm(`Deseja desbloquear o motorista "${driver.full_name}"? A suspensão será removida e o contador de cancelamentos será zerado.`)) {
-      return;
-    }
+  const handleUnsuspendDriver = (driver: any) => {
+    setAdminPasswordAction({
+      open: true,
+      title: `Confirmar Desbloqueio de Motorista`,
+      description: `Digite sua senha de administrador para autorizar o desbloqueio do motorista "${driver.full_name}". A suspensão será removida e o contador de cancelamentos será zerado.`,
+      actionLabel: "Autorizar Desbloqueio",
+      onConfirm: () => executeUnsuspendDriver(driver),
+    });
+  };
+
+  const executeUnsuspendDriver = async (driver: any) => {
     try {
       const { error } = await (supabase as any).rpc("admin_unsuspend_user", {
         p_target_user_id: driver.user_id,
@@ -275,18 +282,30 @@ const DriversTab = () => {
       if (error) throw error;
       toast.success(`Motorista ${driver.full_name} desbloqueado com sucesso! Cancelamentos zerados.`);
       queryClient.invalidateQueries({ queryKey: ["admin-drivers"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-drivers-financial"] });
     } catch (e: any) {
       toast.error(e.message || "Erro ao desbloquear motorista");
     }
   };
 
-  const handleSuspendDriver = async (driver: any) => {
+  const handleSuspendDriver = (driver: any) => {
     const hoursStr = prompt(`Por quantas horas deseja suspender o motorista "${driver.full_name}"?`, "2");
     if (!hoursStr) return;
     const hours = parseFloat(hoursStr);
     if (isNaN(hours) || hours <= 0) {
       return toast.error("Por favor, digite um número de horas válido.");
     }
+
+    setAdminPasswordAction({
+      open: true,
+      title: `Confirmar Bloqueio de Motorista`,
+      description: `Digite sua senha de administrador para autorizar o bloqueio temporário de ${hours} hora(s) do motorista "${driver.full_name}".`,
+      actionLabel: "Autorizar Bloqueio",
+      onConfirm: () => executeSuspendDriver(driver, hours),
+    });
+  };
+
+  const executeSuspendDriver = async (driver: any, hours: number) => {
     const until = new Date(Date.now() + hours * 3600 * 1000).toISOString();
     try {
       const { error } = await (supabase as any).rpc("admin_suspend_user", {
