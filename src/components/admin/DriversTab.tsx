@@ -264,6 +264,44 @@ const DriversTab = () => {
     return () => { supabase.removeChannel(channel); };
   }, [queryClient]);
 
+  const handleUnsuspendDriver = async (driver: any) => {
+    if (!confirm(`Deseja desbloquear o motorista "${driver.full_name}"? A suspensão será removida e o contador de cancelamentos será zerado.`)) {
+      return;
+    }
+    try {
+      const { error } = await (supabase as any).rpc("admin_unsuspend_user", {
+        p_target_user_id: driver.user_id,
+      });
+      if (error) throw error;
+      toast.success(`Motorista ${driver.full_name} desbloqueado com sucesso! Cancelamentos zerados.`);
+      queryClient.invalidateQueries({ queryKey: ["admin-drivers"] });
+    } catch (e: any) {
+      toast.error(e.message || "Erro ao desbloquear motorista");
+    }
+  };
+
+  const handleSuspendDriver = async (driver: any) => {
+    const hoursStr = prompt(`Por quantas horas deseja suspender o motorista "${driver.full_name}"?`, "2");
+    if (!hoursStr) return;
+    const hours = parseFloat(hoursStr);
+    if (isNaN(hours) || hours <= 0) {
+      return toast.error("Por favor, digite um número de horas válido.");
+    }
+    const until = new Date(Date.now() + hours * 3600 * 1000).toISOString();
+    try {
+      const { error } = await (supabase as any).rpc("admin_suspend_user", {
+        p_target_user_id: driver.user_id,
+        p_until: until,
+        p_reason: `Bloqueio manual pelo admin (${hours}h)`,
+      });
+      if (error) throw error;
+      toast.success(`Motorista ${driver.full_name} suspenso até ${new Date(until).toLocaleString("pt-BR")}.`);
+      queryClient.invalidateQueries({ queryKey: ["admin-drivers"] });
+    } catch (e: any) {
+      toast.error(e.message || "Erro ao suspender motorista");
+    }
+  };
+
   return (
     <>
       <Card>
@@ -289,12 +327,14 @@ const DriversTab = () => {
                 <TableHead>Placa</TableHead>
                 <TableHead>Saldo Atual</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead className="w-32 text-right">Ações</TableHead>
+                <TableHead className="w-36 text-right">Ações</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {drivers.map((d) => {
                 const approval = (d as any).approval_status || "approved";
+                const isSuspended = (d as any).suspended_until && new Date((d as any).suspended_until).getTime() > Date.now();
+                const cancelCount = (d as any).cancellation_count || 0;
                 return (
                 <TableRow key={d.id}>
                   <TableCell className="w-12 pr-0">
@@ -314,19 +354,51 @@ const DriversTab = () => {
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-col gap-1">
-                      <Badge variant={d.is_active ? "default" : "secondary"} className="w-fit">
-                        {d.is_active ? "Ativo" : "Inativo"}
-                      </Badge>
+                      {isSuspended ? (
+                        <Badge variant="destructive" className="w-fit text-[10px] animate-pulse" title={(d as any).suspension_reason || "Bloqueado"}>
+                          Bloqueado até {new Date((d as any).suspended_until).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                        </Badge>
+                      ) : (
+                        <Badge variant={d.is_active ? "default" : "secondary"} className="w-fit">
+                          {d.is_active ? "Ativo" : "Inativo"}
+                        </Badge>
+                      )}
                       <Badge
                         variant={approval === "approved" ? "default" : approval === "rejected" ? "destructive" : "secondary"}
                         className="w-fit text-[10px]"
                       >
                         {approval === "approved" ? "Aprovado" : approval === "rejected" ? "Rejeitado" : "Pendente"}
                       </Badge>
+                      {cancelCount > 0 && (
+                        <Badge variant="outline" className="w-fit text-[10px] text-amber-600 border-amber-300 bg-amber-50">
+                          Cancelamentos: {cancelCount}
+                        </Badge>
+                      )}
                     </div>
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1">
+                      {isSuspended || cancelCount > 0 ? (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-50"
+                          title="Desbloquear / Zerar Cancelamentos"
+                          onClick={() => handleUnsuspendDriver(d)}
+                        >
+                          <CheckCircle className="w-4 h-4 text-green-600" />
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-amber-600 hover:text-amber-700 hover:bg-amber-50"
+                          title="Bloquear Temporariamente"
+                          onClick={() => handleSuspendDriver(d)}
+                        >
+                          <Lock className="w-4 h-4" />
+                        </Button>
+                      )}
                       <Button
                         variant="ghost"
                         size="icon"

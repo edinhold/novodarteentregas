@@ -661,6 +661,9 @@ export type Database = {
           user_id: string
           vehicle_plate: string | null
           vehicle_type: string
+          cancellation_count: number
+          suspended_until: string | null
+          suspension_reason: string | null
           zone_description: string | null
           zone_lat: number | null
           zone_lng: number | null

@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { ArrowLeft, MapPin, Phone, MessageSquare, Send, Check, DollarSign, Key, Wallet, XCircle, Home, History, Settings, Map as MapIcon, Signal, SignalZero, Calendar, Radar, PanelLeft } from "lucide-react";
+import { ArrowLeft, MapPin, Phone, MessageSquare, Send, Check, DollarSign, Key, Wallet, XCircle, Home, History, Settings, Map as MapIcon, Signal, SignalZero, Calendar, Radar, PanelLeft, AlertTriangle } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
@@ -699,16 +699,41 @@ const DriverPanel = () => {
   const cancelRequest = async (requestId: string) => {
     setCancelling(true);
     try {
-      const { error } = await supabase.from("delivery_requests").update({
-        driver_id: null,
-        status: "pending",
-      } as any).eq("id", requestId);
-      if (error) throw error;
-      toast.success("Entrega cancelada e devolvida para disponíveis");
+      let isSuspended = false;
+      let untilStr = "";
+
+      const { data, error } = await (supabase as any).rpc("driver_drop_delivery", {
+        p_request_id: requestId,
+      });
+
+      if (error) {
+        // Fallback to direct update
+        const { error: directErr } = await supabase.from("delivery_requests").update({
+          driver_id: null,
+          status: "pending",
+        } as any).eq("id", requestId);
+        if (directErr) throw directErr;
+      } else if (data) {
+        if ((data as any).suspended) {
+          isSuspended = true;
+          if ((data as any).suspended_until) {
+            untilStr = new Date((data as any).suspended_until).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+          }
+        }
+      }
+
+      if (isSuspended) {
+        toast.error(`⚠️ Você cancelou mais de 2 entregas e sua conta foi bloqueada por 2 horas${untilStr ? ` (até às ${untilStr})` : ""}.`, { duration: 8000 });
+      } else {
+        toast.success("Entrega cancelada e devolvida para a lista de disponíveis.");
+      }
+
       queryClient.invalidateQueries({ queryKey: ["driver-my-requests"] });
       queryClient.invalidateQueries({ queryKey: ["driver-pending-requests"] });
+      queryClient.invalidateQueries({ queryKey: ["driver-profile"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-drivers"] });
     } catch (err: any) {
-      toast.error(err.message || "Erro ao cancelar");
+      toast.error(err.message || "Erro ao cancelar corrida");
     } finally {
       setCancelling(false);
       setCancelRequestId(null);
@@ -871,6 +896,23 @@ const DriverPanel = () => {
           </header>
 
           <main className="p-4 max-w-4xl mx-auto w-full">
+            {driverProfile?.suspended_until && new Date(driverProfile.suspended_until).getTime() > Date.now() && (
+              <Card className="mb-4 border-destructive/50 bg-destructive/10 shadow-sm">
+                <CardContent className="p-4 flex items-center gap-3">
+                  <AlertTriangle className="w-6 h-6 text-destructive shrink-0 animate-pulse" />
+                  <div>
+                    <h4 className="font-bold text-destructive text-sm">Conta Bloqueada Temporariamente (2 Horas)</h4>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Sua conta está bloqueada até{" "}
+                      <strong className="text-foreground font-semibold">
+                        {new Date(driverProfile.suspended_until).toLocaleString("pt-BR")}
+                      </strong>{" "}
+                      por ter cancelado mais de 2 entregas aceitas. Você não poderá aceitar novas corridas até que o prazo expire ou um administrador desbloqueie sua conta.
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full space-y-4">
               {isMobile && (
                 <TabsList className="grid w-full grid-cols-7 bg-muted/50 p-1 rounded-xl">
