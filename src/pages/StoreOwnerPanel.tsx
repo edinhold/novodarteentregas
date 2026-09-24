@@ -97,21 +97,20 @@ const StoreOwnerPanel = () => {
   });
 
   const handleCancelActiveRequest = async (requestId: string) => {
+    if (!requestId) return;
     if (!confirm("Cancelar esta corrida? Os créditos descontados serão devolvidos à sua loja.")) return;
     try {
-      const { data, error } = await (supabase as unknown as {
-        rpc: (fn: string, params: Record<string, unknown>) => Promise<{ data: unknown; error: { message: string } | null }>;
-      }).rpc("cancel_delivery_request", { p_request_id: requestId });
+      const { data, error } = await (supabase as any).rpc("cancel_delivery_request", { p_request_id: requestId });
       if (error) throw error;
-      if (!data) throw new Error("Não foi possível cancelar a corrida");
       toast.success("Corrida cancelada. Créditos devolvidos!");
-      queryClient.invalidateQueries({ queryKey: ["my-delivery-requests", activeUserId] });
-      queryClient.invalidateQueries({ queryKey: ["my-credits", activeUserId] });
-      queryClient.invalidateQueries({ queryKey: ["my-delivery-groups", activeUserId] });
+      queryClient.invalidateQueries({ queryKey: ["my-delivery-requests"] });
+      queryClient.invalidateQueries({ queryKey: ["my-credits"] });
+      queryClient.invalidateQueries({ queryKey: ["my-delivery-groups"] });
       queryClient.invalidateQueries({ queryKey: ["assigned-driver-info"] });
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Erro ao cancelar corrida";
-      toast.error(msg);
+      queryClient.invalidateQueries({ queryKey: ["pending-reassignable"] });
+    } catch (err: any) {
+      console.error("[StoreOwnerPanel] Error cancelling active request:", err);
+      toast.error(err.message || "Erro ao cancelar corrida");
     }
   };
 

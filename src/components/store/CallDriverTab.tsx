@@ -1119,16 +1119,19 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
   };
 
   const handleCancelRequest = async (requestId: string) => {
+    if (!requestId) return;
     if (!confirm("Cancelar esta corrida? Os créditos descontados serão devolvidos à sua loja.")) return;
     try {
       const { data, error } = await (supabase as any).rpc("cancel_delivery_request", { p_request_id: requestId });
       if (error) throw error;
-      if (!data) throw new Error("Não foi possível cancelar");
       toast.success("Corrida cancelada. Créditos devolvidos!");
       queryClient.invalidateQueries({ queryKey: ["my-delivery-requests"] });
       queryClient.invalidateQueries({ queryKey: ["my-credits"] });
       queryClient.invalidateQueries({ queryKey: ["my-delivery-groups"] });
+      queryClient.invalidateQueries({ queryKey: ["assigned-driver-info"] });
+      queryClient.invalidateQueries({ queryKey: ["pending-reassignable"] });
     } catch (err: any) {
+      console.error("[CallDriverTab] Error cancelling request:", err);
       toast.error(err.message || "Erro ao cancelar corrida");
     }
   };

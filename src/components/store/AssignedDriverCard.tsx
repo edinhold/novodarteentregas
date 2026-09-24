@@ -373,12 +373,12 @@ export const AssignedDriverCard = ({ activeRequest, onCancelRequest }: AssignedD
                   </Button>
                 )}
 
-                {/* Cancelar corrida (se status for accepted) */}
-                {activeRequest.status === "accepted" && onCancelRequest && (
+                {/* Cancelar corrida (se status for accepted ou picked_up) */}
+                {["accepted", "picked_up"].includes(activeRequest.status) && onCancelRequest && (
                   <Button
                     size="sm"
                     variant="ghost"
-                    className="w-full sm:w-auto text-xs text-destructive hover:bg-destructive/10 hover:text-destructive sm:ml-auto h-9"
+                    className="w-full sm:w-auto text-xs text-destructive hover:bg-destructive/10 hover:text-destructive sm:ml-auto h-9 font-medium"
                     onClick={() => onCancelRequest(activeRequest.id)}
                     id="btn-cancelar-corrida"
                   >

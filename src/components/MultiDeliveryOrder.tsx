@@ -592,15 +592,19 @@ const MultiDeliveryOrder = ({ restaurant, userId }: Props) => {
   };
 
   const cancelGroup = async (groupId: string) => {
+    if (!groupId) return;
     if (!confirm("Cancelar toda esta operação Multi Entregas (todas as paradas)? Os créditos serão devolvidos à sua loja.")) return;
     try {
       const { error } = await supabase.rpc("cancel_delivery_group", { p_group_id: groupId });
       if (error) throw error;
       toast.success("Operação Multi Entregas cancelada. Créditos devolvidos!");
-      queryClient.invalidateQueries({ queryKey: ["my-credits", userId] });
-      queryClient.invalidateQueries({ queryKey: ["my-delivery-groups", userId] });
-      queryClient.invalidateQueries({ queryKey: ["my-delivery-requests", userId] });
+      queryClient.invalidateQueries({ queryKey: ["my-credits"] });
+      queryClient.invalidateQueries({ queryKey: ["my-delivery-groups"] });
+      queryClient.invalidateQueries({ queryKey: ["my-delivery-requests"] });
+      queryClient.invalidateQueries({ queryKey: ["assigned-driver-info"] });
+      queryClient.invalidateQueries({ queryKey: ["pending-reassignable"] });
     } catch (e: any) {
+      console.error("[MultiDeliveryOrder] Error cancelling group:", e);
       toast.error(e.message || "Erro ao cancelar operação");
     }
   };
@@ -1000,7 +1004,7 @@ const MultiDeliveryOrder = ({ restaurant, userId }: Props) => {
                       ? "Cancelada"
                       : g.status}
                   </Badge>
-                  {g.status === "pending" && (
+                  {["pending", "accepted", "picked_up"].includes(g.status) && (
                     <Button
                       size="sm"
                       variant="ghost"
