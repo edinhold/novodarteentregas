@@ -8,6 +8,7 @@ import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import { Route, MapPin, Package, Check, User, Phone, Loader2, CheckCircle2 } from "lucide-react";
 import { useState } from "react";
+import { cancelDeliveryNotification } from "@/lib/push";
 
 interface Props {
   userId: string;
@@ -96,7 +97,8 @@ const DriverGroupedDeliveries = ({ userId, hasActiveSingleRequest }: Props) => {
     try {
       const { error } = await supabase.rpc("accept_delivery_group", { p_group_id: groupId });
       if (error) throw error;
-      toast.success("Rota aceita!");
+      toast.success("Rota Multi-Entregas aceita com sucesso!");
+      void cancelDeliveryNotification(groupId);
       queryClient.invalidateQueries({ queryKey: ["driver-pending-groups"] });
       queryClient.invalidateQueries({ queryKey: ["driver-pending-requests"] });
       queryClient.invalidateQueries({ queryKey: ["driver-active-group"] });
@@ -149,6 +151,11 @@ const DriverGroupedDeliveries = ({ userId, hasActiveSingleRequest }: Props) => {
   };
 
   const nextStopIdx = stops.findIndex((s: any) => s.status !== "delivered");
+  const availableGroups = pendingGroups.filter((g: any) => !rejectedGroups.includes(g.id));
+
+  if (!activeGroup && availableGroups.length === 0) {
+    return null;
+  }
 
   return (
     <div className="space-y-4">
