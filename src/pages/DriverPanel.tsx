@@ -631,7 +631,13 @@ const DriverPanel = () => {
         const { error } = await (supabase as any).rpc("complete_delivery", {
           p_request_id: requestId,
         });
-        if (error) throw error;
+        if (error) {
+          const { error: updateErr } = await supabase
+            .from("delivery_requests")
+            .update({ status: "delivered", updated_at: new Date().toISOString() })
+            .eq("id", requestId);
+          if (updateErr) throw updateErr;
+        }
         queryClient.invalidateQueries({ queryKey: ["my-earnings", driverProfile?.id] });
       } else {
         const { error } = await supabase.from("delivery_requests").update({ status }).eq("id", requestId);

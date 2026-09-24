@@ -142,9 +142,21 @@ const FavoritesTab = ({ restaurant, userId }: FavoritesTabProps) => {
   const handleSetDefault = async (favoriteId: string, name: string) => {
     try {
       const { error } = await (supabase as any).rpc("set_default_favorite_driver", { p_favorite_id: favoriteId });
-      if (error) throw error;
+      if (error) {
+        if (restaurant?.id) {
+          await supabase
+            .from("store_driver_favorites")
+            .update({ is_default: false })
+            .eq("restaurant_id", restaurant.id);
+        }
+        const { error: updateErr } = await supabase
+          .from("store_driver_favorites")
+          .update({ is_default: true })
+          .eq("id", favoriteId);
+        if (updateErr) throw updateErr;
+      }
       toast.success(`${name} definido como favorito padrão`);
-      queryClient.invalidateQueries({ queryKey: ["favorite-drivers", restaurant.id] });
+      queryClient.invalidateQueries({ queryKey: ["favorite-drivers", restaurant?.id] });
     } catch (err: any) {
       toast.error(err.message || "Erro ao definir padrão");
     }

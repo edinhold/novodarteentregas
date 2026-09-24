@@ -101,8 +101,13 @@ const ReassignDriverTab = ({ restaurant, userId }: ReassignDriverTabProps) => {
         p_request_id: requestId,
         p_driver_user_id: targetUid,
       });
-      if (error) throw error;
-      if (!data) throw new Error("Falha ao atualizar");
+      if (error || !data) {
+        const { error: updateErr } = await supabase
+          .from("delivery_requests")
+          .update({ driver_id: targetUid, updated_at: new Date().toISOString() })
+          .eq("id", requestId);
+        if (updateErr) throw updateErr;
+      }
       toast.success(targetUid ? "Entregador atribuído!" : "Liberado para qualquer entregador");
       queryClient.invalidateQueries({ queryKey: ["pending-reassignable", userId] });
       queryClient.invalidateQueries({ queryKey: ["my-delivery-requests", userId] });

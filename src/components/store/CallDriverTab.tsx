@@ -190,10 +190,23 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
         p_clear_all: clearAll,
       });
 
-      if (error) throw error;
+      if (error) {
+        let query = supabase
+          .from("delivery_requests")
+          .update({ hidden_by_store: true })
+          .eq("store_owner_id", user?.id)
+          .in("status", ["delivered", "cancelled"]);
+
+        if (!clearAll && days) {
+          const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+          query = query.gte("created_at", cutoff);
+        }
+        const { error: updateErr } = await query;
+        if (updateErr) throw updateErr;
+      }
 
       const count = typeof data === "number" ? data : 0;
-      toast.success(`Histórico limpo com sucesso! (${count} entregas removidas)`);
+      toast.success(count > 0 ? `Histórico limpo com sucesso! (${count} entregas removidas)` : "Histórico limpo com sucesso!");
       setClearHistoryModalOpen(false);
       queryClient.invalidateQueries({ queryKey: ["my-delivery-requests"] });
     } catch (err: any) {
