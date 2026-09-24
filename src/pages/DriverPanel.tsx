@@ -31,7 +31,6 @@ import ThemeToggle from "@/components/ThemeToggle";
 import GlobalDriverMap from "@/components/GlobalDriverMap";
 import AppSidebar from "@/components/AppSidebar";
 import DeliveryNotifications from "@/components/driver/DeliveryNotifications";
-import DriverGroupedDeliveries from "@/components/driver/DriverGroupedDeliveries";
 
 import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/sidebar";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -448,16 +447,6 @@ const DriverPanel = () => {
             // Notificar que a corrida foi aceita por outro entregador
             window.dispatchEvent(new CustomEvent("delivery-unavailable", { detail: { pedidoId: payload.new?.id } }));
           }
-        }
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "delivery_groups" }, (payload: any) => {
-        console.log("Delivery group changed:", payload);
-        queryClient.invalidateQueries({ queryKey: ["driver-pending-groups"] });
-        queryClient.invalidateQueries({ queryKey: ["driver-pending-requests"] });
-        queryClient.invalidateQueries({ queryKey: ["driver-active-group"] });
-        queryClient.invalidateQueries({ queryKey: ["driver-my-requests"] });
-        if (payload.new?.status === "accepted" && payload.new?.driver_id !== user.id) {
-          window.dispatchEvent(new CustomEvent("delivery-unavailable", { detail: { groupId: payload.new?.id } }));
         }
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "driver_earnings" }, () => {
@@ -956,9 +945,6 @@ const DriverPanel = () => {
                     onAcceptRequest={acceptRequest}
                     trackingData={trackingData}
                   />
-
-                  {/* Multi-stop grouped routes */}
-                  <DriverGroupedDeliveries userId={user.id} hasActiveSingleRequest={!!activeRequest} />
 
                   {/* Active delivery */}
                   {activeRequest && (

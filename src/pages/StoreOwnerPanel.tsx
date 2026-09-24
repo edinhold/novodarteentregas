@@ -5,7 +5,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ArrowLeft, Truck, UtensilsCrossed, CreditCard, Store, Map as MapIcon, Star, RefreshCw, Route, MessageSquare, Settings } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import MultiDeliveryOrder from "@/components/MultiDeliveryOrder";
 import { motion } from "framer-motion";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import ThemeToggle from "@/components/ThemeToggle";
@@ -149,24 +148,6 @@ const StoreOwnerPanel = () => {
           }
         }
       )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "delivery_groups", filter: `store_owner_id=eq.${activeUserId}` },
-        (payload: { eventType: string; new?: Record<string, unknown>; old?: Record<string, unknown> }) => {
-          queryClient.invalidateQueries({ queryKey: ["my-delivery-groups", activeUserId] });
-          queryClient.invalidateQueries({ queryKey: ["my-delivery-requests", activeUserId] });
-          if (payload.eventType === "UPDATE") {
-            const newStatus = payload.new?.status as string | undefined;
-            const oldStatus = payload.old?.status as string | undefined;
-            if (newStatus === "accepted" && oldStatus === "pending") {
-              toast.success("🎉 Um entregador aceitou sua rota Multi Entregas!", { duration: 8000 });
-              if ("Notification" in window && Notification.permission === "granted") {
-                new Notification("Rota Multi Entregas Aceita!", { body: "Um entregador aceitou sua operação de multi entregas.", icon: "/favicon.ico" });
-              }
-            }
-          }
-        }
-      )
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_messages" }, (payload: { new?: { sender_id?: string; message?: string } }) => {
         if (activeRequest) {
           queryClient.invalidateQueries({ queryKey: ["chat-messages", activeRequest.id] });
@@ -247,7 +228,6 @@ const StoreOwnerPanel = () => {
                     <TabsTrigger value="store" className="rounded-lg shrink-0 gap-1 px-3"><Store className="w-4 h-4" /><span className="text-xs">Loja</span></TabsTrigger>
                     <TabsTrigger value="menu" className="rounded-lg shrink-0 gap-1 px-3"><UtensilsCrossed className="w-4 h-4" /><span className="text-xs">Cardápio</span></TabsTrigger>
                     <TabsTrigger value="driver" className="rounded-lg shrink-0 gap-1 px-3"><Truck className="w-4 h-4" /><span className="text-xs">Entregador</span></TabsTrigger>
-                    <TabsTrigger value="multi" className="rounded-lg shrink-0 gap-1 px-3"><Route className="w-4 h-4" /><span className="text-xs">Multi</span></TabsTrigger>
                     <TabsTrigger value="reassign" className="rounded-lg shrink-0 gap-1 px-3"><RefreshCw className="w-4 h-4" /><span className="text-xs">Reatribuir</span></TabsTrigger>
                     <TabsTrigger value="favorites" className="rounded-lg shrink-0 gap-1 px-3"><Star className="w-4 h-4" /><span className="text-xs">Favoritos</span></TabsTrigger>
                     <TabsTrigger value="map" className="rounded-lg shrink-0 gap-1 px-3"><MapIcon className="w-4 h-4" /><span className="text-xs">Mapa</span></TabsTrigger>
@@ -281,10 +261,6 @@ const StoreOwnerPanel = () => {
                       credits={credits}
                       onNavigateTab={setActiveTab}
                     />
-                  </TabsContent>
-
-                  <TabsContent value="multi" className="mt-0 outline-none">
-                    <MultiDeliveryOrder restaurant={restaurant} userId={activeUserId!} />
                   </TabsContent>
 
                   <TabsContent value="reassign" className="mt-0 outline-none">
