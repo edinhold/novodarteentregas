@@ -1122,21 +1122,17 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
     if (!requestId) return;
     if (!confirm("Cancelar esta corrida? Os créditos descontados serão devolvidos à sua loja.")) return;
     try {
-      const { data, error } = await (supabase as any).rpc("cancel_delivery_request", { p_request_id: requestId });
-      if (error) {
-        console.warn("[CallDriverTab] RPC cancel failed, trying direct update fallback:", error);
-        const { error: directErr } = await supabase.from("delivery_requests").update({
-          status: "cancelled",
-          updated_at: new Date().toISOString(),
-        } as any).eq("id", requestId);
-        if (directErr) throw error;
-      }
+      const { error } = await (supabase as any).rpc("cancel_delivery_request", { p_request_id: requestId });
+      if (error) throw error;
+      
+      void cancelDeliveryNotification(requestId);
       toast.success("Corrida cancelada. Créditos devolvidos!");
       queryClient.invalidateQueries({ queryKey: ["my-delivery-requests"] });
       queryClient.invalidateQueries({ queryKey: ["my-credits"] });
       queryClient.invalidateQueries({ queryKey: ["my-delivery-groups"] });
       queryClient.invalidateQueries({ queryKey: ["assigned-driver-info"] });
       queryClient.invalidateQueries({ queryKey: ["pending-reassignable"] });
+      queryClient.invalidateQueries({ queryKey: ["store-deliveries"] });
     } catch (err: any) {
       console.error("[CallDriverTab] Error cancelling request:", err);
       toast.error(err.message || "Erro ao cancelar corrida");
