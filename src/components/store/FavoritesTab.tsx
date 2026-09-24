@@ -10,12 +10,14 @@ import { toast } from "sonner";
 import { Star, UserPlus, Trash2, Search, Code, User, BadgeCheck, Plus, Circle } from "lucide-react";
 import { useDriverLocations } from "@/hooks/useDriverLocations";
 import { DriverPhoto } from "@/components/DriverPhoto";
+import ReassignDriverTab from "./ReassignDriverTab";
 
 interface FavoritesTabProps {
   restaurant: any;
+  userId?: string;
 }
 
-const FavoritesTab = ({ restaurant }: FavoritesTabProps) => {
+const FavoritesTab = ({ restaurant, userId }: FavoritesTabProps) => {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [adding, setAdding] = useState<string | null>(null);
@@ -322,6 +324,12 @@ const FavoritesTab = ({ restaurant }: FavoritesTabProps) => {
           )}
         </CardContent>
       </Card>
+
+      {userId && (
+        <div className="pt-2">
+          <ReassignDriverTab restaurant={restaurant} userId={userId} />
+        </div>
+      )}
     </div>
   );
 };

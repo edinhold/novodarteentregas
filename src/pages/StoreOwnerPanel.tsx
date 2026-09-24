@@ -13,7 +13,6 @@ import MenuTab from "@/components/store/MenuTab";
 import CreditsTab from "@/components/store/CreditsTab";
 import StoreInfoTab from "@/components/store/StoreInfoTab";
 import FavoritesTab from "@/components/store/FavoritesTab";
-import ReassignDriverTab from "@/components/store/ReassignDriverTab";
 import RadarTab from "@/components/store/RadarTab";
 import AppSidebar from "@/components/AppSidebar";
 import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/sidebar";
@@ -27,7 +26,7 @@ const StoreOwnerPanel = () => {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState("store");
+  const [activeTab, setActiveTab] = useState("map");
   const isMobile = useIsMobile();
 
   const impersonatedUserId = typeof window !== "undefined" ? sessionStorage.getItem("admin_impersonated_user_id") : null;
@@ -225,12 +224,10 @@ const StoreOwnerPanel = () => {
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                 {isMobile && (
                   <TabsList className="flex w-full overflow-x-auto p-1 rounded-xl mb-4 scrollbar-none gap-1 justify-start bg-muted/50">
-                    <TabsTrigger value="store" className="rounded-lg shrink-0 gap-1 px-3"><Store className="w-4 h-4" /><span className="text-xs">Loja</span></TabsTrigger>
-                    <TabsTrigger value="menu" className="rounded-lg shrink-0 gap-1 px-3"><UtensilsCrossed className="w-4 h-4" /><span className="text-xs">Cardápio</span></TabsTrigger>
-                    <TabsTrigger value="driver" className="rounded-lg shrink-0 gap-1 px-3"><Truck className="w-4 h-4" /><span className="text-xs">Entregador</span></TabsTrigger>
-                    <TabsTrigger value="reassign" className="rounded-lg shrink-0 gap-1 px-3"><RefreshCw className="w-4 h-4" /><span className="text-xs">Reatribuir</span></TabsTrigger>
-                    <TabsTrigger value="favorites" className="rounded-lg shrink-0 gap-1 px-3"><Star className="w-4 h-4" /><span className="text-xs">Favoritos</span></TabsTrigger>
                     <TabsTrigger value="map" className="rounded-lg shrink-0 gap-1 px-3"><MapIcon className="w-4 h-4" /><span className="text-xs">Mapa</span></TabsTrigger>
+                    <TabsTrigger value="driver" className="rounded-lg shrink-0 gap-1 px-3"><Truck className="w-4 h-4" /><span className="text-xs">Entregador</span></TabsTrigger>
+                    <TabsTrigger value="menu" className="rounded-lg shrink-0 gap-1 px-3"><UtensilsCrossed className="w-4 h-4" /><span className="text-xs">Cardápio</span></TabsTrigger>
+                    <TabsTrigger value="favorites" className="rounded-lg shrink-0 gap-1 px-3"><Star className="w-4 h-4" /><span className="text-xs">Favoritos</span></TabsTrigger>
                     <TabsTrigger value="credits" className="rounded-lg shrink-0 gap-1 px-3"><CreditCard className="w-4 h-4" /><span className="text-xs">Recarga</span></TabsTrigger>
                     <TabsTrigger value="support" className="rounded-lg shrink-0 gap-1 px-3"><MessageSquare className="w-4 h-4" /><span className="text-xs">Suporte</span></TabsTrigger>
                     <TabsTrigger value="settings" className="rounded-lg shrink-0 gap-1 px-3"><Settings className="w-4 h-4" /><span className="text-xs">Ajustes</span></TabsTrigger>
@@ -243,12 +240,8 @@ const StoreOwnerPanel = () => {
                   animate={{ opacity: 1, y: 0 }} 
                   className="mt-0"
                 >
-                  <TabsContent value="store" className="mt-0 outline-none">
-                    <StoreInfoTab restaurant={restaurant} userId={activeUserId!} />
-                  </TabsContent>
-
-                  <TabsContent value="menu" className="mt-0 outline-none">
-                    <MenuTab restaurant={restaurant} />
+                  <TabsContent value="map" className="mt-0 outline-none">
+                    <RadarTab restaurant={restaurant} userId={activeUserId!} />
                   </TabsContent>
 
                   <TabsContent value="driver" className="mt-0 outline-none">
@@ -263,16 +256,12 @@ const StoreOwnerPanel = () => {
                     />
                   </TabsContent>
 
-                  <TabsContent value="reassign" className="mt-0 outline-none">
-                    <ReassignDriverTab restaurant={restaurant} userId={activeUserId!} />
+                  <TabsContent value="menu" className="mt-0 outline-none">
+                    <MenuTab restaurant={restaurant} />
                   </TabsContent>
 
                   <TabsContent value="favorites" className="mt-0 outline-none">
-                    <FavoritesTab restaurant={restaurant} />
-                  </TabsContent>
-
-                  <TabsContent value="map" className="mt-0 outline-none">
-                    <RadarTab restaurant={restaurant} userId={activeUserId!} />
+                    <FavoritesTab restaurant={restaurant} userId={activeUserId!} />
                   </TabsContent>
 
                   <TabsContent value="credits" className="mt-0 outline-none">
