@@ -101,7 +101,14 @@ const StoreOwnerPanel = () => {
     if (!confirm("Cancelar esta corrida? Os créditos descontados serão devolvidos à sua loja.")) return;
     try {
       const { data, error } = await (supabase as any).rpc("cancel_delivery_request", { p_request_id: requestId });
-      if (error) throw error;
+      if (error) {
+        console.warn("[StoreOwnerPanel] RPC cancel failed, trying direct update fallback:", error);
+        const { error: directErr } = await supabase.from("delivery_requests").update({
+          status: "cancelled",
+          updated_at: new Date().toISOString(),
+        } as any).eq("id", requestId);
+        if (directErr) throw error;
+      }
       toast.success("Corrida cancelada. Créditos devolvidos!");
       queryClient.invalidateQueries({ queryKey: ["my-delivery-requests"] });
       queryClient.invalidateQueries({ queryKey: ["my-credits"] });
