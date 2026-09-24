@@ -20,7 +20,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import AdminSupportPanel from "@/components/AdminSupportPanel";
 import AssignedDriverCard, { ActiveDeliveryRequest } from "@/components/store/AssignedDriverCard";
 import logoDuarte from "@/assets/logo-duarte.jpeg";
-import { cancelDeliveryNotification } from "@/lib/push";
+import { executeStoreDeliveryCancellation } from "@/lib/cancelStoreDelivery";
 
 const StoreOwnerPanel = () => {
   const { user, loading } = useAuth();
@@ -98,21 +98,7 @@ const StoreOwnerPanel = () => {
   const handleCancelActiveRequest = async (requestId: string) => {
     if (!requestId) return;
     if (!confirm("Cancelar esta corrida? Os créditos descontados serão devolvidos à sua loja.")) return;
-    try {
-      const { error } = await (supabase as any).rpc("cancel_delivery_request", { p_request_id: requestId });
-      if (error) throw error;
-
-      void cancelDeliveryNotification(requestId);
-      toast.success("Corrida cancelada. Créditos devolvidos!");
-      queryClient.invalidateQueries({ queryKey: ["my-delivery-requests"] });
-      queryClient.invalidateQueries({ queryKey: ["my-credits"] });
-      queryClient.invalidateQueries({ queryKey: ["my-delivery-groups"] });
-      queryClient.invalidateQueries({ queryKey: ["assigned-driver-info"] });
-      queryClient.invalidateQueries({ queryKey: ["pending-reassignable"] });
-    } catch (err: any) {
-      console.error("[StoreOwnerPanel] Error cancelling active request:", err);
-      toast.error(err.message || "Erro ao cancelar corrida");
-    }
+    await executeStoreDeliveryCancellation(requestId, queryClient, activeUserId);
   };
 
   useEffect(() => {
