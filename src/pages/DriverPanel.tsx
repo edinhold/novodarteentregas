@@ -317,42 +317,6 @@ const DriverPanel = () => {
     };
   }, [driverProfile?.id, user?.id, queryClient]);
 
-  // Realtime listener para mudanças de status/bloqueio do motorista
-  useEffect(() => {
-    if (!user?.id) return;
-
-    const channel = supabase
-      .channel(`driver-suspension-status-${user.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "drivers",
-          filter: `user_id=eq.${user.id}`,
-        },
-        (payload: any) => {
-          const oldUntil = payload.old?.suspended_until;
-          const newUntil = payload.new?.suspended_until;
-          const wasSuspended = oldUntil && new Date(oldUntil).getTime() > Date.now();
-          const isNowSuspended = newUntil && new Date(newUntil).getTime() > Date.now();
-
-          queryClient.invalidateQueries({ queryKey: ["my-driver-profile", user.id] });
-
-          if (wasSuspended && !isNowSuspended) {
-            toast.success("🎉 Sua conta foi DESBLOQUEADA pelo administrador! Você já pode aceitar novas entregas.", { duration: 10000 });
-          } else if (!wasSuspended && isNowSuspended) {
-            toast.error("⚠️ Sua conta foi suspensa/bloqueada pelo administrador.", { duration: 10000 });
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [user?.id, queryClient]);
-
   // Request local notification permission (no push provider configured).
   useEffect(() => {
     if (!user?.id) return;
@@ -602,13 +566,6 @@ const DriverPanel = () => {
 
   const acceptRequest = async (requestId: string) => {
     if (acceptingId) return;
-
-    const isSuspended = isFutureDate((driverProfile as any)?.suspended_until);
-    if (isSuspended) {
-      toast.error(`⚠️ Sua conta está bloqueada até ${safeFormatDateTime((driverProfile as any).suspended_until)}. Você não pode aceitar novas entregas.`);
-      return;
-    }
-
     setAcceptingId(requestId);
     try {
       console.log("[Delivery] Motorista tentando aceitar", requestId);
@@ -770,10 +727,7 @@ const DriverPanel = () => {
   const cancelRequest = async (requestId: string) => {
     setCancelling(true);
     try {
-      let isSuspended = false;
-      let untilStr = "";
-
-      const { data, error } = await (supabase as any).rpc("driver_drop_delivery", {
+      const { error } = await (supabase as any).rpc("driver_drop_delivery", {
         p_request_id: requestId,
       });
 
@@ -784,20 +738,9 @@ const DriverPanel = () => {
           status: "pending",
         } as any).eq("id", requestId);
         if (directErr) throw directErr;
-      } else if (data) {
-        if ((data as any).suspended) {
-          isSuspended = true;
-          if ((data as any).suspended_until) {
-            untilStr = new Date((data as any).suspended_until).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-          }
-        }
       }
 
-      if (isSuspended) {
-        toast.error(`⚠️ Você cancelou mais de 2 entregas e sua conta foi bloqueada por 2 horas${untilStr ? ` (até às ${untilStr})` : ""}.`, { duration: 8000 });
-      } else {
-        toast.success("Entrega cancelada e devolvida para a lista de disponíveis.");
-      }
+      toast.success("Entrega cancelada e devolvida para a lista de disponíveis.");
 
       queryClient.invalidateQueries({ queryKey: ["driver-my-requests"] });
       queryClient.invalidateQueries({ queryKey: ["driver-pending-requests"] });
@@ -968,45 +911,24 @@ const DriverPanel = () => {
           </header>
 
           <main className="p-4 max-w-4xl mx-auto w-full">
-            {isFutureDate((driverProfile as any)?.suspended_until) ? (
-              <Card className="mb-4 border-destructive/50 bg-destructive/10 shadow-sm animate-pulse">
-                <CardContent className="p-4 flex items-center gap-3">
-                  <AlertTriangle className="w-6 h-6 text-destructive shrink-0" />
-                  <div className="space-y-0.5">
-                    <div className="flex items-center gap-2">
-                      <h4 className="font-bold text-destructive text-sm">🚫 Conta Bloqueada / Suspensa Temporariamente</h4>
-                      <Badge variant="destructive" className="text-[10px]">Bloqueado</Badge>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      Sua conta está bloqueada até{" "}
-                      <strong className="text-foreground font-semibold">
-                        {safeFormatDateTime((driverProfile as any).suspended_until)}
-                      </strong>{" "}
-                      {(driverProfile as any).suspension_reason ? `(${ (driverProfile as any).suspension_reason })` : "por ter cancelado mais de 2 entregas aceitas"}. Você não poderá aceitar novas corridas até que o prazo expire ou um administrador desbloqueie sua conta.
+            <Card className="mb-4 border-green-500/30 bg-green-500/10 dark:bg-green-950/20 shadow-sm">
+              <CardContent className="p-3 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400 shrink-0" />
+                  <div>
+                    <h4 className="font-bold text-green-700 dark:text-green-400 text-xs flex items-center gap-1.5">
+                      Status do Entregador: Liberado e Ativo
+                    </h4>
+                    <p className="text-[11px] text-muted-foreground">
+                      Sua conta está liberada para receber e aceitar entregas normalmente.
                     </p>
                   </div>
-                </CardContent>
-              </Card>
-            ) : (
-              <Card className="mb-4 border-green-500/30 bg-green-500/10 dark:bg-green-950/20 shadow-sm">
-                <CardContent className="p-3 flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2.5">
-                    <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400 shrink-0" />
-                    <div>
-                      <h4 className="font-bold text-green-700 dark:text-green-400 text-xs flex items-center gap-1.5">
-                        Status do Entregador: Liberado e Ativo
-                      </h4>
-                      <p className="text-[11px] text-muted-foreground">
-                        Sua conta está liberada para receber e aceitar entregas normalmente.
-                      </p>
-                    </div>
-                  </div>
-                  <Badge variant="outline" className="bg-green-600 text-white border-green-600 text-[10px] shrink-0 font-medium">
-                    ✓ Liberado
-                  </Badge>
-                </CardContent>
-              </Card>
-            )}
+                </div>
+                <Badge variant="outline" className="bg-green-600 text-white border-green-600 text-[10px] shrink-0 font-medium">
+                  ✓ Liberado
+                </Badge>
+              </CardContent>
+            </Card>
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full space-y-4">
               {isMobile && (
                 <TabsList className="grid w-full grid-cols-7 bg-muted/50 p-1 rounded-xl">

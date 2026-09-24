@@ -265,63 +265,6 @@ const DriversTab = () => {
     return () => { supabase.removeChannel(channel); };
   }, [queryClient]);
 
-  const handleUnsuspendDriver = (driver: any) => {
-    setAdminPasswordAction({
-      open: true,
-      title: `Confirmar Desbloqueio de Motorista`,
-      description: `Digite sua senha de administrador para autorizar o desbloqueio do motorista "${driver.full_name}". A suspensão será removida e o contador de cancelamentos será zerado.`,
-      actionLabel: "Autorizar Desbloqueio",
-      onConfirm: () => executeUnsuspendDriver(driver),
-    });
-  };
-
-  const executeUnsuspendDriver = async (driver: any) => {
-    try {
-      const { error } = await (supabase as any).rpc("admin_unsuspend_user", {
-        p_target_user_id: driver.user_id,
-      });
-      if (error) throw error;
-      toast.success(`Motorista ${driver.full_name} desbloqueado com sucesso! Cancelamentos zerados.`);
-      queryClient.invalidateQueries({ queryKey: ["admin-drivers"] });
-      queryClient.invalidateQueries({ queryKey: ["admin-drivers-financial"] });
-    } catch (e: any) {
-      toast.error(e.message || "Erro ao desbloquear motorista");
-    }
-  };
-
-  const handleSuspendDriver = (driver: any) => {
-    const hoursStr = prompt(`Por quantas horas deseja suspender o motorista "${driver.full_name}"?`, "2");
-    if (!hoursStr) return;
-    const hours = parseFloat(hoursStr);
-    if (isNaN(hours) || hours <= 0) {
-      return toast.error("Por favor, digite um número de horas válido.");
-    }
-
-    setAdminPasswordAction({
-      open: true,
-      title: `Confirmar Bloqueio de Motorista`,
-      description: `Digite sua senha de administrador para autorizar o bloqueio temporário de ${hours} hora(s) do motorista "${driver.full_name}".`,
-      actionLabel: "Autorizar Bloqueio",
-      onConfirm: () => executeSuspendDriver(driver, hours),
-    });
-  };
-
-  const executeSuspendDriver = async (driver: any, hours: number) => {
-    const until = new Date(Date.now() + hours * 3600 * 1000).toISOString();
-    try {
-      const { error } = await (supabase as any).rpc("admin_suspend_user", {
-        p_target_user_id: driver.user_id,
-        p_until: until,
-        p_reason: `Bloqueio manual pelo admin (${hours}h)`,
-      });
-      if (error) throw error;
-      toast.success(`Motorista ${driver.full_name} suspenso até ${new Date(until).toLocaleString("pt-BR")}.`);
-      queryClient.invalidateQueries({ queryKey: ["admin-drivers"] });
-    } catch (e: any) {
-      toast.error(e.message || "Erro ao suspender motorista");
-    }
-  };
-
   return (
     <>
       <Card>
@@ -353,8 +296,6 @@ const DriversTab = () => {
             <TableBody>
               {drivers.map((d) => {
                 const approval = (d as any).approval_status || "approved";
-                const isSuspended = isFutureDate((d as any).suspended_until);
-                const cancelCount = (d as any).cancellation_count || 0;
                 return (
                 <TableRow key={d.id}>
                   <TableCell className="w-12 pr-0">
@@ -374,51 +315,19 @@ const DriversTab = () => {
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-col gap-1">
-                      {isSuspended ? (
-                        <Badge variant="destructive" className="w-fit text-[10px] animate-pulse" title={(d as any).suspension_reason || "Bloqueado"}>
-                          Bloqueado até {safeFormatTime((d as any).suspended_until)}
-                        </Badge>
-                      ) : (
-                        <Badge variant={d.is_active ? "default" : "secondary"} className="w-fit">
-                          {d.is_active ? "Ativo" : "Inativo"}
-                        </Badge>
-                      )}
+                      <Badge variant={d.is_active ? "default" : "secondary"} className="w-fit">
+                        {d.is_active ? "Ativo" : "Inativo"}
+                      </Badge>
                       <Badge
                         variant={approval === "approved" ? "default" : approval === "rejected" ? "destructive" : "secondary"}
                         className="w-fit text-[10px]"
                       >
                         {approval === "approved" ? "Aprovado" : approval === "rejected" ? "Rejeitado" : "Pendente"}
                       </Badge>
-                      {cancelCount > 0 && (
-                        <Badge variant="outline" className="w-fit text-[10px] text-amber-600 border-amber-300 bg-amber-50">
-                          Cancelamentos: {cancelCount}
-                        </Badge>
-                      )}
                     </div>
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1">
-                      {isSuspended || cancelCount > 0 ? (
-                        <Button
-                          size="sm"
-                          variant="default"
-                          className="h-7 text-xs bg-green-600 hover:bg-green-700 text-white gap-1 font-semibold px-2 shrink-0"
-                          title="Desbloquear Motorista com Senha Admin"
-                          onClick={() => handleUnsuspendDriver(d)}
-                        >
-                          <Unlock className="w-3.5 h-3.5" /> Desbloquear
-                        </Button>
-                      ) : (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-amber-600 hover:text-amber-700 hover:bg-amber-50"
-                          title="Bloquear Temporariamente"
-                          onClick={() => handleSuspendDriver(d)}
-                        >
-                          <Lock className="w-4 h-4" />
-                        </Button>
-                      )}
                       <Button
                         variant="ghost"
                         size="icon"
@@ -538,44 +447,6 @@ const DriversTab = () => {
                   </Button>
                 </div>
               </div>
-              {isFutureDate((viewDriver as any).suspended_until) || ((viewDriver as any).cancellation_count || 0) > 0 ? (
-                <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 flex items-center justify-between gap-2">
-                  <div className="space-y-0.5">
-                    <p className="text-xs font-semibold text-amber-600 dark:text-amber-400">
-                      Status do Motorista: {isFutureDate((viewDriver as any).suspended_until) ? "Bloqueado / Suspenso" : "Atenção (Cancelamentos)"}
-                    </p>
-                    <p className="text-[11px] text-muted-foreground">
-                      {(viewDriver as any).suspension_reason || `Cancelamentos recentes: ${(viewDriver as any).cancellation_count || 0}`}
-                    </p>
-                  </div>
-                  <Button
-                    size="sm"
-                    className="bg-green-600 hover:bg-green-700 text-white gap-1 font-semibold text-xs shrink-0"
-                    onClick={() => {
-                      const driver = viewDriver;
-                      setViewDriver(null);
-                      handleUnsuspendDriver(driver);
-                    }}
-                  >
-                    <Unlock className="w-3.5 h-3.5" /> Desbloquear
-                  </Button>
-                </div>
-              ) : (
-                <div className="flex justify-end pt-1">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="text-amber-600 hover:text-amber-700 border-amber-300 gap-1 text-xs"
-                    onClick={() => {
-                      const driver = viewDriver;
-                      setViewDriver(null);
-                      handleSuspendDriver(driver);
-                    }}
-                  >
-                    <Lock className="w-3.5 h-3.5" /> Bloquear Motorista
-                  </Button>
-                </div>
-              )}
             </div>
           )}
         </DialogContent>

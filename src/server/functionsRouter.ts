@@ -168,15 +168,12 @@ export async function handleEdgeFunction(
         last_seen_at: s.last_seen_at,
       }));
 
-      const isSuspended = d.suspended_until && new Date(d.suspended_until) > new Date();
-      const online = d.is_active && d.is_online && !isSuspended && !!d.last_seen_at && d.last_seen_at >= cutoff;
+      const isSuspended = false;
+      const online = d.is_active && d.is_online && !!d.last_seen_at && d.last_seen_at >= cutoff;
 
       const recommendations: string[] = [];
       if (devices.length === 0) {
         recommendations.push("Nenhum aparelho registrado.");
-      }
-      if (isSuspended) {
-        recommendations.push("Motorista suspenso temporariamente.");
       } else if (!online) {
         recommendations.push("Motorista offline ou sem sinal nos últimos 15 min.");
       }
@@ -894,18 +891,14 @@ export async function handleEdgeFunction(
     // - is_active = true
     // - approval_status = 'approved'
     // - is_online = true
-    // - not suspended (suspended_until is null or < now)
     const { data: drivers } = await supabase
       .from("drivers")
-      .select("id, user_id, full_name, suspended_until")
+      .select("id, user_id, full_name")
       .eq("is_active", true)
       .eq("approval_status", "approved")
       .eq("is_online", true);
 
-    const nowTime = new Date().getTime();
-    const unsuspendedDrivers = (drivers ?? []).filter(
-      (d) => !d.suspended_until || new Date(d.suspended_until).getTime() < nowTime
-    );
+    const unsuspendedDrivers = drivers ?? [];
 
     if (unsuspendedDrivers.length === 0) {
       console.log("[DeliveryNotification:skip]", { pedidoId, reason: "SEM_MOTORISTAS_ONLINE" });

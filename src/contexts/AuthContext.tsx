@@ -41,19 +41,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
 
 
-    const enforceSuspension = async () => {
-      try {
-        const { data } = await (supabase as any).rpc("get_my_suspension");
-        const row = Array.isArray(data) ? data[0] : data;
-        if (row?.suspended_until && new Date(row.suspended_until).getTime() > Date.now()) {
-          // A suspensão temporária é tratada visualmente pelo painel (DriverPanel)
-          // para exibir a mensagem e tempo restante sem causar loop de logout.
-          return false;
-        }
-      } catch {}
-      return false;
-    };
-
     const resolveRole = async (uid: string): Promise<AppRole> => {
       try {
         const { data: roles } = await (supabase as any)
@@ -92,11 +79,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       setRoleLoading(true);
       try {
-        const suspended = await enforceSuspension();
-        if (suspended) {
-          setRole(null);
-          return;
-        }
         const resolved = await resolveRole(uid);
         console.log("[Auth] Role carregada:", resolved);
         setRole(resolved);
