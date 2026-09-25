@@ -414,7 +414,7 @@ export const AssignedDriverCard = ({ activeRequest, onCancelRequest }: AssignedD
                 )}
 
                 {/* BOTÃO DE CANCELAR CHAMADA DO MOTORISTA (ALTAMENTE VISÍVEL) */}
-                {["accepted", "picked_up"].includes(activeRequest.status) && onCancelRequest && (
+                {!["delivered", "cancelled"].includes(activeRequest.status) && onCancelRequest && (
                   <Button
                     size="default"
                     variant="destructive"

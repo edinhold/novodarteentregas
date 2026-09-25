@@ -78,7 +78,7 @@ const StoreOwnerPanel = () => {
   });
 
   const activeRequest = requests.find((r) =>
-    ["pending", "accepted", "picked_up", "in_transit", "delivering"].includes(r.status)
+    !["delivered", "cancelled"].includes(r.status)
   ) || null;
 
   const { data: chatMessages = [] } = useQuery({

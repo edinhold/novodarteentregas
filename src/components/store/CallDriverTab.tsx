@@ -1726,9 +1726,9 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
                 const vehicleType = driver?.vehicle_type || r.driver?.vehicle_type || null;
                 const driverPhone = driver?.phone || r.driver?.phone || null;
 
-                const canCancel = ["pending", "accepted", "picked_up"].includes(r.status);
-                const isPendingUnaccepted = r.status === "pending" || !r.driver_id;
                 const isFinished = ["delivered", "cancelled"].includes(r.status);
+                const canCancel = !isFinished;
+                const isPendingUnaccepted = r.status === "pending" || !r.driver_id;
                 const deliveryVal = Number(r.driver_fee ?? r.credit_cost ?? 0);
 
                 return (
