@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase, createFreshChannel } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 
 /**
@@ -12,9 +12,11 @@ export function useOnlinePresence(role?: "driver" | "store_owner" | "admin" | "c
 
   useEffect(() => {
     if (!user) return;
-    const channel = supabase.channel("global-presence", {
-      config: { presence: { key: user.id } },
-    });
+    const channel = createFreshChannel(
+      "global-presence",
+      { config: { presence: { key: user.id } } },
+      true
+    );
 
     channel
       .on("presence", { event: "sync" }, () => {

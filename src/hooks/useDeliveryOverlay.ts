@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase, createFreshChannel } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { playUrgentNotification } from "@/lib/notificationSound";
 import { cancelDeliveryNotification } from "@/lib/push";
@@ -247,8 +247,7 @@ export function useDeliveryOverlay({ standby, timeoutMs = 30000, onAccepted }: O
   // Realtime listener for new pending deliveries.
   useEffect(() => {
     if (!user?.id) return;
-    const channel = supabase
-      .channel("delivery-overlay")
+    const channel = createFreshChannel("delivery-overlay")
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "delivery_requests" },

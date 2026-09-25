@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase, createFreshChannel } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -75,8 +75,7 @@ const ReassignDriverTab = ({ restaurant, userId }: ReassignDriverTabProps) => {
   }, [pendingRequests, defaultFavoriteUserId]);
 
   useEffect(() => {
-    const channel = supabase
-      .channel("reassign-realtime")
+    const channel = createFreshChannel("reassign-realtime")
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "delivery_requests", filter: `store_owner_id=eq.${userId}` },

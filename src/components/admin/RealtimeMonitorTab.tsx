@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase, createFreshChannel } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -106,8 +106,7 @@ const RealtimeMonitorContent = () => {
 
   // Realtime subscriptions
   useEffect(() => {
-    const ch = supabase
-      .channel("admin-monitor")
+    const ch = createFreshChannel("admin-monitor")
       .on("postgres_changes", { event: "*", schema: "public", table: "driver_locations" }, (payload) => {
         const row: any = payload.new ?? payload.old;
         if (!row?.user_id) return;

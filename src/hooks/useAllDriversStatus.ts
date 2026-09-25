@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase, createFreshChannel } from "@/integrations/supabase/client";
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -23,8 +23,7 @@ export const useAllDriversStatus = () => {
 
   // Realtime subscription for locations and delivery requests
   useEffect(() => {
-    const channel = supabase
-      .channel("global_driver_status_realtime")
+    const channel = createFreshChannel("global_driver_status_realtime")
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "driver_locations" },

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase, createFreshChannel } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ArrowLeft, Truck, UtensilsCrossed, CreditCard, Store, Map as MapIcon, Star, RefreshCw, Route, MessageSquare, Settings } from "lucide-react";
@@ -109,7 +109,7 @@ const StoreOwnerPanel = () => {
 
   useEffect(() => {
     if (!activeUserId) return;
-    const channel = supabase.channel(`store-owner-realtime-${activeUserId}`)
+    const channel = createFreshChannel(`store-owner-realtime-${activeUserId}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "delivery_requests", filter: `store_owner_id=eq.${activeUserId}` },

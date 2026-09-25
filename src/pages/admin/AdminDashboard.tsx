@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { playNotificationSound, playUrgentNotification } from "@/lib/notificationSound";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase, createFreshChannel } from "@/integrations/supabase/client";
 import { useCategories } from "@/hooks/useData";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -101,8 +101,7 @@ const AdminDashboard = () => {
   // Realtime: notify admin on new withdrawal requests
   useEffect(() => {
     if (!authChecked) return;
-    const channel = supabase
-      .channel("admin-withdrawal-notifications")
+    const channel = createFreshChannel("admin-withdrawal-notifications")
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "withdrawal_requests" },

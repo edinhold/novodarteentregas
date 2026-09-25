@@ -7,7 +7,7 @@ import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Volume2, Vibrate, Bell, BellOff, Smartphone } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase, createFreshChannel } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   setNotificationVolume,
@@ -51,8 +51,7 @@ const DriverNotificationSettings = () => {
     };
 
     refresh();
-    const channel = supabase
-      .channel("driver-standby-pending")
+    const channel = createFreshChannel("driver-standby-pending")
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "delivery_requests" },

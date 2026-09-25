@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase, createFreshChannel } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -291,8 +291,7 @@ const DriverPanel = () => {
   useEffect(() => {
     if (!driverProfile?.id) return;
 
-    const channel = supabase
-      .channel(`driver-wallet-realtime-${driverProfile.id}`)
+    const channel = createFreshChannel(`driver-wallet-realtime-${driverProfile.id}`)
       .on(
         "postgres_changes",
         {
@@ -404,7 +403,7 @@ const DriverPanel = () => {
     window.addEventListener("delivery-unavailable", handleUnavailable);
 
 
-    const channel = supabase.channel("driver-realtime")
+    const channel = createFreshChannel("driver-realtime")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "delivery_requests" }, (payload) => {
         console.log("New delivery request received:", payload);
         queryClient.invalidateQueries({ queryKey: ["driver-pending-requests"] });

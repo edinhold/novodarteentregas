@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase, createFreshChannel } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -44,8 +44,7 @@ const SupportChat = ({ currentUserId, otherUserId, title = "Conversa", maxHeight
 
   useEffect(() => {
     if (!currentUserId || !otherUserId) return;
-    const channel = supabase
-      .channel(`admin-dm-${[currentUserId, otherUserId].sort().join("-")}`)
+    const channel = createFreshChannel(`admin-dm-${[currentUserId, otherUserId].sort().join("-")}`)
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "admin_direct_messages" },

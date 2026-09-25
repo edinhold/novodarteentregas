@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase, createFreshChannel } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { ArrowLeft, MapPin, Phone, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -144,8 +144,7 @@ const OrderTracking = () => {
 
     fetchLocation();
 
-    const channel = supabase
-      .channel(`tracking-${deliveryRequest.driver_id}`)
+    const channel = createFreshChannel(`tracking-${deliveryRequest.driver_id}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "driver_locations", filter: `user_id=eq.${deliveryRequest.driver_id}` },
@@ -159,8 +158,7 @@ const OrderTracking = () => {
       .subscribe();
 
     // Also listen for delivery request status changes
-    const statusChannel = supabase
-      .channel(`delivery-status-${deliveryRequest.id}`)
+    const statusChannel = createFreshChannel(`delivery-status-${deliveryRequest.id}`)
       .on(
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "delivery_requests", filter: `id=eq.${deliveryRequest.id}` },

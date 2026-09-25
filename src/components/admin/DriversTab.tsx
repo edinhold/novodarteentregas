@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase, createFreshChannel } from "@/integrations/supabase/client";
 import { DriverPhoto } from "@/components/DriverPhoto";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
@@ -254,7 +254,7 @@ const DriversTab = () => {
 
   // Realtime: auto-update earnings when a driver finishes a delivery
   useEffect(() => {
-    const channel = supabase.channel("admin-earnings-realtime")
+    const channel = createFreshChannel("admin-earnings-realtime")
       .on("postgres_changes", { event: "*", schema: "public", table: "driver_earnings" }, () => {
         queryClient.invalidateQueries({ queryKey: ["admin-driver-earnings"] });
       })

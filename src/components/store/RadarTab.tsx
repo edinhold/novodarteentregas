@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useMemo } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase, createFreshChannel } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -148,8 +148,7 @@ const RadarTabContent = ({ restaurant, userId }: Props) => {
 
   // Realtime — patch cache directly for instant map updates
   useEffect(() => {
-    const channel = supabase
-      .channel("radar-tab-realtime")
+    const channel = createFreshChannel("radar-tab-realtime")
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "driver_locations" },

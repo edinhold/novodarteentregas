@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase, createFreshChannel } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -296,8 +296,7 @@ export const FinancialTab = () => {
 
   // Inscrever no Realtime do Supabase para atualizar antecipações e lançamentos de motoristas automaticamente
   useEffect(() => {
-    const channel = supabase
-      .channel("financial-tab-realtime")
+    const channel = createFreshChannel("financial-tab-realtime")
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "withdrawal_requests" },
