@@ -188,47 +188,48 @@ export const AssignedDriverCard = ({ activeRequest, onCancelRequest }: AssignedD
   const isPending = activeRequest.status === "pending" || !activeRequest.driver_id;
 
   // 1. ESTADO: AGUARDANDO MOTORISTA (Aguardando motorista aceitar a entrega)
-  // Conforme requisito estrito: mostrar apenas o estado atual, NENHUM dado de motorista.
   if (isPending) {
     return (
-      <Card className="border-amber-500/40 bg-amber-500/5 shadow-sm overflow-hidden" id="card-delivery-pending">
-        <CardHeader className="pb-2 pt-3 px-3 sm:px-4">
+      <Card className="border-amber-500/40 bg-amber-500/5 shadow-md overflow-hidden" id="card-delivery-pending">
+        <CardHeader className="pb-2 pt-3 px-3 sm:px-4 bg-amber-500/10 border-b border-amber-500/20">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <CardTitle className="text-sm sm:text-base flex items-center gap-2 text-amber-700 dark:text-amber-400 font-semibold">
-              <span className="relative flex h-3 w-3 shrink-0">
+            <CardTitle className="text-sm sm:text-base flex items-center gap-2 text-amber-800 dark:text-amber-300 font-bold">
+              <span className="relative flex h-3.5 w-3.5 shrink-0">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500"></span>
+                <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-amber-500"></span>
               </span>
               Aguardando motorista aceitar a entrega
             </CardTitle>
-            <Badge variant="outline" className="text-xs bg-amber-500/10 border-amber-500/30 text-amber-800 dark:text-amber-300">
+            <Badge variant="outline" className="text-xs bg-amber-500/10 border-amber-500/30 text-amber-800 dark:text-amber-300 font-mono font-bold">
               Chamada #{activeRequest.id.slice(0, 8)}
             </Badge>
           </div>
         </CardHeader>
-        <CardContent className="p-3 sm:p-4 pt-1 sm:pt-2 space-y-3">
-          <div className="text-xs text-muted-foreground space-y-1">
-            <p className="flex items-center gap-1.5 truncate">
-              <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+        <CardContent className="p-3 sm:p-4 space-y-3">
+          <div className="text-xs text-muted-foreground space-y-1 bg-amber-500/5 p-2.5 rounded-lg border border-amber-500/20">
+            <p className="flex items-center gap-1.5 font-medium text-amber-800 dark:text-amber-300">
+              <Clock className="w-4 h-4 text-amber-600 shrink-0" />
               Buscando entregadores disponíveis nas proximidades...
             </p>
             {activeRequest.delivery_address && (
-              <p className="truncate text-foreground/80">
-                <span className="font-medium">Destino:</span> {activeRequest.delivery_address}
+              <p className="truncate text-foreground/90 pt-1">
+                <span className="font-semibold text-muted-foreground">Destino:</span> {activeRequest.delivery_address}
               </p>
             )}
           </div>
 
           {onCancelRequest && (
-            <div className="flex justify-end pt-1">
+            <div className="pt-2 border-t border-amber-500/20 flex flex-col sm:flex-row items-center justify-between gap-2">
+              <span className="text-xs text-muted-foreground">Precisa desistir ou alterar o pedido?</span>
               <Button
-                size="sm"
+                size="default"
                 variant="destructive"
-                className="h-8 text-xs gap-1.5"
+                className="w-full sm:w-auto bg-red-600 hover:bg-red-700 text-white font-bold text-xs sm:text-sm h-11 px-5 shadow-md gap-2 border border-red-700 active:scale-[0.98] transition-transform"
                 onClick={() => onCancelRequest(activeRequest.id)}
+                id="btn-cancelar-chamada-pending"
               >
-                <XCircle className="w-3.5 h-3.5" />
-                Cancelar solicitação
+                <XCircle className="w-5 h-5 shrink-0 animate-pulse" />
+                <span>CANCELAR CHAMADA DO MOTORISTA</span>
               </Button>
             </div>
           )}
@@ -238,7 +239,6 @@ export const AssignedDriverCard = ({ activeRequest, onCancelRequest }: AssignedD
   }
 
   // 2. ESTADO: MOTORISTA ACEITOU (Motorista aceitou a entrega)
-  // Exibir: Foto, Nome, Credencial, Placa, WhatsApp e Botão Chamar no WhatsApp.
   if (isAcceptedOrTransit) {
     const waNumber = driver?.phone ? normalizeWhatsAppNumber(driver.phone) : "";
     const waMessage = encodeURIComponent(
@@ -259,14 +259,14 @@ export const AssignedDriverCard = ({ activeRequest, onCancelRequest }: AssignedD
         : "Entrega em andamento";
 
     return (
-      <Card className="border-emerald-500/40 bg-emerald-500/5 shadow-sm overflow-hidden" id="card-delivery-accepted">
+      <Card className="border-emerald-500/40 bg-emerald-500/5 shadow-md overflow-hidden" id="card-delivery-accepted">
         <CardHeader className="pb-2.5 pt-3 px-3 sm:px-4 bg-emerald-500/10 border-b border-emerald-500/20">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <CardTitle className="text-sm sm:text-base flex items-center gap-2 text-emerald-800 dark:text-emerald-300 font-bold">
-              <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+            <CardTitle className="text-sm sm:text-base flex items-center gap-2 text-emerald-800 dark:text-emerald-300 font-extrabold">
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
               {statusHeading}
             </CardTitle>
-            <Badge className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs">
+            <Badge className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-mono font-bold">
               Entrega #{activeRequest.id.slice(0, 8)}
             </Badge>
           </div>
@@ -275,84 +275,96 @@ export const AssignedDriverCard = ({ activeRequest, onCancelRequest }: AssignedD
         <CardContent className="p-3 sm:p-4 space-y-4">
           {loadingDriver && !driver ? (
             <div className="flex items-center justify-center py-6 gap-2 text-muted-foreground text-sm">
-              <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
+              <Loader2 className="w-5 h-5 animate-spin text-emerald-600" />
               <span>Carregando dados do motorista...</span>
             </div>
           ) : driver ? (
             <div className="space-y-4">
-              {/* Título de Seção conforme especificação */}
-              <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-400 uppercase tracking-wider">
-                Motorista que aceitou
-              </p>
+              {/* Título de Seção */}
+              <div className="flex items-center justify-between pb-1 border-b border-emerald-500/20">
+                <p className="text-xs font-extrabold text-emerald-800 dark:text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <Truck className="w-4 h-4 text-emerald-600" />
+                  Motorista que Aceitou a Corrida
+                </p>
+                <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30">
+                  {driver.vehicle_type || "Motorista"}
+                </Badge>
+              </div>
 
-              {/* Layout Responsivo: PWA / APK / 375px safe */}
-              <div className="flex flex-col sm:flex-row items-center sm:items-start gap-3 sm:gap-4">
+              {/* Layout Responsivo: Foto, Nome, Telefone, Placa e Credencial */}
+              <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 bg-card p-3 sm:p-4 rounded-xl border border-emerald-500/20 shadow-sm">
                 {/* Foto com placeholder padrão */}
                 <div className="relative shrink-0">
                   <DriverPhoto
                     photoUrl={driver.photo_url}
                     driverId={driver.user_id || driver.id}
                     alt={driver.full_name || "Motorista"}
-                    className="w-20 h-20 sm:w-24 sm:h-24 rounded-full border-2 border-emerald-500 shadow object-cover"
+                    className="w-20 h-20 sm:w-24 sm:h-24 rounded-full border-3 border-emerald-500 shadow-md object-cover"
                   />
-                  <span className="absolute bottom-0 right-0 p-1 bg-emerald-600 rounded-full text-white shadow-sm">
-                    <Truck className="w-3.5 h-3.5" />
+                  <span className="absolute bottom-0 right-0 p-1.5 bg-emerald-600 rounded-full text-white shadow">
+                    <Truck className="w-4 h-4" />
                   </span>
                 </div>
 
                 {/* Dados do Motorista */}
-                <div className="flex-1 min-w-0 w-full space-y-1.5 text-center sm:text-left">
-                  {/* Nome */}
+                <div className="flex-1 min-w-0 w-full space-y-2 text-center sm:text-left">
+                  {/* Nome do Motorista */}
                   <div className="min-w-0">
-                    <span className="text-xs text-muted-foreground">Nome: </span>
-                    <span className="text-base font-bold text-foreground break-words">
+                    <span className="text-xs text-muted-foreground uppercase font-bold tracking-wider block">Nome do Motorista</span>
+                    <h3 className="text-base sm:text-lg font-black text-foreground break-words leading-tight">
                       {driver.full_name || "Motorista"}
-                    </span>
+                    </h3>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                    {/* Placa do Veículo */}
+                    <div className="flex items-center gap-2 p-2 bg-amber-500/10 dark:bg-amber-950/40 rounded-lg border border-amber-500/30">
+                      <Car className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0" />
+                      <div className="flex flex-col text-left">
+                        <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wide">Placa do Veículo</span>
+                        <span className="font-mono font-black text-sm sm:text-base text-foreground tracking-wider uppercase">{vehiclePlate}</span>
+                      </div>
+                    </div>
+
+                    {/* Telefone / WhatsApp */}
+                    <div className="flex items-center gap-2 p-2 bg-emerald-500/10 dark:bg-emerald-950/40 rounded-lg border border-emerald-500/30">
+                      <Phone className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                      <div className="flex flex-col text-left min-w-0">
+                        <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wide">Telefone / Whats</span>
+                        <span className="font-bold text-sm text-foreground truncate">
+                          {driver.phone ? formatPhoneNumber(driver.phone) : "Não informado"}
+                        </span>
+                      </div>
+                    </div>
                   </div>
 
                   {/* Credencial */}
-                  <div className="flex items-center justify-center sm:justify-start gap-1.5 text-xs sm:text-sm text-foreground">
-                    <IdCard className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                    <span className="text-muted-foreground">Credencial:</span>
-                    <span className="font-mono font-semibold truncate">{driverCode}</span>
-                  </div>
-
-                  {/* Placa */}
-                  <div className="flex items-center justify-center sm:justify-start gap-1.5 text-xs sm:text-sm text-foreground">
-                    <Car className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                    <span className="text-muted-foreground">Placa:</span>
-                    <span className="font-mono font-semibold uppercase truncate">{vehiclePlate}</span>
-                  </div>
-
-                  {/* WhatsApp / Telefone */}
-                  <div className="flex items-center justify-center sm:justify-start gap-1.5 text-xs sm:text-sm text-foreground">
-                    <Phone className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                    <span className="text-muted-foreground">WhatsApp:</span>
-                    <span className="font-medium truncate">
-                      {driver.phone ? formatPhoneNumber(driver.phone) : "Não informado"}
-                    </span>
+                  <div className="flex items-center justify-center sm:justify-start gap-1.5 text-xs text-muted-foreground pt-0.5">
+                    <IdCard className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                    <span>Credencial:</span>
+                    <span className="font-mono font-bold text-foreground">{driverCode}</span>
                   </div>
                 </div>
               </div>
 
-              {/* Botões de Ação */}
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-2 border-t border-emerald-500/20">
+              {/* Botões de Ação com Botão de Cancelar Altamente Visível */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 pt-3 border-t border-emerald-500/20">
                 {/* Botão Chamar no WhatsApp */}
                 {waUrl ? (
                   <Button
                     asChild
                     size="default"
-                    className="w-full sm:w-auto bg-[#25D366] hover:bg-[#20bd5a] text-white font-semibold shadow-sm gap-2 h-10 px-4"
+                    className="w-full sm:w-auto bg-[#25D366] hover:bg-[#20bd5a] text-white font-bold shadow-md gap-2 h-11 px-4"
                     id="btn-chamar-whatsapp"
                   >
                     <a href={waUrl} target="_blank" rel="noopener noreferrer">
-                      <MessageCircle className="w-4 h-4 fill-white shrink-0" />
+                      <MessageCircle className="w-5 h-5 fill-white shrink-0" />
                       <span>Chamar no WhatsApp</span>
                     </a>
                   </Button>
                 ) : (
-                  <Button size="default" disabled variant="outline" className="w-full sm:w-auto gap-2">
-                    <MessageCircle className="w-4 h-4 shrink-0" />
+                  <Button size="default" disabled variant="outline" className="w-full sm:w-auto gap-2 h-11">
+                    <MessageCircle className="w-5 h-5 shrink-0" />
                     <span>WhatsApp indisponível</span>
                   </Button>
                 )}
@@ -363,7 +375,7 @@ export const AssignedDriverCard = ({ activeRequest, onCancelRequest }: AssignedD
                     asChild
                     variant="outline"
                     size="default"
-                    className="w-full sm:w-auto gap-2 h-10 px-3 border-emerald-500/30 hover:bg-emerald-500/10 text-foreground"
+                    className="w-full sm:w-auto gap-2 h-11 px-4 border-emerald-500/40 hover:bg-emerald-500/10 text-foreground font-semibold"
                     id="btn-ligar-motorista"
                   >
                     <a href={`tel:${driver.phone.replace(/\D/g, "")}`}>
@@ -373,17 +385,17 @@ export const AssignedDriverCard = ({ activeRequest, onCancelRequest }: AssignedD
                   </Button>
                 )}
 
-                {/* Cancelar corrida (se status for accepted ou picked_up) */}
+                {/* BOTÃO DE CANCELAR CHAMADA DO MOTORISTA (ALTAMENTE VISÍVEL) */}
                 {["accepted", "picked_up"].includes(activeRequest.status) && onCancelRequest && (
                   <Button
-                    size="sm"
-                    variant="ghost"
-                    className="w-full sm:w-auto text-xs text-destructive hover:bg-destructive/10 hover:text-destructive sm:ml-auto h-9 font-medium"
+                    size="default"
+                    variant="destructive"
+                    className="w-full sm:w-auto bg-red-600 hover:bg-red-700 text-white font-extrabold text-xs sm:text-sm h-11 px-4 shadow-md gap-2 border border-red-700 sm:ml-auto active:scale-[0.98] transition-transform"
                     onClick={() => onCancelRequest(activeRequest.id)}
                     id="btn-cancelar-corrida"
                   >
-                    <XCircle className="w-3.5 h-3.5 mr-1 shrink-0" />
-                    Cancelar corrida
+                    <XCircle className="w-5 h-5 shrink-0" />
+                    <span>CANCELAR CHAMADA DO MOTORISTA</span>
                   </Button>
                 )}
               </div>

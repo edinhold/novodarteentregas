@@ -77,12 +77,18 @@ const ChatTab = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("drivers")
-        .select("user_id, full_name, driver_code, phone, is_active")
+        .select("id, user_id, full_name, driver_code, phone, is_active")
         .order("full_name");
       if (error) throw error;
       return data || [];
     },
   });
+
+  const getDriverName = (driverId: string | null) => {
+    if (!driverId) return null;
+    const d = drivers.find((drv: any) => drv.user_id === driverId || drv.id === driverId);
+    return d?.full_name ? `${d.full_name}${d.driver_code ? ` (${d.driver_code})` : ""}` : null;
+  };
 
   // All store owners via restaurants table (owner_id = user_id of lojista)
   const { data: storeOwners = [] } = useQuery({
@@ -267,51 +273,72 @@ const ChatTab = () => {
                 <p className="text-muted-foreground text-center py-4">Nenhuma entrega com chat disponível</p>
               ) : (
                 <div className="space-y-2 max-h-96 overflow-y-auto">
-                  {allRequests.map((r: any) => (
-                    <div
-                      key={r.id}
-                      onClick={() => setSelectedRequestId(r.id === selectedRequestId ? null : r.id)}
-                      className={`p-3 rounded-lg cursor-pointer transition-colors ${
-                        selectedRequestId === r.id ? "bg-primary/10 border border-primary" : "bg-muted/50 hover:bg-muted"
-                      }`}
-                    >
-                      <div className="flex justify-between items-center">
-                        <div>
-                          <p className="font-bold text-sm">{(r as any).restaurants?.name || "Loja"}</p>
-                          <p className="text-xs text-muted-foreground">#{r.id.slice(0, 8)}</p>
+                  {allRequests.map((r: any) => {
+                    const driverName = getDriverName(r.driver_id);
+                    return (
+                      <div
+                        key={r.id}
+                        onClick={() => setSelectedRequestId(r.id === selectedRequestId ? null : r.id)}
+                        className={`p-3 rounded-lg cursor-pointer transition-colors ${
+                          selectedRequestId === r.id ? "bg-primary/10 border border-primary" : "bg-muted/50 hover:bg-muted"
+                        }`}
+                      >
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <p className="font-bold text-sm">{(r as any).restaurants?.name || "Loja"}</p>
+                            <p className="text-xs text-muted-foreground font-mono">Entrega #{r.id.slice(0, 8)}</p>
+                          </div>
+                          <Badge variant={
+                            r.status === "delivered" ? "default" :
+                            r.status === "cancelled" ? "destructive" :
+                            "secondary"
+                          }>
+                            {statusLabels[r.status] || r.status}
+                          </Badge>
                         </div>
-                        <Badge variant={
-                          r.status === "delivered" ? "default" :
-                          r.status === "cancelled" ? "destructive" :
-                          "secondary"
-                        }>
-                          {statusLabels[r.status] || r.status}
-                        </Badge>
+
+                        {/* Nome do Motorista que Aceitou */}
+                        {driverName ? (
+                          <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-300 mt-1.5 flex items-center gap-1.5 bg-emerald-500/10 p-1.5 rounded border border-emerald-500/20">
+                            <Truck className="w-3.5 h-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                            <span>Motorista: <strong>{driverName}</strong></span>
+                          </p>
+                        ) : (
+                          <p className="text-xs text-amber-700 dark:text-amber-400 mt-1.5 flex items-center gap-1.5 bg-amber-500/10 p-1.5 rounded border border-amber-500/20">
+                            <Clock className="w-3.5 h-3.5 shrink-0 text-amber-600" />
+                            <span>Aguardando motorista aceitar</span>
+                          </p>
+                        )}
+
+                        <p className="text-xs text-muted-foreground mt-1.5 truncate">
+                          📍 {r.pickup_address} → {r.delivery_address}
+                        </p>
                       </div>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        📍 {r.pickup_address} → {r.delivery_address}
-                      </p>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </CardContent>
           </Card>
 
-          {selectedRequestId && user && (
-            <>
-              {(() => {
-                const selected = allRequests.find((r: any) => r.id === selectedRequestId);
-                return selected ? <AdminAddressCorrection request={selected} /> : null;
-              })()}
-              <ChatWidget
-                deliveryRequestId={selectedRequestId}
-                currentUserId={user.id}
-                title="Chat da Entrega (Admin)"
-                maxHeight="max-h-80"
-              />
-            </>
-          )}
+          {selectedRequestId && user && (() => {
+            const selected = allRequests.find((r: any) => r.id === selectedRequestId);
+            const selectedDriver = selected ? getDriverName(selected.driver_id) : null;
+            const chatTitle = selectedDriver
+              ? `Chat da Entrega #${selectedRequestId.slice(0, 8)} • Motorista: ${selectedDriver}`
+              : `Chat da Entrega #${selectedRequestId.slice(0, 8)}`;
+            return (
+              <>
+                {selected && <AdminAddressCorrection request={selected} />}
+                <ChatWidget
+                  deliveryRequestId={selectedRequestId}
+                  currentUserId={user.id}
+                  title={chatTitle}
+                  maxHeight="max-h-80"
+                />
+              </>
+            );
+          })()}
         </TabsContent>
       </Tabs>
 
