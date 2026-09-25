@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { MessageSquare, Trash2, Truck, Store, Circle } from "lucide-react";
+import { MessageSquare, Trash2, Truck, Store, Circle, Clock } from "lucide-react";
 import { toast } from "sonner";
 import ChatWidget from "@/components/ChatWidget";
 import DeleteConfirm from "@/components/admin/DeleteConfirm";
