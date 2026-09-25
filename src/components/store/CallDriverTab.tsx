@@ -1,5 +1,6 @@
 import { notifyAvailableDrivers } from "@/lib/push";
 import { executeStoreDeliveryCancellation } from "@/lib/cancelStoreDelivery";
+import AssignedDriverCard from "@/components/store/AssignedDriverCard";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -1140,6 +1141,14 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
 
   return (
     <div className="space-y-4">
+      {/* Card de Pedido Ativo / Motorista Vinculado (Se houver corrida ativa) */}
+      {activeRequest && (
+        <AssignedDriverCard
+          activeRequest={activeRequest}
+          onCancelRequest={handleCancelRequest}
+        />
+      )}
+
       {/* Wallet Balance Banner (Carteira da Loja Altamente Visível) */}
       <Card className="border border-emerald-500/30 bg-gradient-to-r from-emerald-500/10 via-emerald-500/5 to-background shadow-sm overflow-hidden relative">
         <CardContent className="p-4 flex items-center justify-between flex-wrap gap-3">
@@ -1651,27 +1660,41 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
               {visibleRequests.map((r: any) => {
                 const canCancel = ["pending", "accepted", "picked_up"].includes(r.status);
                 const isFinished = ["delivered", "cancelled"].includes(r.status);
+                const deliveryVal = Number(r.driver_fee ?? r.credit_cost ?? 0);
+
                 return (
-                  <div key={r.id} className="p-3 rounded-lg bg-muted/50 space-y-1 hover:bg-muted/70 transition-colors border border-border/40">
+                  <div key={r.id} className="p-3 sm:p-3.5 rounded-xl bg-card hover:bg-muted/40 transition-colors border border-border/60 shadow-sm space-y-2">
                     <div className="flex justify-between items-center gap-2 flex-wrap">
                       <div className="flex items-center gap-2">
-                        <p className="text-sm font-bold">#{r.id.slice(0, 8)}</p>
+                        <p className="text-sm font-extrabold font-mono">#{r.id.slice(0, 8)}</p>
                         <span className="text-[11px] text-muted-foreground">
                           {new Date(r.created_at).toLocaleString("pt-BR")}
                         </span>
                       </div>
-                      <div className="flex items-center gap-1.5">
-                        <Badge variant={r.status === "delivered" ? "default" : r.status === "cancelled" ? "destructive" : "secondary"}>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {/* Exibição Clara do Valor da Entrega */}
+                        {deliveryVal > 0 && (
+                          <span className="text-xs font-black text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 px-2.5 py-1 rounded-md border border-emerald-500/30 flex items-center gap-1">
+                            <DollarSign className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                            <span>R$ {deliveryVal.toFixed(2).replace(".", ",")}</span>
+                          </span>
+                        )}
+
+                        <Badge variant={r.status === "delivered" ? "default" : r.status === "cancelled" ? "destructive" : "secondary"} className="font-semibold">
                           {statusLabels[r.status] || r.status}
                         </Badge>
+
+                        {/* Botão de Cancelar Entrega Altamente Visível */}
                         {canCancel && (
                           <Button
                             size="sm"
                             variant="destructive"
-                            className="h-7 px-2 text-xs"
+                            className="h-8 px-3 text-xs font-bold bg-red-600 hover:bg-red-700 text-white shadow-sm gap-1.5 border border-red-700 active:scale-95 transition-transform"
                             onClick={() => handleCancelRequest(r.id)}
+                            title="Cancelar esta chamada de entregador"
                           >
-                            <XCircle className="w-3.5 h-3.5 mr-1" /> Cancelar
+                            <XCircle className="w-4 h-4 shrink-0 animate-pulse" />
+                            <span>Cancelar Entrega</span>
                           </Button>
                         )}
                         {isFinished && (
@@ -1688,7 +1711,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
                         )}
                       </div>
                     </div>
-                    <p className="text-xs text-muted-foreground">📍 {r.pickup_address} → {r.delivery_address}</p>
+                    <p className="text-xs text-muted-foreground truncate">📍 {r.pickup_address} → {r.delivery_address}</p>
                   </div>
                 );
               })}

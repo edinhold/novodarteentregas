@@ -15,6 +15,7 @@ import {
   IdCard,
   CheckCircle2,
   Loader2,
+  DollarSign,
 } from "lucide-react";
 
 export interface AssignedDriverData {
@@ -186,6 +187,7 @@ export const AssignedDriverCard = ({ activeRequest, onCancelRequest }: AssignedD
   if (!activeRequest) return null;
 
   const isPending = activeRequest.status === "pending" || !activeRequest.driver_id;
+  const deliveryValue = Number(activeRequest.driver_fee ?? activeRequest.credit_cost ?? 0);
 
   // 1. ESTADO: AGUARDANDO MOTORISTA (Aguardando motorista aceitar a entrega)
   if (isPending) {
@@ -217,6 +219,19 @@ export const AssignedDriverCard = ({ activeRequest, onCancelRequest }: AssignedD
               </p>
             )}
           </div>
+
+          {/* Exibição Clara do Valor da Entrega */}
+          {deliveryValue > 0 && (
+            <div className="flex items-center justify-between bg-emerald-500/10 dark:bg-emerald-950/40 p-2.5 rounded-lg border border-emerald-500/30">
+              <div className="flex items-center gap-2">
+                <DollarSign className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Valor da Entrega:</span>
+              </div>
+              <span className="text-base sm:text-lg font-black text-emerald-700 dark:text-emerald-300">
+                R$ {deliveryValue.toFixed(2).replace(".", ",")}
+              </span>
+            </div>
+          )}
 
           {onCancelRequest && (
             <div className="pt-2 border-t border-amber-500/20 flex flex-col sm:flex-row items-center justify-between gap-2">
@@ -346,6 +361,19 @@ export const AssignedDriverCard = ({ activeRequest, onCancelRequest }: AssignedD
                   </div>
                 </div>
               </div>
+
+              {/* Exibição Clara do Valor da Entrega */}
+              {deliveryValue > 0 && (
+                <div className="flex items-center justify-between bg-emerald-500/10 dark:bg-emerald-950/40 p-2.5 rounded-lg border border-emerald-500/30">
+                  <div className="flex items-center gap-2">
+                    <DollarSign className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                    <span className="text-xs font-extrabold text-muted-foreground uppercase tracking-wider">Valor da Entrega:</span>
+                  </div>
+                  <span className="text-base sm:text-lg font-black text-emerald-700 dark:text-emerald-300">
+                    R$ {deliveryValue.toFixed(2).replace(".", ",")}
+                  </span>
+                </div>
+              )}
 
               {/* Botões de Ação com Botão de Cancelar Altamente Visível */}
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 pt-3 border-t border-emerald-500/20">
