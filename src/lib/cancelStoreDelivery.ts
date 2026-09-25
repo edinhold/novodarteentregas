@@ -6,11 +6,34 @@ import { cancelDeliveryNotification } from "@/lib/push";
 export async function executeStoreDeliveryCancellation(
   requestId: string,
   queryClient: QueryClient,
-  activeUserId?: string
+  activeUserId?: string,
+  cancellationReason?: string
 ): Promise<boolean> {
   if (!requestId) return false;
 
   try {
+    // Prepend/append cancellation reason into notes for traceability
+    if (cancellationReason && cancellationReason.trim()) {
+      try {
+        const { data: currentReq } = await supabase
+          .from("delivery_requests")
+          .select("notes")
+          .eq("id", requestId)
+          .maybeSingle();
+
+        const reasonTag = `[MOTIVO DO CANCELAMENTO PELA LOJA: ${cancellationReason.trim()}]`;
+        const updatedNotes = currentReq?.notes 
+          ? `${currentReq.notes} ${reasonTag}`
+          : reasonTag;
+
+        await supabase
+          .from("delivery_requests")
+          .update({ notes: updatedNotes, updated_at: new Date().toISOString() })
+          .eq("id", requestId);
+      } catch (err) {
+        console.warn("[cancelStoreDelivery] Could not update cancellation notes:", err);
+      }
+    }
     // 1. Try RPC cancellation first
     const { error: rpcError } = await (supabase as any).rpc("cancel_delivery_request", {
       p_request_id: requestId,

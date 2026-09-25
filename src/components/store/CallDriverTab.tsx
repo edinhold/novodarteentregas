@@ -156,10 +156,55 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
     return driversList.find((d: any) => d.id === driverId || d.user_id === driverId) || null;
   };
 
-  // Programar / Agendar Entrega State
-  const [isScheduled, setIsScheduled] = useState(false);
-  const [scheduledTime, setScheduledTime] = useState("");
-  const [scheduledDate, setScheduledDate] = useState<"today" | "tomorrow">("today");
+  // Modal de Justificativa de Cancelamento State
+  const [cancelModalOpen, setCancelModalOpen] = useState(false);
+  const [cancellingReqId, setCancellingReqId] = useState<string | null>(null);
+  const [cancellingDriverName, setCancellingDriverName] = useState<string | null>(null);
+  const [cancellingIsAccepted, setCancellingIsAccepted] = useState(false);
+  const [selectedReasonOption, setSelectedReasonOption] = useState<string>("Cliente desistiu do pedido");
+  const [customReasonText, setCustomReasonText] = useState("");
+  const [submittingCancel, setSubmittingCancel] = useState(false);
+
+  const CANCEL_REASON_OPTIONS = [
+    "Cliente desistiu do pedido",
+    "Atraso no preparo da cozinha",
+    "Endereço de entrega incorreto informado",
+    "Pedido saiu por entregador próprio da loja",
+    "Outro motivo",
+  ];
+
+  const handleOpenCancelModal = (requestId: string, driverName?: string | null, isAccepted = false) => {
+    setCancellingReqId(requestId);
+    setCancellingDriverName(driverName || null);
+    setCancellingIsAccepted(isAccepted);
+    setSelectedReasonOption("Cliente desistiu do pedido");
+    setCustomReasonText("");
+    setCancelModalOpen(true);
+  };
+
+  const handleConfirmCancellationWithReason = async () => {
+    if (!cancellingReqId) return;
+
+    let finalReason = selectedReasonOption;
+    if (selectedReasonOption === "Outro motivo") {
+      if (!customReasonText.trim()) {
+        toast.error("Por favor, digite a justificativa do cancelamento.");
+        return;
+      }
+      finalReason = customReasonText.trim();
+    }
+
+    try {
+      setSubmittingCancel(true);
+      await executeStoreDeliveryCancellation(cancellingReqId, queryClient, user?.id, finalReason);
+      setCancelModalOpen(false);
+      setCancellingReqId(null);
+    } catch (err: any) {
+      toast.error(err.message || "Erro ao cancelar corrida");
+    } finally {
+      setSubmittingCancel(false);
+    }
+  };
 
   // Delivery History Filter & Cleanup State
   const [historyPeriodFilter, setHistoryPeriodFilter] = useState<"all" | "today" | "7days" | "15days" | "30days">("all");
@@ -1097,15 +1142,10 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
 
     setCalling(true);
     try {
-      const scheduleTag = isScheduled && scheduledTime 
-        ? `[PROGRAMADO PARA: ${scheduledDate === "tomorrow" ? "Amanhã" : "Hoje"} às ${scheduledTime}] ` 
-        : "";
-      const combinedNotes = `${scheduleTag}${callForm.notes || ""}`.trim();
-
       const { data: requestId, error } = await supabase.rpc("deduct_credits_for_delivery", {
         p_pickup_address: callForm.pickup,
         p_delivery_address: finalDeliveryAddress,
-        p_notes: combinedNotes || null,
+        p_notes: callForm.notes || null,
         p_restaurant_id: restaurant?.id || null,
         p_distance_km: finalDistance,
         p_preferred_driver_id: selectedDriverId || null,
@@ -1133,7 +1173,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
         }
       } catch (e) {}
 
-      toast.success(isScheduled && scheduledTime ? `Entrega programada para ${scheduledTime}! Custo: R$ ${(deliveryCost ?? 0).toFixed(2)}` : `Entregador chamado! Custo: R$ ${(deliveryCost ?? 0).toFixed(2)}`);
+      toast.success(`Entregador chamado! Custo: R$ ${(deliveryCost ?? 0).toFixed(2)}`);
 
       const pickupAddr = restaurant?.address || callForm.pickup;
       setCallForm({ pickup: pickupAddr, delivery: "", delivery_number: "", notes: "" });
@@ -1143,8 +1183,6 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
       setRouteCoords([]);
       setManualDistanceEnabled(false);
       setManualDistanceKm("");
-      setIsScheduled(false);
-      setScheduledTime("");
       
       queryClient.invalidateQueries({ queryKey: ["my-delivery-requests"] });
       queryClient.invalidateQueries({ queryKey: ["my-credits"] });
@@ -1156,10 +1194,9 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
     }
   };
 
-  const handleCancelRequest = async (requestId: string) => {
+  const handleCancelRequest = (requestId: string, driverName?: string | null, isAccepted?: boolean) => {
     if (!requestId) return;
-    if (!confirm("Cancelar esta corrida? Os créditos descontados serão devolvidos à sua loja.")) return;
-    await executeStoreDeliveryCancellation(requestId, queryClient, user?.id);
+    handleOpenCancelModal(requestId, driverName, isAccepted);
   };
 
   return (
@@ -1485,57 +1522,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
             <Textarea value={callForm.notes} onChange={(e) => setCallForm(f => ({ ...f, notes: e.target.value }))} rows={2} placeholder="Detalhes da entrega..." />
           </div>
 
-          {/* Programar / Agendar Horário de Entrega */}
-          <div className="rounded-xl border border-primary/30 bg-primary/5 p-3.5 space-y-2.5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Clock className="w-4 h-4 text-primary shrink-0" />
-                <Label className="text-xs font-bold text-foreground cursor-pointer">
-                  Programar / Agendar Entrega
-                </Label>
-              </div>
-              <Button
-                type="button"
-                variant={isScheduled ? "default" : "outline"}
-                size="sm"
-                className="h-7 text-xs font-semibold gap-1"
-                onClick={() => setIsScheduled(!isScheduled)}
-              >
-                {isScheduled ? "✓ Agendado" : "+ Programar Horário"}
-              </Button>
-            </div>
 
-            {isScheduled && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2 border-t border-primary/20 animate-in fade-in duration-200">
-                <div>
-                  <Label className="text-[11px] font-medium text-muted-foreground">Dia da entrega:</Label>
-                  <Select value={scheduledDate} onValueChange={(v: any) => setScheduledDate(v)}>
-                    <SelectTrigger className="h-8 text-xs bg-background">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="today">Hoje</SelectItem>
-                      <SelectItem value="tomorrow">Amanhã</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label className="text-[11px] font-medium text-muted-foreground">Horário previsto (HH:MM):</Label>
-                  <Input
-                    type="time"
-                    value={scheduledTime}
-                    onChange={(e) => setScheduledTime(e.target.value)}
-                    className="h-8 text-xs bg-background"
-                  />
-                </div>
-                {scheduledTime && (
-                  <div className="sm:col-span-2 text-[11px] text-primary font-medium flex items-center gap-1 bg-primary/10 p-1.5 rounded">
-                    ⏰ A entrega será gravada como programada para {scheduledDate === "tomorrow" ? "amanhã" : "hoje"} às {scheduledTime}.
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
 
           {/* Manual distance adjustment */}
           {distanceKm > 0 && (
@@ -1744,17 +1731,9 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
                 const isFinished = ["delivered", "cancelled"].includes(r.status);
                 const deliveryVal = Number(r.driver_fee ?? r.credit_cost ?? 0);
 
-                // Extract schedule info from notes if present
-                const isReqScheduled = r.notes?.includes("[PROGRAMADO") || r.is_scheduled;
-                let scheduledInfo = "";
-                if (isReqScheduled && r.notes) {
-                  const match = r.notes.match(/\[PROGRAMADO PARA:\s*([^\]]+)\]/);
-                  if (match) scheduledInfo = match[1];
-                }
-
                 return (
                   <div key={r.id} className="p-3.5 sm:p-4 rounded-xl bg-card hover:bg-muted/40 transition-colors border border-border/70 shadow-sm space-y-3">
-                    {/* Top Header: ID, Date/Time, Price, Status Badge, Scheduled Badge */}
+                    {/* Top Header: ID, Date/Time, Price, Status Badge */}
                     <div className="flex justify-between items-start gap-2 flex-wrap pb-2 border-b border-border/40">
                       <div className="space-y-0.5">
                         <div className="flex items-center gap-2">
@@ -1764,11 +1743,6 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
                             {new Date(r.created_at).toLocaleDateString("pt-BR")} às {new Date(r.created_at).toLocaleTimeString("pt-BR", { hour: '2-digit', minute: '2-digit' })}
                           </span>
                         </div>
-                        {scheduledInfo && (
-                          <Badge variant="outline" className="text-[11px] bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-300 font-semibold gap-1">
-                            <Clock className="w-3 h-3" /> Programada para: {scheduledInfo}
-                          </Badge>
-                        )}
                       </div>
 
                       <div className="flex items-center gap-2 flex-wrap">
@@ -1839,17 +1813,17 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
                     {/* Action Buttons: Cancel call if unaccepted / active, and Clear History item */}
                     <div className="flex items-center justify-between gap-2 pt-1 flex-wrap">
                       <div className="flex items-center gap-2">
-                        {/* Botão de Cancelamento bem visível para chamadas não aceitas ou ativas */}
+                        {/* Botão de Cancelamento com Justificativa */}
                         {canCancel && (
                           <Button
                             size="sm"
                             variant="destructive"
                             className="h-8 px-3.5 text-xs font-extrabold bg-red-600 hover:bg-red-700 text-white shadow-sm gap-1.5 border border-red-700 active:scale-95 transition-transform"
-                            onClick={() => handleCancelRequest(r.id)}
-                            title="Cancelar esta chamada de entregador e estornar o valor"
+                            onClick={() => handleCancelRequest(r.id, driverName, !isPendingUnaccepted)}
+                            title="Cancelar esta chamada de entregador com justificativa"
                           >
                             <XCircle className="w-4 h-4 shrink-0 animate-pulse" />
-                            <span>{isPendingUnaccepted ? "CANCELAR CHAMADA (Estornar Crédito)" : "Cancelar Entrega"}</span>
+                            <span>{isPendingUnaccepted ? "CANCELAR CHAMADA (Estornar Crédito)" : "CANCELAR COM JUSTIFICATIVA"}</span>
                           </Button>
                         )}
                       </div>
@@ -1911,6 +1885,90 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
             </Button>
             <Button variant="destructive" onClick={handleClearHistoryByPeriod} disabled={clearingHistory}>
               {clearingHistory ? "Limpando..." : "Confirmar Exclusão"}
+            </Button>
+          </DialogFooter>
+      {/* Modal de Justificativa de Cancelamento */}
+      <Dialog open={cancelModalOpen} onOpenChange={setCancelModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive font-bold text-base sm:text-lg">
+              <XCircle className="w-5 h-5 shrink-0" />
+              Cancelar Chamada de Entrega
+            </DialogTitle>
+            <DialogDescription className="text-xs sm:text-sm">
+              {cancellingDriverName ? (
+                <span>Motorista aceito: <strong>{cancellingDriverName}</strong>. Selecione ou informe a justificativa do cancelamento.</span>
+              ) : (
+                <span>Informe a justificativa para cancelar esta entrega e estornar o valor descontado.</span>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold">Motivo / Justificativa *</Label>
+              <div className="space-y-1.5">
+                {CANCEL_REASON_OPTIONS.map((opt) => (
+                  <button
+                    key={opt}
+                    type="button"
+                    className={`w-full text-left px-3 py-2 text-xs rounded-lg border transition-all flex items-center justify-between font-medium ${
+                      selectedReasonOption === opt
+                        ? "border-red-500/60 bg-red-500/10 text-red-700 dark:text-red-300 font-bold shadow-xs"
+                        : "border-border/60 hover:bg-muted/60 text-foreground"
+                    }`}
+                    onClick={() => setSelectedReasonOption(opt)}
+                  >
+                    <span>{opt}</span>
+                    {selectedReasonOption === opt && <span className="text-red-600 font-bold">✓</span>}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {selectedReasonOption === "Outro motivo" && (
+              <div className="space-y-1.5 animate-in fade-in duration-200">
+                <Label className="text-xs font-semibold">Descreva o motivo *</Label>
+                <Textarea
+                  value={customReasonText}
+                  onChange={(e) => setCustomReasonText(e.target.value)}
+                  placeholder="Escreva a justificativa aqui..."
+                  rows={3}
+                  className="text-xs bg-background"
+                />
+              </div>
+            )}
+
+            <div className="bg-amber-500/10 border border-amber-500/30 p-2.5 rounded-lg text-[11px] text-amber-800 dark:text-amber-300">
+              💡 <strong>Estorno na Carteira:</strong> O saldo descontado nesta entrega será reembolsado à carteira da sua loja.
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => setCancelModalOpen(false)}
+              disabled={submittingCancel}
+            >
+              Voltar
+            </Button>
+            <Button
+              variant="destructive"
+              className="bg-red-600 hover:bg-red-700 font-bold gap-1.5"
+              onClick={handleConfirmCancellationWithReason}
+              disabled={submittingCancel}
+            >
+              {submittingCancel ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Cancelando...</span>
+                </>
+              ) : (
+                <>
+                  <XCircle className="w-4 h-4" />
+                  <span>Confirmar Cancelamento</span>
+                </>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
