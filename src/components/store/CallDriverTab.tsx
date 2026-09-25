@@ -1887,6 +1887,9 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
               {clearingHistory ? "Limpando..." : "Confirmar Exclusão"}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Modal de Justificativa de Cancelamento */}
       <Dialog open={cancelModalOpen} onOpenChange={setCancelModalOpen}>
         <DialogContent className="max-w-md">
