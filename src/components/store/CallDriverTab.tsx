@@ -1,6 +1,8 @@
 import { notifyAvailableDrivers } from "@/lib/push";
 import { executeStoreDeliveryCancellation } from "@/lib/cancelStoreDelivery";
 import AssignedDriverCard from "@/components/store/AssignedDriverCard";
+import { DriverPhoto } from "@/components/DriverPhoto";
+import { normalizeWhatsAppNumber, formatPhoneNumber } from "@/lib/phoneUtils";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -11,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Truck, DollarSign, MapPin, Navigation, Search, Route, Car, Bike, Footprints, Clock, Pencil, RotateCcw, AlertTriangle, Layers, Heart, Star, Code, XCircle, Loader2, Wallet, PlusCircle, Trash2, Filter, History } from "lucide-react";
+import { Truck, DollarSign, MapPin, Navigation, Search, Route, Car, Bike, Footprints, Clock, Pencil, RotateCcw, AlertTriangle, Layers, Heart, Star, Code, XCircle, Loader2, Wallet, PlusCircle, Trash2, Filter, History, Phone, MessageCircle } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { isToday } from "date-fns";
@@ -1725,6 +1727,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
                 const vehiclePlate = driver?.vehicle_plate || r.driver?.vehicle_plate || null;
                 const vehicleType = driver?.vehicle_type || r.driver?.vehicle_type || null;
                 const driverPhone = driver?.phone || r.driver?.phone || null;
+                const driverPhoto = driver?.photo_url || r.driver?.photo_url || null;
 
                 const isFinished = ["delivered", "cancelled"].includes(r.status);
                 const canCancel = !isFinished;
@@ -1759,34 +1762,71 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
                       </div>
                     </div>
 
-                    {/* Driver Information section */}
-                    <div className="p-2.5 rounded-lg bg-muted/30 border border-border/50 text-xs space-y-1">
+                    {/* Driver Information section: Foto, Placa, Telefone */}
+                    <div className="p-3 rounded-xl bg-muted/40 border border-border/60 text-xs space-y-2">
                       {driverName ? (
-                        <div className="flex items-center justify-between flex-wrap gap-2">
-                          <div className="flex items-center gap-2">
-                            <div className="w-6 h-6 rounded-full bg-primary/20 text-primary flex items-center justify-center font-bold text-[10px]">
-                              🚴
-                            </div>
-                            <div>
-                              <span className="font-bold text-foreground">Motorista: {driverName}</span>
-                              {vehiclePlate && (
-                                <span className="ml-2 font-mono text-[11px] bg-background px-1.5 py-0.5 rounded border border-border">
-                                  🚘 Placa: {vehiclePlate}
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                          <div className="flex items-center gap-3">
+                            <DriverPhoto
+                              photoUrl={driverPhoto}
+                              driverId={r.driver_id}
+                              alt={driverName}
+                              className="w-12 h-12 rounded-full border-2 border-emerald-500 shadow-sm object-cover shrink-0"
+                            />
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-extrabold text-foreground text-sm">{driverName}</span>
+                                {vehicleType && (
+                                  <Badge variant="outline" className="text-[10px] py-0 px-1.5 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 font-semibold">
+                                    {vehicleType}
+                                  </Badge>
+                                )}
+                              </div>
+
+                              <div className="flex items-center gap-2 flex-wrap text-xs">
+                                <span className="font-mono font-bold text-xs bg-amber-500/10 text-amber-800 dark:text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 flex items-center gap-1">
+                                  <Car className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                                  <span>Placa: {vehiclePlate || "Não informada"}</span>
                                 </span>
-                              )}
+
+                                {driverPhone && (
+                                  <span className="text-muted-foreground font-semibold flex items-center gap-1">
+                                    <Phone className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                    <span>{formatPhoneNumber(driverPhone)}</span>
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           </div>
+
                           {driverPhone && (
-                            <span className="text-muted-foreground text-[11px]">📞 {driverPhone}</span>
+                            <div className="flex items-center gap-1.5 sm:ml-auto">
+                              <a
+                                href={`https://wa.me/${normalizeWhatsAppNumber(driverPhone)}?text=${encodeURIComponent(`Olá ${driverName}, sou da loja referente à entrega #${r.id.slice(0, 8)}.`)}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold bg-[#25D366] hover:bg-[#20bd5a] text-white rounded-lg shadow-xs transition-colors"
+                              >
+                                <MessageCircle className="w-3.5 h-3.5 fill-white" />
+                                <span>Whats</span>
+                              </a>
+                              <a
+                                href={`tel:${driverPhone.replace(/\D/g, "")}`}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold bg-background hover:bg-muted border border-border rounded-lg transition-colors"
+                              >
+                                <Phone className="w-3.5 h-3.5 text-emerald-600" />
+                                <span>Ligar</span>
+                              </a>
+                            </div>
                           )}
                         </div>
                       ) : (
-                        <div className="flex items-center justify-between flex-wrap gap-2 text-amber-700 dark:text-amber-400">
+                        <div className="flex items-center justify-between flex-wrap gap-2 text-amber-700 dark:text-amber-400 p-1">
                           <div className="flex items-center gap-1.5 font-semibold">
                             <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
-                            <span>⚠️ Não aceita por nenhum motorista ainda</span>
+                            <span>⚠️ Aguardando um motorista aceitar a entrega</span>
                           </div>
-                          <span className="text-[11px] bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded font-mono">
+                          <span className="text-[11px] bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded font-mono font-bold">
                             Placa: Aguardando
                           </span>
                         </div>

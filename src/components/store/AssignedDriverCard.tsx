@@ -86,7 +86,7 @@ export const AssignedDriverCard = ({ activeRequest, onCancelRequest }: AssignedD
   const { data: driver, isLoading: loadingDriver } = useQuery<AssignedDriverData | null>({
     queryKey: ["assigned-driver-info", requestId, assignedDriverId],
     queryFn: async (): Promise<AssignedDriverData | null> => {
-      if (!assignedDriverId || !requestId) return null;
+      let driverInfo: AssignedDriverData | null = null;
 
       // 1. RPC oficial get_delivery_driver_info (SECURITY DEFINER no banco)
       try {
@@ -99,9 +99,9 @@ export const AssignedDriverCard = ({ activeRequest, onCancelRequest }: AssignedD
           const rows = rpcData as unknown as DeliveryDriverRpcRow[];
           const item = Array.isArray(rows) ? rows[0] : (rows as unknown as DeliveryDriverRpcRow);
           if (item && item.full_name) {
-            return {
+            driverInfo = {
               id: item.id,
-              user_id: item.user_id,
+              user_id: item.user_id || assignedDriverId,
               full_name: item.full_name,
               phone: item.phone || "",
               photo_url: item.photo_url || null,
@@ -115,69 +115,95 @@ export const AssignedDriverCard = ({ activeRequest, onCancelRequest }: AssignedD
         console.warn("[AssignedDriverCard] RPC get_delivery_driver_info fallback:", err);
       }
 
-      // 2. Consulta direta na tabela drivers por user_id ou id
-      try {
-        const { data: directDriver, error: directErr } = await supabase
-          .from("drivers")
-          .select("id, user_id, full_name, phone, photo_url, driver_code, vehicle_plate, vehicle_type")
-          .or(`user_id.eq.${assignedDriverId},id.eq.${assignedDriverId}`)
-          .maybeSingle();
+      // 2. Consulta direta na tabela drivers por user_id ou id se nada retornado ou faltar dados
+      if (!driverInfo || !driverInfo.full_name || !driverInfo.photo_url || !driverInfo.vehicle_plate || !driverInfo.phone) {
+        try {
+          const { data: directDriver } = await supabase
+            .from("drivers")
+            .select("id, user_id, full_name, phone, photo_url, driver_code, vehicle_plate, vehicle_type")
+            .or(`user_id.eq.${assignedDriverId},id.eq.${assignedDriverId}`)
+            .maybeSingle();
 
-        if (!directErr && directDriver?.full_name) {
-          return {
-            id: directDriver.id,
-            user_id: directDriver.user_id,
-            full_name: directDriver.full_name,
-            phone: directDriver.phone || "",
-            photo_url: directDriver.photo_url || null,
-            driver_code: directDriver.driver_code || null,
-            vehicle_plate: directDriver.vehicle_plate || null,
-            vehicle_type: directDriver.vehicle_type || null,
-          };
+          if (directDriver?.full_name) {
+            if (!driverInfo) {
+              driverInfo = {
+                id: directDriver.id,
+                user_id: directDriver.user_id || assignedDriverId,
+                full_name: directDriver.full_name,
+                phone: directDriver.phone || "",
+                photo_url: directDriver.photo_url || null,
+                driver_code: directDriver.driver_code || null,
+                vehicle_plate: directDriver.vehicle_plate || null,
+                vehicle_type: directDriver.vehicle_type || null,
+              };
+            } else {
+              if (!driverInfo.photo_url && directDriver.photo_url) driverInfo.photo_url = directDriver.photo_url;
+              if (!driverInfo.vehicle_plate && directDriver.vehicle_plate) driverInfo.vehicle_plate = directDriver.vehicle_plate;
+              if (!driverInfo.phone && directDriver.phone) driverInfo.phone = directDriver.phone;
+              if (!driverInfo.vehicle_type && directDriver.vehicle_type) driverInfo.vehicle_type = directDriver.vehicle_type;
+              if (!driverInfo.driver_code && directDriver.driver_code) driverInfo.driver_code = directDriver.driver_code;
+            }
+          }
+        } catch (err: unknown) {
+          console.warn("[AssignedDriverCard] Direct drivers fallback:", err);
         }
-      } catch (err: unknown) {
-        console.warn("[AssignedDriverCard] Direct drivers fallback:", err);
       }
 
-      // 3. Fallback via Edge Function segura (get-assigned-driver)
-      try {
-        const { data: edgeData, error: edgeErr } = await supabase.functions.invoke<EdgeFunctionDriverResponse>(
-          "get-assigned-driver",
-          { body: { request_id: requestId, driver_id: assignedDriverId } }
-        );
+      // 3. Complemento via Edge Function segura (get-assigned-driver)
+      if (!driverInfo || !driverInfo.photo_url || !driverInfo.vehicle_plate || !driverInfo.phone) {
+        try {
+          const { data: edgeData } = await supabase.functions.invoke<EdgeFunctionDriverResponse>(
+            "get-assigned-driver",
+            { body: { request_id: requestId, driver_id: assignedDriverId } }
+          );
 
-        if (!edgeErr && edgeData?.success && edgeData.driver?.full_name) {
-          return edgeData.driver as AssignedDriverData;
+          if (edgeData?.success && edgeData.driver?.full_name) {
+            const ed = edgeData.driver;
+            if (!driverInfo) {
+              driverInfo = ed as AssignedDriverData;
+            } else {
+              if (!driverInfo.photo_url && ed.photo_url) driverInfo.photo_url = ed.photo_url;
+              if (!driverInfo.vehicle_plate && ed.vehicle_plate) driverInfo.vehicle_plate = ed.vehicle_plate;
+              if (!driverInfo.phone && ed.phone) driverInfo.phone = ed.phone;
+            }
+          }
+        } catch (err: unknown) {
+          console.warn("[AssignedDriverCard] Edge function fallback:", err);
         }
-      } catch (err: unknown) {
-        console.warn("[AssignedDriverCard] Edge function fallback:", err);
       }
 
-      // 4. Fallback na tabela profiles
-      try {
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("id, full_name, phone, avatar_url")
-          .eq("id", assignedDriverId)
-          .maybeSingle();
+      // 4. Complemento final na tabela profiles
+      if (!driverInfo || !driverInfo.photo_url || !driverInfo.phone) {
+        try {
+          const { data: profile } = await supabase
+            .from("profiles")
+            .select("id, full_name, phone, avatar_url")
+            .eq("id", assignedDriverId)
+            .maybeSingle();
 
-        if (profile?.full_name) {
-          return {
-            id: profile.id,
-            user_id: profile.id,
-            full_name: profile.full_name,
-            phone: profile.phone || "",
-            photo_url: profile.avatar_url || null,
-            driver_code: `MOT-${profile.id.slice(0, 5).toUpperCase()}`,
-            vehicle_plate: null,
-            vehicle_type: "Moto",
-          };
+          if (profile?.full_name) {
+            if (!driverInfo) {
+              driverInfo = {
+                id: profile.id,
+                user_id: profile.id,
+                full_name: profile.full_name,
+                phone: profile.phone || "",
+                photo_url: profile.avatar_url || null,
+                driver_code: `MOT-${profile.id.slice(0, 5).toUpperCase()}`,
+                vehicle_plate: null,
+                vehicle_type: "Moto",
+              };
+            } else {
+              if (!driverInfo.photo_url && profile.avatar_url) driverInfo.photo_url = profile.avatar_url;
+              if (!driverInfo.phone && profile.phone) driverInfo.phone = profile.phone;
+            }
+          }
+        } catch (err: unknown) {
+          console.warn("[AssignedDriverCard] Profiles fallback:", err);
         }
-      } catch (err: unknown) {
-        console.warn("[AssignedDriverCard] Profiles fallback:", err);
       }
 
-      return null;
+      return driverInfo;
     },
     enabled: isAcceptedOrTransit,
     staleTime: 1000 * 15,
