@@ -447,6 +447,11 @@ const DriverPanel = () => {
             window.dispatchEvent(new CustomEvent("delivery-unavailable", { detail: { pedidoId: payload.new?.id } }));
           }
         }
+        if (payload.new?.status === "cancelled") {
+          if (payload.new?.driver_id === user.id || payload.old?.driver_id === user.id) {
+            toast.error("⚠️ A loja cancelou este chamado de entrega.", { duration: 7000 });
+          }
+        }
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "driver_earnings" }, () => {
         queryClient.invalidateQueries({ queryKey: ["my-earnings", driverProfile?.id] });
