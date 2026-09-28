@@ -69,10 +69,9 @@ interface EdgeFunctionDriverResponse {
 
 interface AssignedDriverCardProps {
   activeRequest: ActiveDeliveryRequest | null;
-  onCancelRequest?: (requestId: string, driverName?: string | null, isAccepted?: boolean, driverDetails?: AssignedDriverData | null) => void;
 }
 
-export const AssignedDriverCard = ({ activeRequest, onCancelRequest }: AssignedDriverCardProps) => {
+export const AssignedDriverCard = ({ activeRequest }: AssignedDriverCardProps) => {
   const assignedDriverId = activeRequest?.driver_id || null;
   const requestId = activeRequest?.id || null;
   const requestStatus = activeRequest?.status || "";
@@ -258,22 +257,6 @@ export const AssignedDriverCard = ({ activeRequest, onCancelRequest }: AssignedD
               </span>
             </div>
           )}
-
-          {onCancelRequest && (
-            <div className="pt-2 border-t border-amber-500/20 flex flex-col sm:flex-row items-center justify-between gap-2">
-              <span className="text-xs text-muted-foreground">Precisa desistir ou alterar o pedido?</span>
-              <Button
-                size="default"
-                variant="destructive"
-                className="w-full sm:w-auto bg-red-600 hover:bg-red-700 text-white font-bold text-xs sm:text-sm h-11 px-5 shadow-md gap-2 border border-red-700 active:scale-[0.98] transition-transform"
-                onClick={() => onCancelRequest(activeRequest.id)}
-                id="btn-cancelar-chamada-pending"
-              >
-                <XCircle className="w-5 h-5 shrink-0 animate-pulse" />
-                <span>CANCELAR CHAMADA DO MOTORISTA</span>
-              </Button>
-            </div>
-          )}
         </CardContent>
       </Card>
     );
@@ -439,19 +422,6 @@ export const AssignedDriverCard = ({ activeRequest, onCancelRequest }: AssignedD
                   </Button>
                 )}
 
-                {/* BOTÃO DE CANCELAR CHAMADA DO MOTORISTA (ALTAMENTE VISÍVEL) */}
-                {!["delivered", "cancelled"].includes(activeRequest.status) && onCancelRequest && (
-                  <Button
-                    size="default"
-                    variant="destructive"
-                    className="w-full sm:w-auto bg-red-600 hover:bg-red-700 text-white font-extrabold text-xs sm:text-sm h-11 px-4 shadow-md gap-2 border border-red-700 sm:ml-auto active:scale-[0.98] transition-transform"
-                    onClick={() => onCancelRequest(activeRequest.id, driver?.full_name, isAcceptedOrTransit, driver)}
-                    id="btn-cancelar-corrida"
-                  >
-                    <XCircle className="w-5 h-5 shrink-0" />
-                    <span>CANCELAR CHAMADA DO MOTORISTA</span>
-                  </Button>
-                )}
               </div>
             </div>
           ) : (
