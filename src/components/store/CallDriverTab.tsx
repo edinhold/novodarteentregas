@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Truck, DollarSign, MapPin, Navigation, Search, Route, Car, Bike, Footprints, Clock, Pencil, RotateCcw, AlertTriangle, Layers, Heart, Star, Code, XCircle, Loader2, Wallet, PlusCircle, Trash2, Filter, History, Phone, MessageCircle } from "lucide-react";
+import { Truck, DollarSign, MapPin, Navigation, Search, Route, Car, Bike, Footprints, Clock, Pencil, RotateCcw, AlertTriangle, Layers, Heart, Star, Code, XCircle, Loader2, Wallet, PlusCircle, Trash2, Filter, History, Phone, MessageCircle, Copy, ExternalLink } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { isToday } from "date-fns";
@@ -1908,18 +1908,44 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
                     </div>
 
                     {/* Addresses pickup & delivery */}
-                    <div className="text-xs space-y-1 text-muted-foreground bg-background p-2.5 rounded-lg border border-border/40">
+                    <div className="text-xs space-y-1.5 text-muted-foreground bg-background p-2.5 rounded-lg border border-border/40">
                       <p className="truncate flex items-center gap-1.5">
                         <span className="font-semibold text-emerald-600 dark:text-emerald-400 shrink-0">📍 Coleta:</span>
                         <span className="truncate">{r.pickup_address}</span>
                       </p>
-                      <p className="truncate flex items-center gap-1.5">
-                        <span className="font-semibold text-blue-600 dark:text-blue-400 shrink-0">🎯 Entrega:</span>
-                        <span className="truncate">{r.delivery_address}</span>
-                      </p>
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <p className="truncate flex items-center gap-1.5 flex-1 min-w-0">
+                          <span className="font-semibold text-blue-600 dark:text-blue-400 shrink-0">🎯 Entrega:</span>
+                          <span className="truncate">{r.delivery_address}</span>
+                        </p>
+                        {r.delivery_address && (
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText(r.delivery_address);
+                                toast.success("Endereço copiado!");
+                              }}
+                              className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground transition-colors"
+                              title="Copiar endereço de entrega"
+                            >
+                              <Copy className="w-3.5 h-3.5" />
+                            </button>
+                            <a
+                              href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.delivery_address)}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="p-1 hover:bg-muted rounded text-blue-600 dark:text-blue-400 transition-colors"
+                              title="Abrir no Google Maps"
+                            >
+                              <ExternalLink className="w-3.5 h-3.5" />
+                            </a>
+                          </div>
+                        )}
+                      </div>
                       {r.notes && (
                         <p className="text-[11px] italic text-muted-foreground/90 pt-1 border-t border-border/30">
-                          💬 Obs: {r.notes}
+                          💬 Obs / Produtos: {r.notes}
                         </p>
                       )}
                     </div>
