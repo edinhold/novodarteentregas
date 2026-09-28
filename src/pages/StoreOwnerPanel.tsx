@@ -27,6 +27,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import AdminSupportPanel from "@/components/AdminSupportPanel";
 import AssignedDriverCard, { ActiveDeliveryRequest } from "@/components/store/AssignedDriverCard";
 import logoDuarte from "@/assets/logo-duarte.jpeg";
+import { executeStoreDeliveryCancellation } from "@/lib/cancelStoreDelivery";
 
 const StoreOwnerPanel = () => {
   const { user, loading } = useAuth();
@@ -107,6 +108,79 @@ const StoreOwnerPanel = () => {
     },
     enabled: !!activeRequest,
   });
+
+  // Modal de Justificativa de Cancelamento no Painel Principal da Loja
+  const [cancelModalOpen, setCancelModalOpen] = useState(false);
+  const [cancellingReqId, setCancellingReqId] = useState<string | null>(null);
+  const [cancellingDriverName, setCancellingDriverName] = useState<string | null>(null);
+  const [cancellingDriverDetails, setCancellingDriverDetails] = useState<any | null>(null);
+  const [selectedReasonOption, setSelectedReasonOption] = useState<string>("Cancelado pelo cliente final");
+  const [customReasonText, setCustomReasonText] = useState("");
+  const [submittingCancel, setSubmittingCancel] = useState(false);
+
+  const CANCEL_REASON_OPTIONS = [
+    "Cancelado pelo cliente final",
+    "Atraso no preparo da cozinha",
+    "Endereço de entrega incorreto informado",
+    "Pedido saiu por entregador próprio da loja",
+    "Outro motivo",
+  ];
+
+  const handleOpenCancelModal = async (
+    requestId: string,
+    driverName?: string | null,
+    isAccepted = false,
+    driverDetails?: any | null
+  ) => {
+    setCancellingReqId(requestId);
+    setCancellingDriverName(driverName || null);
+    setSelectedReasonOption("Cancelado pelo cliente final");
+    setCustomReasonText("");
+
+    if (driverDetails) {
+      setCancellingDriverDetails(driverDetails);
+    } else {
+      try {
+        const { data: rpcData } = await supabase.rpc("get_delivery_driver_info", { p_request_id: requestId });
+        const rows = rpcData as any;
+        if (rows && rows[0]) {
+          setCancellingDriverDetails(rows[0]);
+          if (!driverName && rows[0].full_name) setCancellingDriverName(rows[0].full_name);
+        } else {
+          setCancellingDriverDetails(null);
+        }
+      } catch (err) {
+        console.warn("[StoreOwnerPanel] Error fetching driver details for modal:", err);
+        setCancellingDriverDetails(null);
+      }
+    }
+
+    setCancelModalOpen(true);
+  };
+
+  const handleConfirmCancellationWithReason = async () => {
+    if (!cancellingReqId) return;
+
+    let finalReason = selectedReasonOption;
+    if (selectedReasonOption === "Outro motivo") {
+      if (!customReasonText.trim()) {
+        toast.error("Por favor, digite a justificativa do cancelamento.");
+        return;
+      }
+      finalReason = customReasonText.trim();
+    }
+
+    try {
+      setSubmittingCancel(true);
+      await executeStoreDeliveryCancellation(cancellingReqId, queryClient, activeUserId, finalReason);
+      setCancelModalOpen(false);
+      setCancellingReqId(null);
+    } catch (err: any) {
+      toast.error(err.message || "Erro ao cancelar corrida");
+    } finally {
+      setSubmittingCancel(false);
+    }
+  };
 
   useEffect(() => {
     if ("Notification" in window && Notification.permission === "default") {
@@ -210,6 +284,7 @@ const StoreOwnerPanel = () => {
               {activeRequest && (
                 <AssignedDriverCard
                   activeRequest={activeRequest}
+                  onCancelRequest={(reqId, dName, isAcc, dDetails) => handleOpenCancelModal(reqId, dName, isAcc, dDetails)}
                 />
               )}
 
@@ -274,6 +349,162 @@ const StoreOwnerPanel = () => {
         </div>
       </div>
 
+      {/* Modal de Confirmação e Justificativa de Cancelamento no Painel da Loja */}
+      <Dialog open={cancelModalOpen} onOpenChange={setCancelModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive font-bold text-base sm:text-lg">
+              <XCircle className="w-5 h-5 shrink-0" />
+              Cancelar Corrida / Entrega
+            </DialogTitle>
+            <DialogDescription className="text-xs sm:text-sm">
+              {cancellingDriverName ? (
+                <span>Motorista aceito: <strong>{cancellingDriverName}</strong>. Selecione o motivo do cancelamento.</span>
+              ) : (
+                <span>Informe o motivo para cancelar esta entrega e estornar o valor descontado.</span>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            {/* Card de Credenciais do Motorista no Modal de Cancelamento */}
+            {(cancellingDriverDetails || cancellingDriverName) && (
+              <div className="p-3.5 rounded-xl bg-emerald-500/10 dark:bg-emerald-950/40 border border-emerald-500/30 space-y-3">
+                <div className="flex items-center justify-between pb-1 border-b border-emerald-500/20">
+                  <span className="text-xs font-extrabold text-emerald-800 dark:text-emerald-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <Truck className="w-4 h-4 text-emerald-600" />
+                    Motorista Vinculado à Corrida
+                  </span>
+                  <Badge variant="outline" className="text-[10px] bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border-emerald-500/40 font-bold">
+                    {cancellingDriverDetails?.vehicle_type || "Motorista"}
+                  </Badge>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <DriverPhoto
+                    photoUrl={cancellingDriverDetails?.photo_url}
+                    driverId={cancellingDriverDetails?.user_id || cancellingDriverDetails?.id}
+                    alt={cancellingDriverName || "Motorista"}
+                    className="w-14 h-14 rounded-full border-2 border-emerald-500 shadow-sm object-cover shrink-0"
+                  />
+                  <div className="flex-1 min-w-0 space-y-1">
+                    <h4 className="font-black text-sm text-foreground truncate">
+                      {cancellingDriverName || cancellingDriverDetails?.full_name || "Motorista"}
+                    </h4>
+
+                    <div className="flex items-center gap-2 flex-wrap text-xs">
+                      <span className="font-mono font-bold text-[11px] bg-amber-500/15 text-amber-900 dark:text-amber-200 px-2 py-0.5 rounded border border-amber-500/30 flex items-center gap-1">
+                        <Car className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                        <span>Placa: {cancellingDriverDetails?.vehicle_plate || "Não informada"}</span>
+                      </span>
+
+                      {cancellingDriverDetails?.phone && (
+                        <span className="text-xs text-muted-foreground font-semibold flex items-center gap-1">
+                          <Phone className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span>{formatPhoneNumber(cancellingDriverDetails.phone)}</span>
+                        </span>
+                      )}
+                    </div>
+
+                    {cancellingDriverDetails?.driver_code && (
+                      <p className="text-[10px] text-muted-foreground font-medium">
+                        Credencial: <span className="font-mono font-bold text-foreground">{cancellingDriverDetails.driver_code}</span>
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {cancellingDriverDetails?.phone && (
+                  <div className="flex items-center gap-2 pt-1">
+                    <a
+                      href={`https://wa.me/${normalizeWhatsAppNumber(cancellingDriverDetails.phone)}?text=${encodeURIComponent(`Olá ${cancellingDriverName || ""}, sou da loja referente à corrida #${cancellingReqId?.slice(0, 8)}.`)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-[#25D366] hover:bg-[#20bd5a] text-white rounded-lg shadow-xs transition-colors"
+                    >
+                      <MessageCircle className="w-3.5 h-3.5 fill-white" />
+                      <span>WhatsApp</span>
+                    </a>
+                    <a
+                      href={`tel:${cancellingDriverDetails.phone.replace(/\D/g, "")}`}
+                      className="inline-flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-semibold bg-background hover:bg-muted border border-border rounded-lg transition-colors"
+                    >
+                      <Phone className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Ligar</span>
+                    </a>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold">Motivo do Cancelamento *</Label>
+              <div className="space-y-1.5">
+                {CANCEL_REASON_OPTIONS.map((opt) => (
+                  <button
+                    key={opt}
+                    type="button"
+                    className={`w-full text-left px-3 py-2 text-xs rounded-lg border transition-all flex items-center justify-between font-medium ${
+                      selectedReasonOption === opt
+                        ? "border-red-500/60 bg-red-500/10 text-red-700 dark:text-red-300 font-bold shadow-xs"
+                        : "border-border/60 hover:bg-muted/60 text-foreground"
+                    }`}
+                    onClick={() => setSelectedReasonOption(opt)}
+                  >
+                    <span>{opt}</span>
+                    {selectedReasonOption === opt && <span className="text-red-600 font-bold">✓</span>}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {selectedReasonOption === "Outro motivo" && (
+              <div className="space-y-1.5 animate-in fade-in duration-200">
+                <Label className="text-xs font-semibold">Descreva o motivo *</Label>
+                <Textarea
+                  value={customReasonText}
+                  onChange={(e) => setCustomReasonText(e.target.value)}
+                  placeholder="Escreva a justificativa aqui..."
+                  rows={3}
+                  className="text-xs bg-background"
+                />
+              </div>
+            )}
+
+            <div className="bg-amber-500/10 border border-amber-500/30 p-2.5 rounded-lg text-[11px] text-amber-800 dark:text-amber-300">
+              💡 <strong>Estorno na Carteira:</strong> O saldo descontado nesta entrega será reembolsado à carteira da sua loja.
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => setCancelModalOpen(false)}
+              disabled={submittingCancel}
+            >
+              Voltar
+            </Button>
+            <Button
+              variant="destructive"
+              className="bg-red-600 hover:bg-red-700 font-bold gap-1.5"
+              onClick={handleConfirmCancellationWithReason}
+              disabled={submittingCancel}
+            >
+              {submittingCancel ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Cancelando...</span>
+                </>
+              ) : (
+                <>
+                  <XCircle className="w-4 h-4" />
+                  <span>Confirmar Cancelamento</span>
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </SidebarProvider>
   );
 };

@@ -69,9 +69,15 @@ interface EdgeFunctionDriverResponse {
 
 interface AssignedDriverCardProps {
   activeRequest: ActiveDeliveryRequest | null;
+  onCancelRequest?: (
+    requestId: string,
+    driverName?: string | null,
+    isAccepted?: boolean,
+    driverDetails?: any | null
+  ) => void;
 }
 
-export const AssignedDriverCard = ({ activeRequest }: AssignedDriverCardProps) => {
+export const AssignedDriverCard = ({ activeRequest, onCancelRequest }: AssignedDriverCardProps) => {
   const assignedDriverId = activeRequest?.driver_id || null;
   const requestId = activeRequest?.id || null;
   const requestStatus = activeRequest?.status || "";
@@ -257,6 +263,22 @@ export const AssignedDriverCard = ({ activeRequest }: AssignedDriverCardProps) =
               </span>
             </div>
           )}
+
+          {/* Botão de Cancelar Chamada Pendente */}
+          {onCancelRequest && (
+            <div className="pt-2 flex justify-end">
+              <Button
+                variant="destructive"
+                size="default"
+                className="w-full sm:w-auto bg-red-600 hover:bg-red-700 text-white font-bold gap-2 h-10 px-4 shadow-sm"
+                onClick={() => onCancelRequest(activeRequest.id, null, false, null)}
+                id="btn-cancelar-chamada-pending"
+              >
+                <XCircle className="w-4 h-4 shrink-0" />
+                <span>Cancelar Chamada (Estornar Crédito)</span>
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
     );
@@ -422,6 +444,20 @@ export const AssignedDriverCard = ({ activeRequest }: AssignedDriverCardProps) =
                   </Button>
                 )}
 
+                {/* Botão Cancelar Corrida */}
+                {onCancelRequest && (
+                  <Button
+                    variant="destructive"
+                    size="default"
+                    className="w-full sm:w-auto sm:ml-auto bg-red-600 hover:bg-red-700 text-white font-extrabold gap-2 h-11 px-4 shadow-sm border border-red-700"
+                    onClick={() => onCancelRequest(activeRequest.id, driver.full_name, true, driver)}
+                    id="btn-cancelar-corrida"
+                    title="Cancelar esta corrida ativa"
+                  >
+                    <XCircle className="w-5 h-5 shrink-0" />
+                    <span>Cancelar Corrida</span>
+                  </Button>
+                )}
               </div>
             </div>
           ) : (
