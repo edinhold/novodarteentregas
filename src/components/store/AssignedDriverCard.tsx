@@ -69,7 +69,7 @@ interface EdgeFunctionDriverResponse {
 
 interface AssignedDriverCardProps {
   activeRequest: ActiveDeliveryRequest | null;
-  onCancelRequest?: (requestId: string) => void;
+  onCancelRequest?: (requestId: string, driverName?: string | null, isAccepted?: boolean, driverDetails?: AssignedDriverData | null) => void;
 }
 
 export const AssignedDriverCard = ({ activeRequest, onCancelRequest }: AssignedDriverCardProps) => {
@@ -445,7 +445,7 @@ export const AssignedDriverCard = ({ activeRequest, onCancelRequest }: AssignedD
                     size="default"
                     variant="destructive"
                     className="w-full sm:w-auto bg-red-600 hover:bg-red-700 text-white font-extrabold text-xs sm:text-sm h-11 px-4 shadow-md gap-2 border border-red-700 sm:ml-auto active:scale-[0.98] transition-transform"
-                    onClick={() => onCancelRequest(activeRequest.id)}
+                    onClick={() => onCancelRequest(activeRequest.id, driver?.full_name, isAcceptedOrTransit, driver)}
                     id="btn-cancelar-corrida"
                   >
                     <XCircle className="w-5 h-5 shrink-0" />

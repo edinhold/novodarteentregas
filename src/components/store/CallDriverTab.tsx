@@ -144,11 +144,49 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
   const { data: driversList = [] } = useQuery({
     queryKey: ["all-drivers-list-for-history"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("drivers")
-        .select("id, user_id, full_name, vehicle_plate, vehicle_type, phone, driver_code, photo_url");
-      if (error) return [];
-      return data || [];
+      try {
+        const { data: driversData } = await supabase
+          .from("drivers")
+          .select("id, user_id, full_name, vehicle_plate, vehicle_type, phone, driver_code, photo_url");
+
+        const { data: profilesData } = await supabase
+          .from("profiles")
+          .select("id, full_name, phone, avatar_url");
+
+        const profilesMap = new Map((profilesData || []).map((p: any) => [p.id, p]));
+        const mergedDrivers = (driversData || []).map((d: any) => {
+          const prof = profilesMap.get(d.user_id) || profilesMap.get(d.id);
+          return {
+            ...d,
+            full_name: d.full_name || prof?.full_name || "Motorista",
+            phone: d.phone || prof?.phone || "",
+            photo_url: d.photo_url || prof?.avatar_url || null,
+            driver_code: d.driver_code || `MOT-${(d.user_id || d.id || "").slice(0, 5).toUpperCase()}`,
+            vehicle_plate: d.vehicle_plate || "Não informada",
+            vehicle_type: d.vehicle_type || "Moto",
+          };
+        });
+
+        (profilesData || []).forEach((p: any) => {
+          if (!mergedDrivers.some((d: any) => d.user_id === p.id || d.id === p.id)) {
+            mergedDrivers.push({
+              id: p.id,
+              user_id: p.id,
+              full_name: p.full_name || "Motorista",
+              phone: p.phone || "",
+              photo_url: p.avatar_url || null,
+              driver_code: `MOT-${p.id.slice(0, 5).toUpperCase()}`,
+              vehicle_plate: "Não informada",
+              vehicle_type: "Moto",
+            });
+          }
+        });
+
+        return mergedDrivers;
+      } catch (err) {
+        console.warn("[CallDriverTab] Error fetching drivers list:", err);
+        return [];
+      }
     },
     staleTime: 1000 * 60 * 2,
   });
@@ -163,6 +201,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
   const [cancellingReqId, setCancellingReqId] = useState<string | null>(null);
   const [cancellingDriverName, setCancellingDriverName] = useState<string | null>(null);
   const [cancellingIsAccepted, setCancellingIsAccepted] = useState(false);
+  const [cancellingDriverDetails, setCancellingDriverDetails] = useState<any | null>(null);
   const [selectedReasonOption, setSelectedReasonOption] = useState<string>("Cliente desistiu do pedido");
   const [customReasonText, setCustomReasonText] = useState("");
   const [submittingCancel, setSubmittingCancel] = useState(false);
@@ -175,12 +214,47 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
     "Outro motivo",
   ];
 
-  const handleOpenCancelModal = (requestId: string, driverName?: string | null, isAccepted = false) => {
+  const handleOpenCancelModal = async (
+    requestId: string,
+    driverName?: string | null,
+    isAccepted = false,
+    driverDetails?: any | null
+  ) => {
     setCancellingReqId(requestId);
     setCancellingDriverName(driverName || null);
     setCancellingIsAccepted(isAccepted);
     setSelectedReasonOption("Cliente desistiu do pedido");
     setCustomReasonText("");
+
+    if (driverDetails) {
+      setCancellingDriverDetails(driverDetails);
+    } else {
+      const req = (requests || []).find((r: any) => r.id === requestId);
+      if (req?.driver_id) {
+        const cached = getDriverInfo(req.driver_id);
+        if (cached) {
+          setCancellingDriverDetails(cached);
+          if (!driverName) setCancellingDriverName(cached.full_name);
+        } else {
+          try {
+            const { data: rpcData } = await supabase.rpc("get_delivery_driver_info", { p_request_id: requestId });
+            const rows = rpcData as any;
+            if (rows && rows[0]) {
+              setCancellingDriverDetails(rows[0]);
+              if (!driverName && rows[0].full_name) setCancellingDriverName(rows[0].full_name);
+            } else {
+              setCancellingDriverDetails(null);
+            }
+          } catch (err) {
+            console.warn("[CallDriverTab] Error fetching driver details for cancellation:", err);
+            setCancellingDriverDetails(null);
+          }
+        }
+      } else {
+        setCancellingDriverDetails(null);
+      }
+    }
+
     setCancelModalOpen(true);
   };
 
@@ -1948,6 +2022,76 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
           </DialogHeader>
 
           <div className="space-y-4 py-2">
+            {/* Card de Credenciais do Motorista no Modal de Cancelamento */}
+            {(cancellingDriverDetails || cancellingDriverName) && (
+              <div className="p-3.5 rounded-xl bg-emerald-500/10 dark:bg-emerald-950/40 border border-emerald-500/30 space-y-3">
+                <div className="flex items-center justify-between pb-1 border-b border-emerald-500/20">
+                  <span className="text-xs font-extrabold text-emerald-800 dark:text-emerald-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <Truck className="w-4 h-4 text-emerald-600" />
+                    Motorista Vinculado à Corrida
+                  </span>
+                  <Badge variant="outline" className="text-[10px] bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border-emerald-500/40 font-bold">
+                    {cancellingDriverDetails?.vehicle_type || "Motorista"}
+                  </Badge>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <DriverPhoto
+                    photoUrl={cancellingDriverDetails?.photo_url}
+                    driverId={cancellingDriverDetails?.user_id || cancellingDriverDetails?.id}
+                    alt={cancellingDriverName || "Motorista"}
+                    className="w-14 h-14 rounded-full border-2 border-emerald-500 shadow-sm object-cover shrink-0"
+                  />
+                  <div className="flex-1 min-w-0 space-y-1">
+                    <h4 className="font-black text-sm text-foreground truncate">
+                      {cancellingDriverName || cancellingDriverDetails?.full_name || "Motorista"}
+                    </h4>
+
+                    <div className="flex items-center gap-2 flex-wrap text-xs">
+                      <span className="font-mono font-bold text-[11px] bg-amber-500/15 text-amber-900 dark:text-amber-200 px-2 py-0.5 rounded border border-amber-500/30 flex items-center gap-1">
+                        <Car className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                        <span>Placa: {cancellingDriverDetails?.vehicle_plate || "Não informada"}</span>
+                      </span>
+
+                      {cancellingDriverDetails?.phone && (
+                        <span className="text-xs text-muted-foreground font-semibold flex items-center gap-1">
+                          <Phone className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span>{formatPhoneNumber(cancellingDriverDetails.phone)}</span>
+                        </span>
+                      )}
+                    </div>
+
+                    {cancellingDriverDetails?.driver_code && (
+                      <p className="text-[10px] text-muted-foreground font-medium">
+                        Credencial: <span className="font-mono font-bold text-foreground">{cancellingDriverDetails.driver_code}</span>
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {cancellingDriverDetails?.phone && (
+                  <div className="flex items-center gap-2 pt-1">
+                    <a
+                      href={`https://wa.me/${normalizeWhatsAppNumber(cancellingDriverDetails.phone)}?text=${encodeURIComponent(`Olá ${cancellingDriverName || ""}, sou da loja referente à corrida #${cancellingReqId?.slice(0, 8)}.`)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-[#25D366] hover:bg-[#20bd5a] text-white rounded-lg shadow-xs transition-colors"
+                    >
+                      <MessageCircle className="w-3.5 h-3.5 fill-white" />
+                      <span>WhatsApp</span>
+                    </a>
+                    <a
+                      href={`tel:${cancellingDriverDetails.phone.replace(/\D/g, "")}`}
+                      className="inline-flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-semibold bg-background hover:bg-muted border border-border rounded-lg transition-colors"
+                    >
+                      <Phone className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Ligar</span>
+                    </a>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="space-y-2">
               <Label className="text-xs font-semibold">Motivo / Justificativa *</Label>
               <div className="space-y-1.5">

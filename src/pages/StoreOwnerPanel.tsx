@@ -3,10 +3,17 @@ import { useAuth } from "@/contexts/AuthContext";
 import { supabase, createFreshChannel } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArrowLeft, Truck, UtensilsCrossed, CreditCard, Store, Map as MapIcon, Star, RefreshCw, Route, MessageSquare, Settings } from "lucide-react";
+import { ArrowLeft, Truck, UtensilsCrossed, CreditCard, Store, Map as MapIcon, Star, RefreshCw, Route, MessageSquare, Settings, XCircle, Loader2, Phone, MessageCircle, Car } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { DriverPhoto } from "@/components/DriverPhoto";
+import { normalizeWhatsAppNumber, formatPhoneNumber } from "@/lib/phoneUtils";
 import ThemeToggle from "@/components/ThemeToggle";
 import CallDriverTab from "@/components/store/CallDriverTab";
 import MenuTab from "@/components/store/MenuTab";
@@ -61,16 +68,23 @@ const StoreOwnerPanel = () => {
   });
 
   const { data: requests = [] } = useQuery<ActiveDeliveryRequest[]>({
-    queryKey: ["my-delivery-requests", activeUserId],
+    queryKey: ["my-delivery-requests", activeUserId, restaurant?.id],
     queryFn: async () => {
       if (!activeUserId) return [];
-      const { data, error } = await supabase
+      let query = supabase
         .from("delivery_requests")
         .select("*")
-        .eq("store_owner_id", activeUserId)
         .or("hidden_by_store.eq.false,hidden_by_store.is.null")
         .order("created_at", { ascending: false })
-        .limit(50);
+        .limit(100);
+
+      if (restaurant?.id) {
+        query = query.or(`store_owner_id.eq.${activeUserId},restaurant_id.eq.${restaurant.id}`);
+      } else {
+        query = query.eq("store_owner_id", activeUserId);
+      }
+
+      const { data, error } = await query;
       if (error) throw error;
       return (data || []) as ActiveDeliveryRequest[];
     },
@@ -95,10 +109,77 @@ const StoreOwnerPanel = () => {
     enabled: !!activeRequest,
   });
 
-  const handleCancelActiveRequest = async (requestId: string) => {
-    if (!requestId) return;
-    if (!confirm("Cancelar esta corrida? Os créditos descontados serão devolvidos à sua loja.")) return;
-    await executeStoreDeliveryCancellation(requestId, queryClient, activeUserId);
+  // Modal de Justificativa de Cancelamento no Painel Principal
+  const [cancelModalOpen, setCancelModalOpen] = useState(false);
+  const [cancellingReqId, setCancellingReqId] = useState<string | null>(null);
+  const [cancellingDriverName, setCancellingDriverName] = useState<string | null>(null);
+  const [cancellingDriverDetails, setCancellingDriverDetails] = useState<any | null>(null);
+  const [selectedReasonOption, setSelectedReasonOption] = useState<string>("Cliente desistiu do pedido");
+  const [customReasonText, setCustomReasonText] = useState("");
+  const [submittingCancel, setSubmittingCancel] = useState(false);
+
+  const CANCEL_REASON_OPTIONS = [
+    "Cliente desistiu do pedido",
+    "Atraso no preparo da cozinha",
+    "Endereço de entrega incorreto informado",
+    "Pedido saiu por entregador próprio da loja",
+    "Outro motivo",
+  ];
+
+  const handleOpenCancelModal = async (
+    requestId: string,
+    driverName?: string | null,
+    isAccepted = false,
+    driverDetails?: any | null
+  ) => {
+    setCancellingReqId(requestId);
+    setCancellingDriverName(driverName || null);
+    setSelectedReasonOption("Cliente desistiu do pedido");
+    setCustomReasonText("");
+
+    if (driverDetails) {
+      setCancellingDriverDetails(driverDetails);
+    } else {
+      try {
+        const { data: rpcData } = await supabase.rpc("get_delivery_driver_info", { p_request_id: requestId });
+        const rows = rpcData as any;
+        if (rows && rows[0]) {
+          setCancellingDriverDetails(rows[0]);
+          if (!driverName && rows[0].full_name) setCancellingDriverName(rows[0].full_name);
+        } else {
+          setCancellingDriverDetails(null);
+        }
+      } catch (err) {
+        console.warn("[StoreOwnerPanel] Error fetching driver details for modal:", err);
+        setCancellingDriverDetails(null);
+      }
+    }
+
+    setCancelModalOpen(true);
+  };
+
+  const handleConfirmCancellationWithReason = async () => {
+    if (!cancellingReqId) return;
+
+    let finalReason = selectedReasonOption;
+    if (selectedReasonOption === "Outro motivo") {
+      if (!customReasonText.trim()) {
+        toast.error("Por favor, digite a justificativa do cancelamento.");
+        return;
+      }
+      finalReason = customReasonText.trim();
+    }
+
+    try {
+      setSubmittingCancel(true);
+      await executeStoreDeliveryCancellation(cancellingReqId, queryClient, activeUserId, finalReason);
+      setCancelModalOpen(false);
+      setCancellingReqId(null);
+    } catch (err: any) {
+      toast.error(err.message || "Erro ao cancelar corrida");
+    } finally {
+      setSubmittingCancel(false);
+    }
   };
 
   useEffect(() => {
@@ -203,7 +284,7 @@ const StoreOwnerPanel = () => {
               {activeRequest && (
                 <AssignedDriverCard
                   activeRequest={activeRequest}
-                  onCancelRequest={handleCancelActiveRequest}
+                  onCancelRequest={(reqId, dName, isAcc, dDetails) => handleOpenCancelModal(reqId, dName, isAcc, dDetails)}
                 />
               )}
 
@@ -267,6 +348,163 @@ const StoreOwnerPanel = () => {
           </SidebarInset>
         </div>
       </div>
+
+      {/* Modal de Justificativa de Cancelamento no Painel do Lojista */}
+      <Dialog open={cancelModalOpen} onOpenChange={setCancelModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive font-bold text-base sm:text-lg">
+              <XCircle className="w-5 h-5 shrink-0" />
+              Cancelar Chamada de Entrega
+            </DialogTitle>
+            <DialogDescription className="text-xs sm:text-sm">
+              {cancellingDriverName ? (
+                <span>Motorista aceito: <strong>{cancellingDriverName}</strong>. Selecione a justificativa do cancelamento.</span>
+              ) : (
+                <span>Informe a justificativa para cancelar esta entrega e estornar o valor descontado.</span>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            {/* Card de Credenciais do Motorista no Modal de Cancelamento */}
+            {(cancellingDriverDetails || cancellingDriverName) && (
+              <div className="p-3.5 rounded-xl bg-emerald-500/10 dark:bg-emerald-950/40 border border-emerald-500/30 space-y-3">
+                <div className="flex items-center justify-between pb-1 border-b border-emerald-500/20">
+                  <span className="text-xs font-extrabold text-emerald-800 dark:text-emerald-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <Truck className="w-4 h-4 text-emerald-600" />
+                    Motorista Vinculado à Corrida
+                  </span>
+                  <Badge variant="outline" className="text-[10px] bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border-emerald-500/40 font-bold">
+                    {cancellingDriverDetails?.vehicle_type || "Motorista"}
+                  </Badge>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <DriverPhoto
+                    photoUrl={cancellingDriverDetails?.photo_url}
+                    driverId={cancellingDriverDetails?.user_id || cancellingDriverDetails?.id}
+                    alt={cancellingDriverName || "Motorista"}
+                    className="w-14 h-14 rounded-full border-2 border-emerald-500 shadow-sm object-cover shrink-0"
+                  />
+                  <div className="flex-1 min-w-0 space-y-1">
+                    <h4 className="font-black text-sm text-foreground truncate">
+                      {cancellingDriverName || cancellingDriverDetails?.full_name || "Motorista"}
+                    </h4>
+
+                    <div className="flex items-center gap-2 flex-wrap text-xs">
+                      <span className="font-mono font-bold text-[11px] bg-amber-500/15 text-amber-900 dark:text-amber-200 px-2 py-0.5 rounded border border-amber-500/30 flex items-center gap-1">
+                        <Car className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                        <span>Placa: {cancellingDriverDetails?.vehicle_plate || "Não informada"}</span>
+                      </span>
+
+                      {cancellingDriverDetails?.phone && (
+                        <span className="text-xs text-muted-foreground font-semibold flex items-center gap-1">
+                          <Phone className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span>{formatPhoneNumber(cancellingDriverDetails.phone)}</span>
+                        </span>
+                      )}
+                    </div>
+
+                    {cancellingDriverDetails?.driver_code && (
+                      <p className="text-[10px] text-muted-foreground font-medium">
+                        Credencial: <span className="font-mono font-bold text-foreground">{cancellingDriverDetails.driver_code}</span>
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {cancellingDriverDetails?.phone && (
+                  <div className="flex items-center gap-2 pt-1">
+                    <a
+                      href={`https://wa.me/${normalizeWhatsAppNumber(cancellingDriverDetails.phone)}?text=${encodeURIComponent(`Olá ${cancellingDriverName || ""}, sou da loja referente à corrida #${cancellingReqId?.slice(0, 8)}.`)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-[#25D366] hover:bg-[#20bd5a] text-white rounded-lg shadow-xs transition-colors"
+                    >
+                      <MessageCircle className="w-3.5 h-3.5 fill-white" />
+                      <span>WhatsApp</span>
+                    </a>
+                    <a
+                      href={`tel:${cancellingDriverDetails.phone.replace(/\D/g, "")}`}
+                      className="inline-flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-semibold bg-background hover:bg-muted border border-border rounded-lg transition-colors"
+                    >
+                      <Phone className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Ligar</span>
+                    </a>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold">Motivo / Justificativa *</Label>
+              <div className="space-y-1.5">
+                {CANCEL_REASON_OPTIONS.map((opt) => (
+                  <button
+                    key={opt}
+                    type="button"
+                    className={`w-full text-left px-3 py-2 text-xs rounded-lg border transition-all flex items-center justify-between font-medium ${
+                      selectedReasonOption === opt
+                        ? "border-red-500/60 bg-red-500/10 text-red-700 dark:text-red-300 font-bold shadow-xs"
+                        : "border-border/60 hover:bg-muted/60 text-foreground"
+                    }`}
+                    onClick={() => setSelectedReasonOption(opt)}
+                  >
+                    <span>{opt}</span>
+                    {selectedReasonOption === opt && <span className="text-red-600 font-bold">✓</span>}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {selectedReasonOption === "Outro motivo" && (
+              <div className="space-y-1.5 animate-in fade-in duration-200">
+                <Label className="text-xs font-semibold">Descreva o motivo *</Label>
+                <Textarea
+                  value={customReasonText}
+                  onChange={(e) => setCustomReasonText(e.target.value)}
+                  placeholder="Escreva a justificativa aqui..."
+                  rows={3}
+                  className="text-xs bg-background"
+                />
+              </div>
+            )}
+
+            <div className="bg-amber-500/10 border border-amber-500/30 p-2.5 rounded-lg text-[11px] text-amber-800 dark:text-amber-300">
+              💡 <strong>Estorno na Carteira:</strong> O saldo descontado nesta entrega será reembolsado à carteira da sua loja.
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => setCancelModalOpen(false)}
+              disabled={submittingCancel}
+            >
+              Voltar
+            </Button>
+            <Button
+              variant="destructive"
+              className="bg-red-600 hover:bg-red-700 font-bold gap-1.5"
+              onClick={handleConfirmCancellationWithReason}
+              disabled={submittingCancel}
+            >
+              {submittingCancel ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Cancelando...</span>
+                </>
+              ) : (
+                <>
+                  <XCircle className="w-4 h-4" />
+                  <span>Confirmar Cancelamento</span>
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </SidebarProvider>
   );
 };
