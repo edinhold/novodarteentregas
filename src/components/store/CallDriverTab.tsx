@@ -298,11 +298,15 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
       });
 
       if (error) {
-        const { error: updateErr } = await (supabase as any)
-          .from("delivery_requests")
-          .update({ hidden_by_store: true })
-          .eq("id", requestId);
-        if (updateErr) throw updateErr;
+        console.warn("[CallDriverTab] RPC hide_store_delivery_request fallback:", error);
+        try {
+          await (supabase as any)
+            .from("delivery_requests")
+            .update({ hidden_by_store: true })
+            .eq("id", requestId);
+        } catch (fallbackErr) {
+          console.warn("[CallDriverTab] direct update fallback ignored:", fallbackErr);
+        }
       }
 
       toast.success("Entrega removida do histórico.");
@@ -336,18 +340,22 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
       });
 
       if (error) {
-        let query = supabase
-          .from("delivery_requests")
-          .update({ hidden_by_store: true })
-          .eq("store_owner_id", user?.id)
-          .in("status", ["delivered", "cancelled"]);
+        console.warn("[CallDriverTab] RPC clear_store_delivery_history fallback:", error);
+        try {
+          let query = supabase
+            .from("delivery_requests")
+            .update({ hidden_by_store: true })
+            .eq("store_owner_id", user?.id)
+            .in("status", ["delivered", "cancelled"]);
 
-        if (!clearAll && days) {
-          const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
-          query = query.gte("created_at", cutoff);
+          if (!clearAll && days) {
+            const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+            query = query.gte("created_at", cutoff);
+          }
+          await query;
+        } catch (fallbackErr) {
+          console.warn("[CallDriverTab] direct clear fallback ignored:", fallbackErr);
         }
-        const { error: updateErr } = await query;
-        if (updateErr) throw updateErr;
       }
 
       const count = typeof data === "number" ? data : 0;
