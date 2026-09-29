@@ -74,7 +74,6 @@ const StoreOwnerPanel = () => {
       let query = supabase
         .from("delivery_requests")
         .select("*")
-        .or("hidden_by_store.eq.false,hidden_by_store.is.null")
         .order("created_at", { ascending: false })
         .limit(100);
 
@@ -86,7 +85,7 @@ const StoreOwnerPanel = () => {
 
       const { data, error } = await query;
       if (error) throw error;
-      return (data || []) as ActiveDeliveryRequest[];
+      return ((data || []) as ActiveDeliveryRequest[]).filter((r) => !(r as any).hidden_by_store);
     },
     enabled: !!activeUserId,
   });
@@ -193,10 +192,10 @@ const StoreOwnerPanel = () => {
     const channel = createFreshChannel(`store-owner-realtime-${activeUserId}`)
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "delivery_requests", filter: `store_owner_id=eq.${activeUserId}` },
+        { event: "*", schema: "public", table: "delivery_requests" },
         (payload: { eventType: string; new?: Record<string, unknown>; old?: Record<string, unknown> }) => {
-          queryClient.invalidateQueries({ queryKey: ["my-delivery-requests", activeUserId] });
-          queryClient.invalidateQueries({ queryKey: ["my-delivery-groups", activeUserId] });
+          queryClient.invalidateQueries({ queryKey: ["my-delivery-requests"] });
+          queryClient.invalidateQueries({ queryKey: ["my-delivery-groups"] });
           queryClient.invalidateQueries({ queryKey: ["assigned-driver-info"] });
 
           if (payload.eventType === "UPDATE") {
