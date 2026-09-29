@@ -82,10 +82,10 @@ export const AssignedDriverCard = ({ activeRequest, onCancelRequest }: AssignedD
   const requestId = activeRequest?.id || null;
   const requestStatus = activeRequest?.status || "";
 
-  // Motorista vinculado apenas quando corrida aceita ou em andamento
+  // Motorista vinculado em qualquer status ativo diferente de pending/delivered/cancelled
   const isAcceptedOrTransit =
     !!assignedDriverId &&
-    ["accepted", "picked_up", "in_transit", "delivering"].includes(requestStatus);
+    !["pending", "delivered", "cancelled"].includes(requestStatus);
 
   // Busca dados reais do motorista vinculado exclusivamente se a entrega foi aceita
   const { data: driver, isLoading: loadingDriver } = useQuery<AssignedDriverData | null>({
@@ -210,7 +210,7 @@ export const AssignedDriverCard = ({ activeRequest, onCancelRequest }: AssignedD
 
       return driverInfo;
     },
-    enabled: isAcceptedOrTransit,
+    enabled: !!assignedDriverId && !["delivered", "cancelled"].includes(requestStatus),
     staleTime: 1000 * 15,
     refetchOnWindowFocus: true,
   });
@@ -470,7 +470,55 @@ export const AssignedDriverCard = ({ activeRequest, onCancelRequest }: AssignedD
     );
   }
 
-  return null;
+  // Fallback para qualquer outro estado ativo: sempre exibe o card da entrega com o botão de cancelar
+  return (
+    <Card className="border-amber-500/40 bg-amber-500/5 shadow-md overflow-hidden" id="card-delivery-active-fallback">
+      <CardHeader className="pb-2 pt-3 px-3 sm:px-4 bg-amber-500/10 border-b border-amber-500/20">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle className="text-sm sm:text-base flex items-center gap-2 text-amber-800 dark:text-amber-300 font-bold">
+            <Truck className="w-5 h-5 text-amber-600 shrink-0" />
+            Entrega em Andamento (#{activeRequest.id.slice(0, 8)})
+          </CardTitle>
+          <Badge variant="outline" className="text-xs bg-amber-500/10 border-amber-500/30 text-amber-800 dark:text-amber-300 font-mono font-bold">
+            Status: {activeRequest.status}
+          </Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="p-3 sm:p-4 space-y-3">
+        <div className="text-xs text-muted-foreground space-y-1 bg-amber-500/5 p-2.5 rounded-lg border border-amber-500/20">
+          {activeRequest.delivery_address && (
+            <p className="truncate text-foreground/90">
+              <span className="font-semibold text-muted-foreground">Destino:</span> {activeRequest.delivery_address}
+            </p>
+          )}
+        </div>
+
+        {deliveryValue > 0 && (
+          <div className="flex items-center justify-between bg-emerald-500/10 dark:bg-emerald-950/40 p-2.5 rounded-lg border border-emerald-500/30">
+            <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Valor da Entrega:</span>
+            <span className="text-base sm:text-lg font-black text-emerald-700 dark:text-emerald-300">
+              R$ {deliveryValue.toFixed(2).replace(".", ",")}
+            </span>
+          </div>
+        )}
+
+        {onCancelRequest && (
+          <div className="pt-2 flex justify-end">
+            <Button
+              variant="destructive"
+              size="default"
+              className="w-full sm:w-auto bg-red-600 hover:bg-red-700 text-white font-bold gap-2 h-10 px-4 shadow-sm"
+              onClick={() => onCancelRequest(activeRequest.id, driver?.full_name || null, true, driver)}
+              id="btn-cancelar-chamada-fallback"
+            >
+              <XCircle className="w-4 h-4 shrink-0" />
+              <span>Cancelar Corrida</span>
+            </Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
 };
 
 export default AssignedDriverCard;
