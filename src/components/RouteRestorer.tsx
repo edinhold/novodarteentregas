@@ -15,8 +15,9 @@ const isProtectedPanelRoute = (path: string) =>
   PROTECTED_PANEL_ROUTES.some((route) => path === route || path.startsWith(`${route}/`));
 
 const isAuthorizedRoute = (path: string, userRole: string | null): boolean => {
+  const impersonatedStoreId = typeof window !== "undefined" ? sessionStorage.getItem("admin_impersonated_user_id") : null;
   if (path.startsWith("/admin")) return userRole === "admin";
-  if (path.startsWith("/lojas") || path.startsWith("/lojista")) return userRole === "store_owner" || userRole === "admin";
+  if (path.startsWith("/lojas") || path.startsWith("/lojista")) return userRole === "store_owner" || userRole === "admin" || !!impersonatedStoreId;
   if (path.startsWith("/entregador")) return userRole === "driver" || userRole === "admin";
   return true;
 };

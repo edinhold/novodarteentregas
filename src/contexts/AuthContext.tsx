@@ -11,6 +11,7 @@ interface AuthContextType {
   role: AppRole | null;
   roleLoading: boolean;
   signOut: () => Promise<void>;
+  refreshRole: () => Promise<AppRole>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -25,51 +26,67 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // only ONE getSession() + ONE onAuthStateChange listener may exist.
   const initializedRef = useRef(false);
 
+  const resolveRole = async (uid: string): Promise<AppRole> => {
+    try {
+      const { data: roles } = await (supabase as any)
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", uid);
+      const list: string[] = Array.isArray(roles) ? roles.map((r: any) => String(r.role)) : [];
+      if (list.includes("admin")) return "admin";
+      if (list.includes("store_owner")) return "store_owner";
+      if (list.includes("driver")) return "driver";
+
+      // Fallback: infer from associated data (legacy accounts without a row in user_roles)
+      const [{ data: driverProfiles }, { data: ownedRests }] = await Promise.all([
+        supabase.from("drivers").select("id").or(`user_id.eq.${uid},id.eq.${uid}`).limit(1),
+        supabase.from("restaurants").select("id").eq("owner_id", uid).limit(1),
+      ]);
+
+      const driverProfile = driverProfiles && driverProfiles[0];
+      const ownedRest = ownedRests && ownedRests[0];
+
+      if (driverProfile) {
+        await supabase.from("user_roles").upsert({ user_id: uid, role: "driver" as any }, { onConflict: "user_id,role" }).then(() => {}, () => {});
+        return "driver";
+      }
+      if (ownedRest) {
+        await supabase.from("user_roles").upsert({ user_id: uid, role: "store_owner" as any }, { onConflict: "user_id,role" }).then(() => {}, () => {});
+        return "store_owner";
+      }
+    } catch (err) {
+      console.warn("[Auth] Erro na resolução de role:", err);
+    }
+    return "customer";
+  };
+
+  const refreshRole = async (): Promise<AppRole> => {
+    if (!user?.id) {
+      setRole(null);
+      return "customer";
+    }
+    setRoleLoading(true);
+    try {
+      const resolved = await resolveRole(user.id);
+      console.log("[Auth] Role atualizada:", resolved);
+      setRole(resolved);
+      return resolved;
+    } catch (err) {
+      console.error("[Auth] Erro em refreshRole:", err);
+      return role || "customer";
+    } finally {
+      setRoleLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (initializedRef.current) return;
     initializedRef.current = true;
     console.log("[Auth] App iniciou");
 
-    // Track last processed uid + access token to avoid re-running side effects
-    // for duplicate auth events (INITIAL_SESSION + SIGNED_IN + TOKEN_REFRESHED
-    // all fire and each carries a fresh object reference, which was causing
-    // downstream effects that depend on `user` to re-run in a loop).
     let lastUid: string | null | undefined = undefined;
     let lastToken: string | null | undefined = undefined;
     let handled = false;
-
-
-
-    const resolveRole = async (uid: string): Promise<AppRole> => {
-      try {
-        const { data: roles } = await (supabase as any)
-          .from("user_roles")
-          .select("role")
-          .eq("user_id", uid);
-        const list: string[] = Array.isArray(roles) ? roles.map((r: any) => String(r.role)) : [];
-        if (list.includes("admin")) return "admin";
-        if (list.includes("store_owner")) return "store_owner";
-        if (list.includes("driver")) return "driver";
-
-        // Fallback: infer from associated data (legacy accounts without a row in user_roles)
-        const [{ data: driverProfile }, { data: ownedRest }] = await Promise.all([
-          supabase.from("drivers").select("id").or(`user_id.eq.${uid},id.eq.${uid}`).limit(1).maybeSingle(),
-          supabase.from("restaurants").select("id").eq("owner_id", uid).limit(1).maybeSingle(),
-        ]);
-        if (driverProfile) {
-          await supabase.from("user_roles").insert({ user_id: uid, role: "driver" as any }).then(() => {}, () => {});
-          return "driver";
-        }
-        if (ownedRest) {
-          await supabase.from("user_roles").insert({ user_id: uid, role: "store_owner" as any }).then(() => {}, () => {});
-          return "store_owner";
-        }
-      } catch (err) {
-        console.warn("[Auth] Erro na resolução de role:", err);
-      }
-      return "customer";
-    };
 
     const handleUser = async (uid: string | undefined) => {
       if (!uid) {
@@ -89,14 +106,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     };
 
-
     const apply = (nextSession: Session | null, source: string) => {
       const uid = nextSession?.user?.id ?? null;
       const token = nextSession?.access_token ?? null;
       const sameUser = uid === lastUid;
       const sameToken = token === lastToken;
 
-      // Always clear loading on the first signal so UI doesn't hang.
       if (!handled) {
         handled = true;
         setSession(nextSession);
@@ -110,13 +125,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       if (sameUser && sameToken) {
-        // Duplicate event (e.g. INITIAL_SESSION after getSession): skip.
         return;
       }
 
       setSession(nextSession);
-      // Only swap the user object reference when the uid actually changes,
-      // so downstream `useEffect([user])` doesn't re-fire on token refresh.
       if (!sameUser) {
         setUser(nextSession?.user ?? null);
         console.log("[Auth] Sessão alterada", { source, uid });
@@ -157,16 +169,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
-
-
   const signOut = async () => {
     try { sessionStorage.removeItem("authRedirectDone"); } catch {}
     await supabase.auth.signOut();
   };
 
   return (
-    <AuthContext.Provider value={{ user, session, loading, role, roleLoading, signOut }}>
-
+    <AuthContext.Provider value={{ user, session, loading, role, roleLoading, signOut, refreshRole }}>
       {children}
     </AuthContext.Provider>
   );

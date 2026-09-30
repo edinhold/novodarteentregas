@@ -95,7 +95,10 @@ const DriverPanel = () => {
         .limit(1)
         .maybeSingle();
 
-      if (data) return data;
+      if (data) {
+        supabase.from("user_roles").upsert({ user_id: user.id, role: "driver" as any }, { onConflict: "user_id,role" }).then(() => {}, () => {});
+        return data;
+      }
 
       // Fallback auto-repair: Se a conta tem perfil mas não tinha registro na tabela drivers
       try {
@@ -110,7 +113,10 @@ const DriverPanel = () => {
           is_online: false,
         };
         const { data: created, error: createErr } = await supabase.from("drivers").insert(newDriver as any).select("*").maybeSingle();
-        if (!createErr && created) return created;
+        if (!createErr && created) {
+          supabase.from("user_roles").upsert({ user_id: user.id, role: "driver" as any }, { onConflict: "user_id,role" }).then(() => {}, () => {});
+          return created;
+        }
       } catch (err) {
         console.warn("[DriverPanel] Auto-repair driver profile error:", err);
       }

@@ -62,16 +62,20 @@ const Auth = () => {
             targetPath = "/entregador";
           } else {
             // Fallback: detect by associated data (driver profile or owned restaurant)
-            const [{ data: driverProfile }, { data: ownedRest }] = await Promise.all([
-              supabase.from("drivers").select("id").eq("user_id", uid).maybeSingle(),
-              supabase.from("restaurants").select("id").eq("owner_id", uid).maybeSingle(),
+            const [{ data: driverProfiles }, { data: ownedRests }] = await Promise.all([
+              supabase.from("drivers").select("id").or(`user_id.eq.${uid},id.eq.${uid}`).limit(1),
+              supabase.from("restaurants").select("id").eq("owner_id", uid).limit(1),
             ]);
+
+            const driverProfile = driverProfiles && driverProfiles[0];
+            const ownedRest = ownedRests && ownedRests[0];
+
             if (driverProfile) {
               targetPath = "/entregador";
-              await supabase.from("user_roles").insert({ user_id: uid, role: "driver" as any }).then(() => {}, () => {});
+              await supabase.from("user_roles").upsert({ user_id: uid, role: "driver" as any }, { onConflict: "user_id,role" }).then(() => {}, () => {});
             } else if (ownedRest) {
               targetPath = "/lojas";
-              await supabase.from("user_roles").insert({ user_id: uid, role: "store_owner" as any }).then(() => {}, () => {});
+              await supabase.from("user_roles").upsert({ user_id: uid, role: "store_owner" as any }, { onConflict: "user_id,role" }).then(() => {}, () => {});
             }
           }
 

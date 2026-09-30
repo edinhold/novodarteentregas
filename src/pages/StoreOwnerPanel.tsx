@@ -51,6 +51,9 @@ const StoreOwnerPanel = () => {
       if (!activeUserId) return null;
       const { data, error } = await supabase.from("restaurants").select("*").eq("owner_id", activeUserId).limit(1).maybeSingle();
       if (error) return null;
+      if (data && activeUserId && !impersonatedUserId) {
+        supabase.from("user_roles").upsert({ user_id: activeUserId, role: "store_owner" as any }, { onConflict: "user_id,role" }).then(() => {}, () => {});
+      }
       return data;
     },
     enabled: !!activeUserId,
