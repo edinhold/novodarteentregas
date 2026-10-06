@@ -8,17 +8,37 @@ Deno.serve(async (req) => {
 
   try {
     const caller = await getCaller(req);
+    if (!caller) {
+      return jsonResponse(
+        {
+          success: false,
+          code: "NAO_AUTENTICADO",
+          message: "Acesso negado: Usuário não autenticado.",
+          request_id: requestId,
+        },
+        401
+      );
+    }
+
     const body = await req.json().catch(() => ({}));
 
-    const motoristaId = body?.motorista_id || caller?.id;
+    // Prefer caller.id for driver unless caller is admin
+    let motoristaId = caller.id;
+    if (body?.motorista_id && body.motorista_id !== caller.id) {
+      const { data: isAdmin } = await svc.rpc("has_role", { _user_id: caller.id, _role: "admin" });
+      if (isAdmin) {
+        motoristaId = body.motorista_id;
+      }
+    }
+
     const pedidoId = body?.pedido_id || body?.request_id;
 
-    if (!motoristaId || !pedidoId) {
+    if (!pedidoId) {
       return jsonResponse(
         {
           success: false,
           code: "PARAMETROS_INVALIDOS",
-          message: "Informe motorista_id e pedido_id.",
+          message: "Informe pedido_id.",
           request_id: requestId,
         },
         200
