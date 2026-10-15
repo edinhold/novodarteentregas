@@ -76,4 +76,11 @@ describe("Notification System & FunctionsRouter", () => {
     expect(res.body.success).toBe(false);
     expect(res.body.code).toBe("NAO_AUTENTICADO");
   });
+
+  it("push-diagnostics returns expected configuration and does not fail", async () => {
+    const res = await handleEdgeFunction("push-diagnostics", {});
+    expect(res.status).toBe(200);
+    // Unauthenticated caller returns code
+    expect(res.body.code).toBe("NAO_AUTENTICADO");
+  });
 });

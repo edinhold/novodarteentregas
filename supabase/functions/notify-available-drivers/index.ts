@@ -10,6 +10,7 @@ import {
   loadConfig,
   mask,
   sendNotification,
+  applyAndroidChannel,
 } from "../_shared/onesignal.ts";
 
 Deno.serve(async (req) => {
@@ -93,11 +94,11 @@ Deno.serve(async (req) => {
       priority: 10,
       ttl: 300,
       content_available: true,
-      android_channel_id: "novas_entregas_v1",
       android_visibility: 1,
       android_sound: "notification_sound",
       android_accent_color: "FFF97316",
     };
+    applyAndroidChannel(payload);
 
     if (subIds.length > 0) {
       payload.include_subscription_ids = subIds;

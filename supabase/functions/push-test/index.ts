@@ -1,6 +1,6 @@
 import { corsHeaders, jsonResponse } from "../_shared/cors.ts";
 import { checkAdmin, fetchActiveSubscriptions, getCaller, serviceClient } from "../_shared/push-db.ts";
-import { loadConfig, mask, sendNotification } from "../_shared/onesignal.ts";
+import { loadConfig, mask, sendNotification, applyAndroidChannel } from "../_shared/onesignal.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -122,10 +122,10 @@ Deno.serve(async (req) => {
         rota: "/entregador",
         evento_id: `teste_push:${requestId}`,
       },
-      android_channel_id: "novas_entregas_v1",
       priority: 10,
       ttl: 120,
     };
+    applyAndroidChannel(payload);
 
     const osResult = await sendNotification(cfg, payload);
 

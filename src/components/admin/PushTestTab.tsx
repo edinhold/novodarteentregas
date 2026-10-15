@@ -111,7 +111,7 @@ async function fetchDiagnosticsFallback() {
       app_id_masked: "Servidor Supabase",
       app_id_present: true,
       api_key_present: true,
-      android_channel_id: "novas_entregas_v1",
+      android_channel_id: (import.meta.env.VITE_ONESIGNAL_ANDROID_CHANNEL_ID || "").trim() || "Padrão (Default)",
       online_window_minutes: ONLINE_WINDOW_MINUTES,
     },
     drivers: list,
@@ -274,17 +274,25 @@ async function sendPushTestDirectFallback(body: Record<string, unknown>) {
     };
   }
 
-  const payload = {
+  const payload: Record<string, any> = {
     app_id: appId,
     include_subscription_ids: subIds,
     target_channel: "push",
     headings: { pt: "🔔 Teste de Notificação Duarte", en: "Duarte Push Test" },
     contents: { pt: "O sistema de notificações push está funcionando perfeitamente!", en: "Push notifications are working perfectly!" },
     data: { tipo: "teste_push", rota: "/entregador" },
-    android_channel_id: "novas_entregas_v1",
     priority: 10,
     ttl: 120,
   };
+
+  const channelEnv = (import.meta.env.VITE_ONESIGNAL_ANDROID_CHANNEL_ID || "").trim();
+  if (channelEnv) {
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(channelEnv)) {
+      payload.android_channel_id = channelEnv;
+    } else {
+      payload.existing_android_channel_id = channelEnv;
+    }
+  }
 
   const res = await fetch("https://api.onesignal.com/notifications?c=push", {
     method: "POST",

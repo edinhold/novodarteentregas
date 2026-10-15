@@ -1,5 +1,21 @@
 export const ONESIGNAL_API = "https://api.onesignal.com/notifications?c=push";
-export const ANDROID_CHANNEL_ID = "novas_entregas_v1";
+
+export function applyAndroidChannel(payload: Record<string, unknown>) {
+  const channel = (
+    Deno.env.get("ONESIGNAL_ANDROID_CHANNEL_ID") ||
+    Deno.env.get("VITE_ONESIGNAL_ANDROID_CHANNEL_ID") ||
+    ""
+  ).trim();
+
+  if (!channel) return;
+
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(channel);
+  if (isUuid) {
+    payload.android_channel_id = channel;
+  } else {
+    payload.existing_android_channel_id = channel;
+  }
+}
 
 export interface OneSignalConfig {
   appId: string;

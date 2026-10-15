@@ -117,7 +117,24 @@ function resolveOneSignalApiKey(): string {
 
 const ONESIGNAL_APP_API_KEY = resolveOneSignalApiKey();
 const ONESIGNAL_API = "https://api.onesignal.com/notifications?c=push";
-const ANDROID_CHANNEL_ID = "novas_entregas_v1";
+
+function applyAndroidChannel(payload: Record<string, any>) {
+  const channel =
+    (typeof import.meta !== "undefined" && import.meta.env?.VITE_ONESIGNAL_ANDROID_CHANNEL_ID) ||
+    getEnvVar("ONESIGNAL_ANDROID_CHANNEL_ID") ||
+    getEnvVar("VITE_ONESIGNAL_ANDROID_CHANNEL_ID") ||
+    "";
+
+  const trimmed = channel ? channel.trim() : "";
+  if (!trimmed) return;
+
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trimmed);
+  if (isUuid) {
+    payload.android_channel_id = trimmed;
+  } else {
+    payload.existing_android_channel_id = trimmed;
+  }
+}
 
 export interface RouterResponse {
   status: number;
@@ -380,17 +397,17 @@ export async function handleEdgeFunction(
       };
     }
 
-    const payload = {
+    const payload: Record<string, any> = {
       app_id: ONESIGNAL_APP_ID,
       include_subscription_ids: subIds,
       target_channel: "push",
       headings: { pt: "🔔 Teste de Notificação Duarte", en: "Duarte Push Test" },
       contents: { pt: "O sistema de notificações push está funcionando perfeitamente!", en: "Push notifications are working perfectly!" },
       data: { tipo: "teste_push", rota: "/entregador", evento_id: `teste_push:${requestId}` },
-      android_channel_id: ANDROID_CHANNEL_ID,
       priority: 10,
       ttl: 120,
     };
+    applyAndroidChannel(payload);
 
     if (!ONESIGNAL_APP_API_KEY) {
       return {
@@ -1035,11 +1052,11 @@ export async function handleEdgeFunction(
       priority: 10,
       ttl: 300,
       content_available: true,
-      android_channel_id: ANDROID_CHANNEL_ID,
       android_visibility: 1,
       android_sound: "notification_sound",
       android_accent_color: "FFF97316",
     };
+    applyAndroidChannel(payload);
 
     // Estratégia de Alvo:
     // 1. Alvejar por External IDs (user_id do motorista no OneSignal)

@@ -147,7 +147,6 @@ BEGIN
       'priority', 10,
       'ttl', 300,
       'content_available', true,
-      'android_channel_id', 'novas_entregas_v1',
       'android_visibility', 1,
       'android_sound', 'notification_sound',
       'android_accent_color', 'FFF97316'
@@ -181,8 +180,7 @@ BEGIN
       'url', v_app_url || '/entregador?pedido=' || p_pedido_id::text,
       'collapse_id', v_event_key,
       'priority', 10,
-      'ttl', 300,
-      'android_channel_id', 'novas_entregas_v1'
+      'ttl', 300
     );
   END IF;
 
