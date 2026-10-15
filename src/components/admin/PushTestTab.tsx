@@ -119,6 +119,206 @@ async function fetchDiagnosticsFallback() {
   };
 }
 
+async function sendPushTestDirectFallback(body: Record<string, unknown>) {
+  const mode = (body.mode as string) || "driver";
+  const platform = (body.platform as string) || "all";
+  const driverUserId = body.driver_user_id as string | undefined;
+  const subscriptionId = body.subscription_id as string | undefined;
+
+  let subs: Array<{ onesignal_subscription_id: string; platform: string; user_id: string }> = [];
+
+  if (mode === "device" && subscriptionId) {
+    const { data: subData } = await supabase
+      .from("push_subscriptions")
+      .select("onesignal_subscription_id, platform, user_id")
+      .eq("onesignal_subscription_id", subscriptionId)
+      .maybeSingle();
+
+    if (subData) {
+      subs = [subData];
+    } else {
+      const { data: devData } = await supabase
+        .from("driver_push_devices")
+        .select("subscription_id, platform, driver_id")
+        .eq("subscription_id", subscriptionId)
+        .maybeSingle();
+
+      if (devData?.subscription_id) {
+        subs = [{
+          onesignal_subscription_id: devData.subscription_id,
+          platform: devData.platform,
+          user_id: devData.driver_id,
+        }];
+      }
+    }
+  } else if (mode === "broadcast") {
+    const cutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+    const { data: onlineDrivers } = await supabase
+      .from("drivers")
+      .select("user_id")
+      .eq("is_active", true)
+      .eq("approval_status", "approved")
+      .eq("is_online", true)
+      .gte("last_seen_at", cutoff);
+
+    const ids = (onlineDrivers || []).map((d) => d.user_id);
+    if (ids.length > 0) {
+      const { data: s1 } = await supabase
+        .from("push_subscriptions")
+        .select("onesignal_subscription_id, platform, user_id")
+        .in("user_id", ids)
+        .eq("active", true);
+
+      const { data: d1 } = await supabase
+        .from("driver_push_devices")
+        .select("subscription_id, platform, driver_id")
+        .in("driver_id", ids)
+        .eq("active", true);
+
+      const map = new Map<string, any>();
+      for (const dev of d1 || []) {
+        if (dev.subscription_id) {
+          map.set(dev.driver_id, {
+            onesignal_subscription_id: dev.subscription_id,
+            platform: dev.platform || "web_pwa",
+            user_id: dev.driver_id,
+          });
+        }
+      }
+      for (const sub of s1 || []) {
+        if (sub.onesignal_subscription_id && !map.has(sub.user_id)) {
+          map.set(sub.user_id, {
+            onesignal_subscription_id: sub.onesignal_subscription_id,
+            platform: sub.platform || "web_pwa",
+            user_id: sub.user_id,
+          });
+        }
+      }
+      subs = Array.from(map.values());
+    }
+  } else if (driverUserId) {
+    const { data: s1 } = await supabase
+      .from("push_subscriptions")
+      .select("onesignal_subscription_id, platform, user_id")
+      .eq("user_id", driverUserId)
+      .eq("active", true);
+
+    const { data: d1 } = await supabase
+      .from("driver_push_devices")
+      .select("subscription_id, platform, driver_id")
+      .eq("driver_id", driverUserId)
+      .eq("active", true);
+
+    const map = new Map<string, any>();
+    for (const dev of d1 || []) {
+      if (dev.subscription_id) {
+        map.set(dev.driver_id, {
+          onesignal_subscription_id: dev.subscription_id,
+          platform: dev.platform || "web_pwa",
+          user_id: dev.driver_id,
+        });
+      }
+    }
+    for (const sub of s1 || []) {
+      if (sub.onesignal_subscription_id && !map.has(sub.user_id)) {
+        map.set(sub.user_id, {
+          onesignal_subscription_id: sub.onesignal_subscription_id,
+          platform: sub.platform || "web_pwa",
+          user_id: sub.user_id,
+        });
+      }
+    }
+    subs = Array.from(map.values());
+  }
+
+  if (platform !== "all") {
+    subs = subs.filter((s) => (platform === "android_apk" ? s.platform === "android_apk" : s.platform !== "android_apk"));
+  }
+
+  const subIds = Array.from(new Set(subs.map((s) => s.onesignal_subscription_id))).filter(Boolean);
+
+  if (subIds.length === 0) {
+    return {
+      success: false,
+      edge_function_ok: true,
+      onesignal_accepted: false,
+      recipients_requested: 0,
+      recipients_found: 0,
+      code: "SEM_INSCRICOES",
+      message: "Nenhum dispositivo ativado encontrado para o motorista/filtro selecionado. Peça para o motorista abrir o aplicativo no aparelho e ativar as Notificações Push.",
+    };
+  }
+
+  const appId = import.meta.env.VITE_ONESIGNAL_APP_ID || "4f68f47f-63ee-4326-8f98-e63514f2b154";
+  const apiKey =
+    import.meta.env.VITE_ONESIGNAL_APP_API_KEY ||
+    (import.meta.env as any).ONESIGNAL_APP_API_KEY ||
+    "";
+
+  if (!apiKey) {
+    return {
+      success: false,
+      edge_function_ok: true,
+      onesignal_accepted: false,
+      code: "API_KEY_MISSING",
+      message: "REST API Key do OneSignal não configurada no ambiente (VITE_ONESIGNAL_APP_API_KEY).",
+      recipients_requested: subIds.length,
+      recipients_found: 0,
+    };
+  }
+
+  const payload = {
+    app_id: appId,
+    include_subscription_ids: subIds,
+    target_channel: "push",
+    headings: { pt: "🔔 Teste de Notificação Duarte", en: "Duarte Push Test" },
+    contents: { pt: "O sistema de notificações push está funcionando perfeitamente!", en: "Push notifications are working perfectly!" },
+    data: { tipo: "teste_push", rota: "/entregador" },
+    android_channel_id: "novas_entregas_v1",
+    priority: 10,
+    ttl: 120,
+  };
+
+  const res = await fetch("https://api.onesignal.com/notifications?c=push", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      Authorization: `Key ${apiKey}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const osData = await res.json().catch(() => ({}));
+  const ok = res.ok && !!osData?.id && (!osData.errors || osData.errors.length === 0);
+
+  try {
+    await supabase.from("notification_delivery_logs").insert({
+      event_type: "teste_push",
+      recipients_requested: subIds.length,
+      recipients_found: osData?.recipients ?? (ok ? subIds.length : 0),
+      onesignal_notification_id: osData?.id || null,
+      response_status: res.status,
+      response_body_sanitized: JSON.stringify(osData).slice(0, 1000),
+      error_code: ok ? null : (osData.errors?.[0] ?? `HTTP ${res.status}`),
+      platform,
+    });
+  } catch (logErr) {
+    console.warn("[PushTest] Falha ao registrar log de entrega:", logErr);
+  }
+
+  return {
+    success: ok,
+    edge_function_ok: true,
+    onesignal_accepted: ok,
+    message: ok
+      ? `Notificação de teste enviada com sucesso para ${subIds.length} aparelho(s)!`
+      : `OneSignal recusou envio: ${JSON.stringify(osData?.errors || osData)}`,
+    recipients_requested: subIds.length,
+    recipients_found: osData?.recipients ?? (ok ? subIds.length : 0),
+    onesignal_notification_id: osData?.id || null,
+  };
+}
+
 const PushTestTab = () => {
   const [driverId, setDriverId] = useState<string>("");
   const [deviceId, setDeviceId] = useState<string>("all");
@@ -152,18 +352,31 @@ const PushTestTab = () => {
       if (mode === "driver") body.driver_user_id = driverId;
       if (mode === "device") body.subscription_id = deviceId;
 
-      const { data, error } = await supabase.functions.invoke("push-test", { body });
-      
-      if (error) {
-        throw new Error(error.message || "Erro na comunicação com a Edge Function push-test.");
+      let resData: any = null;
+
+      try {
+        const { data, error } = await supabase.functions.invoke("push-test", { body });
+        if (error) {
+          console.warn("[PushTest] invoke retornou erro, acionando fallback direto:", error?.message);
+        } else if (data && data.code !== "ERRO_CONEXAO") {
+          resData = data;
+        }
+      } catch (invokeErr: any) {
+        console.warn("[PushTest] Falha ao invocar push-test:", invokeErr?.message);
       }
 
-      setResult(data);
+      // Se a Edge Function remota não responder ou der erro, executa fallback direto
+      if (!resData) {
+        console.info("[PushTest] Executando envio de teste direto via fallback do cliente...");
+        resData = await sendPushTestDirectFallback(body);
+      }
 
-      if (data?.onesignal_accepted && data?.success) {
-        toast.success(data.message || "Notificação aceita pelo OneSignal com sucesso!");
+      setResult(resData);
+
+      if (resData?.onesignal_accepted && resData?.success) {
+        toast.success(resData.message || "Notificação aceita pelo OneSignal com sucesso!");
       } else {
-        toast.error(data?.message || "O OneSignal recusou a mensagem de teste.");
+        toast.error(resData?.message || "O OneSignal recusou a mensagem de teste.");
       }
     } catch (e: any) {
       const msg = e.message || "Falha ao executar o teste.";

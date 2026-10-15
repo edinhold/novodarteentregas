@@ -57,6 +57,12 @@ async function getCaller(supabase: SupabaseClient, authHeader?: string | null) {
 // Check admin role
 async function checkAdmin(supabase: SupabaseClient, userId: string): Promise<boolean> {
   try {
+    const { data: rpcAdmin } = await supabase.rpc("has_role", {
+      _user_id: userId,
+      _role: "admin",
+    });
+    if (rpcAdmin === true) return true;
+
     const { data } = await supabase
       .from("user_roles")
       .select("role")

@@ -26,12 +26,17 @@ export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABL
 });
 
 // Proxy supabase.functions.invoke: prefer real Supabase Edge Function API, fallback to local functionsRouter
-const originalInvoke = supabase.functions.invoke.bind(supabase.functions);
+const sampleFunctionsInstance = (supabase as any).functions;
+const FunctionsClientClass = sampleFunctionsInstance ? sampleFunctionsInstance.constructor : null;
+const originalInvoke = sampleFunctionsInstance
+  ? sampleFunctionsInstance.invoke.bind(sampleFunctionsInstance)
+  : async () => ({ data: null, error: new Error('Functions client unavailable') });
 
-supabase.functions.invoke = async function (functionName: string, options?: any) {
+const proxiedInvoke = async function (functionName: string, options?: any) {
   // 1. Try real Supabase Edge Function execution first
   try {
     const res = await originalInvoke(functionName, options);
+    // If the remote function returned data without an error, return it
     if (res && !res.error && res.data) {
       return res;
     }
@@ -62,6 +67,26 @@ supabase.functions.invoke = async function (functionName: string, options?: any)
     error: null,
   };
 };
+
+// 1. Patch prototype so every new FunctionsClient created by the getter inherits proxiedInvoke
+if (FunctionsClientClass && FunctionsClientClass.prototype) {
+  FunctionsClientClass.prototype.invoke = proxiedInvoke;
+}
+
+// 2. Override getter on the supabase client instance
+try {
+  const functionsProxy = {
+    invoke: proxiedInvoke,
+    setAuth: (token: string) => {},
+  };
+  Object.defineProperty(supabase, 'functions', {
+    get: () => functionsProxy,
+    configurable: true,
+    enumerable: true,
+  });
+} catch (defErr) {
+  console.warn('[SupabaseClient] Falha ao redefinir getter functions:', defErr);
+}
 
 /**
  * Creates a unique Supabase Realtime channel instance.

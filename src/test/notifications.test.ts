@@ -50,4 +50,30 @@ describe("Notification System & FunctionsRouter", () => {
     expect(() => playNotificationSound()).not.toThrow();
     expect(() => playUrgentNotification()).not.toThrow();
   });
+
+  it("supabase.functions.invoke proxy works seamlessly and catches edge function calls", async () => {
+    const { supabase } = await import("@/integrations/supabase/client");
+    const res = await supabase.functions.invoke("push-config");
+    expect(res.error).toBeNull();
+    expect(res.data).toBeDefined();
+    expect(res.data.success).toBe(true);
+    expect(res.data.app_id).toBe("4f68f47f-63ee-4326-8f98-e63514f2b154");
+  });
+
+  it("supabase.functions.invoke survives multiple invocations (getter does not drop proxy)", async () => {
+    const { supabase } = await import("@/integrations/supabase/client");
+    const res1 = await supabase.functions.invoke("push-config");
+    const res2 = await supabase.functions.invoke("push-config");
+    expect(res1.error).toBeNull();
+    expect(res2.error).toBeNull();
+    expect(res1.data.success).toBe(true);
+    expect(res2.data.success).toBe(true);
+  });
+
+  it("push-test handles unauthorized invocation cleanly without crashing", async () => {
+    const res = await handleEdgeFunction("push-test", {});
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(false);
+    expect(res.body.code).toBe("NAO_AUTENTICADO");
+  });
 });
