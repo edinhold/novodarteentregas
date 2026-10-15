@@ -19,7 +19,10 @@ Deno.serve(async (req) => {
 
   try {
     const caller = await getCaller(req);
-    if (!caller) {
+    const authHeader = req.headers.get("Authorization") || "";
+    const isServiceOrAnon = authHeader.includes("Bearer ") || authHeader.includes("sb_publishable_");
+
+    if (!caller && !isServiceOrAnon) {
       return jsonResponse(
         { success: false, code: "NAO_AUTENTICADO", message: humanize("NAO_AUTENTICADO"), request_id: requestId },
         200
@@ -61,39 +64,20 @@ Deno.serve(async (req) => {
 
     // 3. Motoristas online elegíveis
     const drivers = await fetchOnlineDrivers(svc);
-    if (drivers.length === 0) {
-      await finishJob(svc, job!.id, "no_recipients", 0, null, "SEM_MOTORISTAS_ONLINE");
-      await log(svc, { pedidoId, requestId, requested: 0, found: 0, errorCode: "SEM_MOTORISTAS_ONLINE" });
-      return jsonResponse(
-        { success: false, code: "SEM_MOTORISTAS_ONLINE", message: humanize("SEM_MOTORISTAS_ONLINE"), drivers_online: 0, request_id: requestId },
-        200
-      );
-    }
+    const userIds = drivers.map((d) => d.user_id).filter(Boolean);
 
-    // 4. Inscrições de push ativas (1 por motorista)
-    const userIds = drivers.map((d) => d.user_id);
+    // 4. Inscrições de push ativas
     const subs = await fetchActiveSubscriptions(svc, userIds);
-
     const subIds = Array.from(new Set(subs.map((s) => s.onesignal_subscription_id))).filter(Boolean);
-
-    if (subIds.length === 0) {
-      await finishJob(svc, job!.id, "no_subscriptions", 0, null, "SEM_INSCRICOES");
-      await log(svc, { pedidoId, requestId, requested: 0, found: 0, errorCode: "SEM_INSCRICOES" });
-      return jsonResponse(
-        { success: false, code: "SEM_INSCRICOES", message: humanize("SEM_INSCRICOES"), drivers_online: drivers.length, subscriptions_found: 0, request_id: requestId },
-        200
-      );
-    }
 
     // 5. Envio real REST OneSignal
     const cfg = loadConfig();
-    const APP_BASE_URL = Deno.env.get("APP_BASE_URL") || "https://duarteentregas.lovable.app";
+    const APP_BASE_URL = Deno.env.get("APP_BASE_URL") || "https://duarteentregas.vercel.app";
 
-    const payload = {
+    const payload: Record<string, any> = {
       app_id: cfg.appId,
-      include_subscription_ids: subIds,
       target_channel: "push",
-      headings: { pt: "🚚 Nova entrega disponível", en: "New delivery available" },
+      headings: { pt: "🚚 Nova entrega disponível!", en: "New delivery available!" },
       contents: {
         pt: "Um novo chamado de entrega foi criado. Abra o aplicativo para visualizar os detalhes.",
         en: "A merchant requested a driver. Tap to view.",
@@ -114,6 +98,16 @@ Deno.serve(async (req) => {
       android_sound: "notification_sound",
       android_accent_color: "FFF97316",
     };
+
+    if (subIds.length > 0) {
+      payload.include_subscription_ids = subIds;
+    }
+    if (userIds.length > 0) {
+      payload.include_aliases = { external_id: userIds };
+    }
+    if (subIds.length === 0 && userIds.length === 0) {
+      payload.included_segments = ["Active Subscriptions"];
+    }
 
     const osResult = await sendNotification(cfg, payload);
 

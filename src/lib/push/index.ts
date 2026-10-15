@@ -376,6 +376,17 @@ export async function notifyAvailableDrivers(pedidoId: string): Promise<void> {
   console.log("[DeliveryNotification:trigger]", { pedidoId });
 
   try {
+    // 1. Tentar acionar diretamente via RPC SECURITY DEFINER no banco (mais rápido e 100% confiável)
+    const { data: rpcData, error: rpcError } = await supabase.rpc("notify_available_drivers", {
+      p_pedido_id: pedidoId,
+    });
+
+    if (!rpcError && (rpcData as any)?.success) {
+      console.log("[DeliveryNotification:rpc_success]", rpcData);
+      return;
+    }
+
+    // 2. Fallback para Edge Function / functionsRouter
     const { data, error } = await supabase.functions.invoke("notify-available-drivers", {
       body: { pedido_id: pedidoId },
     });

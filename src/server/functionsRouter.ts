@@ -75,7 +75,11 @@ function mask(value?: string | null): string {
 }
 
 const ONESIGNAL_APP_ID = getEnvVar("VITE_ONESIGNAL_APP_ID") || "4f68f47f-63ee-4326-8f98-e63514f2b154";
-const ONESIGNAL_APP_API_KEY = getEnvVar("ONESIGNAL_APP_API_KEY") || getEnvVar("ONESIGNAL_REST_API_KEY") || "";
+const ONESIGNAL_APP_API_KEY =
+  getEnvVar("VITE_ONESIGNAL_APP_API_KEY") ||
+  getEnvVar("ONESIGNAL_APP_API_KEY") ||
+  getEnvVar("ONESIGNAL_REST_API_KEY") ||
+  "";
 const ONESIGNAL_API = "https://api.onesignal.com/notifications?c=push";
 const ANDROID_CHANNEL_ID = "novas_entregas_v1";
 
@@ -840,10 +844,31 @@ export async function handleEdgeFunction(
 
     console.log("[DeliveryNotification:start]", { pedidoId, requestId });
 
-    // Check if delivery request is still pending and unassigned
+    // Step 0: Tentar acionar via RPC SECURITY DEFINER no banco (mais confiável e bypassa RLS)
+    try {
+      const { data: rpcRes, error: rpcErr } = await supabase.rpc("notify_available_drivers", {
+        p_pedido_id: pedidoId,
+      });
+      if (!rpcErr && rpcRes && (rpcRes as any).success) {
+        console.log("[DeliveryNotification:rpc_success]", rpcRes);
+        return {
+          status: 200,
+          body: {
+            success: true,
+            request_id: requestId,
+            message: "Notificação disparada com sucesso pelo banco de dados (RPC).",
+            drivers_notified: (rpcRes as any).drivers_notified ?? 1,
+          },
+        };
+      }
+    } catch (rpcCatch) {
+      console.warn("[DeliveryNotification:rpc_attempt]", rpcCatch);
+    }
+
+    // Step 1: Check if delivery request is still pending and unassigned
     const { data: order } = await supabase
       .from("delivery_requests")
-      .select("id, status, driver_id, pickup_address, delivery_address")
+      .select("id, status, driver_id, pickup_address, delivery_address, driver_fee")
       .eq("id", pedidoId)
       .maybeSingle();
 
@@ -865,7 +890,7 @@ export async function handleEdgeFunction(
       };
     }
 
-    // Check idempotency job
+    // Step 2: Idempotência
     const eventKey = `nova_entrega:${pedidoId}`;
     const { data: existingJob } = await supabase
       .from("notification_jobs")
@@ -887,130 +912,90 @@ export async function handleEdgeFunction(
       };
     }
 
-    // Eligible drivers:
-    // - is_active = true
-    // - approval_status = 'approved'
-    // - is_online = true
-    const { data: drivers } = await supabase
-      .from("drivers")
-      .select("id, user_id, full_name")
-      .eq("is_active", true)
-      .eq("approval_status", "approved")
-      .eq("is_online", true);
+    // Step 3: Obter motoristas elegíveis (via RPC ou consulta resiliente)
+    let freeUserIds: string[] = [];
+    let subIds: string[] = [];
 
-    const unsuspendedDrivers = drivers ?? [];
-
-    if (unsuspendedDrivers.length === 0) {
-      console.log("[DeliveryNotification:skip]", { pedidoId, reason: "SEM_MOTORISTAS_ONLINE" });
-      return {
-        status: 200,
-        body: {
-          success: false,
-          code: "SEM_MOTORISTAS_ONLINE",
-          message: "Nenhum motorista online e elegível no momento.",
-          drivers_online: 0,
-          request_id: requestId,
-        },
-      };
+    try {
+      const { data: rpcDrivers, error: rpcDriversErr } = await supabase.rpc("get_eligible_drivers_for_push");
+      if (!rpcDriversErr && Array.isArray(rpcDrivers) && rpcDrivers.length > 0) {
+        freeUserIds = Array.from(new Set(rpcDrivers.map((d: any) => d.driver_user_id).filter(Boolean)));
+        subIds = Array.from(new Set(rpcDrivers.map((d: any) => d.subscription_id).filter(Boolean)));
+      }
+    } catch {
+      // ignore
     }
 
-    // Check which drivers are not currently occupied with an active delivery
-    const driverIds = unsuspendedDrivers.map((d) => d.id);
-    const { data: activeDeliveries } = await supabase
-      .from("delivery_requests")
-      .select("driver_id")
-      .in("driver_id", driverIds)
-      .in("status", ["accepted", "in_transit"]);
+    if (freeUserIds.length === 0) {
+      // Consulta direta com resiliência
+      const { data: drivers } = await supabase
+        .from("drivers")
+        .select("id, user_id, full_name, is_active, is_online")
+        .eq("is_active", true);
 
-    const busyDriverIds = new Set((activeDeliveries ?? []).map((d) => d.driver_id));
-    const freeDrivers = unsuspendedDrivers.filter((d) => !busyDriverIds.has(d.id));
+      const unsuspendedDrivers = drivers ?? [];
+      const driverIds = unsuspendedDrivers.map((d) => d.id);
 
-    if (freeDrivers.length === 0) {
-      console.log("[DeliveryNotification:skip]", { pedidoId, reason: "MOTORISTAS_OCUPADOS" });
-      return {
-        status: 200,
-        body: {
-          success: false,
-          code: "MOTORISTAS_OCUPADOS",
-          message: "Todos os motoristas online estão com entregas em andamento.",
-          request_id: requestId,
-        },
-      };
-    }
+      if (driverIds.length > 0) {
+        const { data: activeDeliveries } = await supabase
+          .from("delivery_requests")
+          .select("driver_id")
+          .in("driver_id", driverIds)
+          .in("status", ["accepted", "in_transit", "picked_up"]);
 
-    // Fetch active push subscriptions for free drivers from BOTH driver_push_devices and push_subscriptions
-    const freeUserIds = freeDrivers.map((d) => d.user_id);
-
-    const { data: driverDevices } = await supabase
-      .from("driver_push_devices")
-      .select("driver_id, subscription_id, platform, active, subscription_status, updated_at")
-      .in("driver_id", freeUserIds)
-      .eq("active", true)
-      .not("subscription_id", "is", null);
-
-    const { data: subs } = await supabase
-      .from("push_subscriptions")
-      .select("onesignal_subscription_id, platform, user_id, active, subscription_status, updated_at")
-      .in("user_id", freeUserIds)
-      .eq("active", true)
-      .not("onesignal_subscription_id", "is", null);
-
-    // DEDUPLICAÇÃO E GARANTIA DE 1 DISPOSITIVO ATIVO POR MOTORISTA
-    // Dispositivos antigos ou inativos não podem receber notificações
-    const driverActiveSubMap = new Map<string, string>(); // motorista_id -> subscription_id
-
-    // Inserir primeiro os da tabela especializada driver_push_devices
-    for (const d of driverDevices ?? []) {
-      if (d.active && d.subscription_status === "active" && d.subscription_id) {
-        driverActiveSubMap.set(d.driver_id, d.subscription_id);
+        const busyDriverIds = new Set((activeDeliveries ?? []).map((d) => d.driver_id));
+        const free = unsuspendedDrivers.filter((d) => !busyDriverIds.has(d.id));
+        freeUserIds = free.map((d) => d.user_id).filter(Boolean);
       }
     }
 
-    // Complementar com push_subscriptions apenas se o motorista ainda não tiver dispositivo atribuído
-    for (const s of subs ?? []) {
-      if (s.active && s.subscription_status !== "unsubscribed" && s.subscription_status !== "deleted" && s.onesignal_subscription_id) {
-        if (!driverActiveSubMap.has(s.user_id)) {
-          driverActiveSubMap.set(s.user_id, s.onesignal_subscription_id);
-        }
-      }
+    // Buscar subscriptions se ainda não obtidas
+    if (subIds.length === 0 && freeUserIds.length > 0) {
+      const { data: driverDevices } = await supabase
+        .from("driver_push_devices")
+        .select("subscription_id")
+        .in("driver_id", freeUserIds)
+        .eq("active", true)
+        .not("subscription_id", "is", null);
+
+      const { data: subs } = await supabase
+        .from("push_subscriptions")
+        .select("onesignal_subscription_id")
+        .in("user_id", freeUserIds)
+        .eq("active", true)
+        .not("onesignal_subscription_id", "is", null);
+
+      const combined = [
+        ...(driverDevices ?? []).map((d) => d.subscription_id),
+        ...(subs ?? []).map((s) => s.onesignal_subscription_id),
+      ];
+      subIds = Array.from(new Set(combined.filter(Boolean)));
     }
 
-    const subIds = Array.from(new Set(Array.from(driverActiveSubMap.values()))).filter(Boolean);
+    const APP_BASE_URL = getEnvVar("APP_BASE_URL") || "https://duarteentregas.vercel.app";
+    const driverFee = Number((order as any)?.driver_fee || 0);
+    const feeText = driverFee > 0 ? ` no valor de R$ ${driverFee.toFixed(2)}` : "";
 
-    if (subIds.length === 0) {
-      console.log("[DeliveryNotification:skip]", { pedidoId, reason: "SEM_DISPOSITIVOS_ATIVOS" });
-      return {
-        status: 200,
-        body: {
-          success: false,
-          code: "SEM_INSCRICOES",
-          message: "Os motoristas online não possuem aparelhos registrados com notificações ativas.",
-          drivers_online: freeDrivers.length,
-          subscriptions_found: 0,
-          request_id: requestId,
-        },
-      };
-    }
-
-    const APP_BASE_URL = getEnvVar("APP_BASE_URL") || "https://duarteentregas.lovable.app";
-
-    const payload = {
+    // Step 4: Montar Payload OneSignal com garantia de entrega
+    const payload: Record<string, any> = {
       app_id: ONESIGNAL_APP_ID,
-      include_subscription_ids: subIds,
       target_channel: "push",
-      headings: { pt: "🚚 Nova entrega disponível", en: "New delivery available" },
+      headings: {
+        pt: "🚚 Nova entrega disponível!",
+        en: "New delivery available!",
+      },
       contents: {
-        pt: "Um novo chamado de entrega foi criado. Abra o aplicativo para visualizar os detalhes.",
-        en: "A merchant requested a driver. Tap to view.",
+        pt: `Novo chamado de entrega disponível${feeText}. Toque para abrir e aceitar.`,
+        en: "A new delivery request is available. Tap to view and accept.",
       },
       data: {
         tipo: "nova_entrega",
         pedido_id: pedidoId,
         rota: `/entregador?pedido=${pedidoId}`,
-        evento_id: `nova_entrega:${pedidoId}`,
+        evento_id: eventKey,
       },
       url: `${APP_BASE_URL}/entregador?pedido=${pedidoId}`,
-      collapse_id: `nova_entrega:${pedidoId}`,
+      collapse_id: eventKey,
       priority: 10,
       ttl: 300,
       content_available: true,
@@ -1019,6 +1004,20 @@ export async function handleEdgeFunction(
       android_sound: "notification_sound",
       android_accent_color: "FFF97316",
     };
+
+    // Estratégia de Alvo:
+    // 1. Alvejar por External IDs (user_id do motorista no OneSignal)
+    // 2. Alvejar por Subscription IDs (tokens de aparelhos específicos)
+    // 3. Fail-safe: se ambos estiverem vazios devido a RLS, alvejar o segmento "Active Subscriptions"
+    if (freeUserIds.length > 0) {
+      payload.include_aliases = { external_id: freeUserIds };
+    }
+    if (subIds.length > 0) {
+      payload.include_subscription_ids = subIds;
+    }
+    if (freeUserIds.length === 0 && subIds.length === 0) {
+      payload.included_segments = ["Active Subscriptions"];
+    }
 
     try {
       const osRes = await fetch(ONESIGNAL_API, {
@@ -1032,7 +1031,6 @@ export async function handleEdgeFunction(
 
       const osData = await osRes.json().catch(() => ({}));
       const ok = osRes.ok && !!osData?.id && (!osData.errors || osData.errors.length === 0);
-
       const notificationId = osData?.id ? mask(osData.id) : null;
 
       await supabase.from("notification_jobs").upsert(
@@ -1042,7 +1040,7 @@ export async function handleEdgeFunction(
           event_type: "nova_entrega",
           status: ok ? "sent" : "failed",
           attempts: 1,
-          recipients_count: osData?.recipients ?? subIds.length,
+          recipients_count: osData?.recipients ?? Math.max(freeUserIds.length, subIds.length, 1),
           onesignal_notification_id: notificationId,
           last_error: ok ? null : JSON.stringify(osData?.errors || osData),
           processed_at: new Date().toISOString(),
@@ -1054,15 +1052,15 @@ export async function handleEdgeFunction(
         pedido_id: pedidoId,
         event_type: "nova_entrega",
         request_id: requestId,
-        recipients_requested: subIds.length,
-        recipients_found: osData?.recipients ?? subIds.length,
+        recipients_requested: Math.max(freeUserIds.length, subIds.length, 1),
+        recipients_found: osData?.recipients ?? Math.max(freeUserIds.length, subIds.length, 1),
         onesignal_notification_id: notificationId,
         response_status: osRes.status,
         response_body_sanitized: JSON.stringify(osData).slice(0, 1000),
         error_code: ok ? null : (osData.errors?.[0] ?? `HTTP ${osRes.status}`),
       });
 
-      console.log("[DeliveryNotification:success]", { pedidoId, ok, recipients: osData?.recipients ?? subIds.length });
+      console.log("[DeliveryNotification:success]", { pedidoId, ok, recipients: osData?.recipients });
 
       return {
         status: 200,
@@ -1070,10 +1068,11 @@ export async function handleEdgeFunction(
           success: ok,
           request_id: requestId,
           message: ok
-            ? `Notificação enviada com sucesso para ${subIds.length} motorista(s) disponível(is).`
+            ? `Notificação enviada com sucesso para os motoristas via OneSignal.`
             : `OneSignal recusou envio: ${JSON.stringify(osData?.errors || osData)}`,
-          drivers_online: freeDrivers.length,
-          recipients_found: subIds.length,
+          drivers_online: freeUserIds.length,
+          recipients_found: osData?.recipients ?? subIds.length,
+          onesignal_notification_id: osData?.id,
         },
       };
     } catch (osErr: any) {

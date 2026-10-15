@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { ArrowLeft, MapPin, Phone, MessageSquare, Send, Check, CheckCircle, Unlock, DollarSign, Key, Wallet, XCircle, Home, History, Settings, Map as MapIcon, Signal, SignalZero, Calendar, Radar, PanelLeft, AlertTriangle, Loader2 } from "lucide-react";
+import { ArrowLeft, MapPin, Phone, MessageSquare, Send, Check, CheckCircle, Unlock, DollarSign, Key, Wallet, XCircle, Home, History, Settings, Map as MapIcon, Signal, SignalZero, Calendar, Radar, PanelLeft, AlertTriangle, Loader2, Bell, BellRing, BellOff } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
@@ -65,7 +65,8 @@ const DriverPanel = () => {
   const hadPendingStandbyRef = useRef(false);
 
   // Sincronização e validação automática do dispositivo Push ao abrir o painel
-  usePushNotifications(user?.id, "driver");
+  const { state: pushState, activate: activatePush, loading: pushLoading } = usePushNotifications(user?.id, "driver");
+  const isPushActive = pushState?.permission === "granted" && !!pushState?.subscriptionId;
 
   useEffect(() => {
     if (loading) return;
@@ -934,6 +935,47 @@ const DriverPanel = () => {
                 </Badge>
               </CardContent>
             </Card>
+
+            {!isPushActive && (
+              <Card className="mb-4 border-amber-500/40 bg-amber-500/10 dark:bg-amber-950/20 shadow-sm">
+                <CardContent className="p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <BellRing className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 animate-bounce" />
+                    <div>
+                      <h4 className="font-bold text-amber-800 dark:text-amber-300 text-xs flex items-center gap-1.5">
+                        Notificações de Novas Entregas Desativadas
+                      </h4>
+                      <p className="text-[11px] text-amber-700/80 dark:text-amber-400/80">
+                        Ative agora para receber chamados com sirene e vibração mesmo com a tela desligada.
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    className="bg-amber-600 hover:bg-amber-700 text-white text-xs shrink-0 w-full sm:w-auto font-medium"
+                    disabled={pushLoading}
+                    onClick={async () => {
+                      resumeAudioContext();
+                      const res = await activatePush();
+                      if (res?.permission === "granted") {
+                        playNotificationSound();
+                        toast.success("Notificações e alertas sonoros ativados com sucesso!");
+                      } else {
+                        toast.error("Permissão de notificação negada no navegador.");
+                      }
+                    }}
+                  >
+                    {pushLoading ? (
+                      <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                    ) : (
+                      <Bell className="w-3.5 h-3.5 mr-1.5" />
+                    )}
+                    Ativar Notificações Agora
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
+
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full space-y-4">
               {isMobile && (
                 <TabsList className="grid w-full grid-cols-7 bg-muted/50 p-1 rounded-xl">

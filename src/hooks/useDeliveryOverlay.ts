@@ -281,8 +281,8 @@ export function useDeliveryOverlay({ standby, timeoutMs = 30000, onAccepted }: O
                   body: `Ganho Líquido: R$ ${netFee.toFixed(2)} · Toque para aceitar`,
                   tag: `delivery-${row.id}`,
                   requireInteraction: true,
-                  icon: "/icon-192.png",
-                  badge: "/icon-192.png",
+                  icon: "/pwa-192x192.png",
+                  badge: "/pwa-192x192.png",
                 } as NotificationOptions);
                 n.onclick = () => {
                   window.focus();
