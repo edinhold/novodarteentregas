@@ -419,16 +419,8 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
     return driverLocations.some((dl: any) => dl.user_id === uidOrDid || dl.driver_id === uidOrDid);
   };
 
-  // Auto-select default favorite driver ONLY if online
-  useEffect(() => {
-    if (selectedDriverId) return;
-    const def = favoriteDrivers.find((f: any) => f.is_default);
-    const defUid = def?.driver?.user_id;
-    const defDid = def?.driver_id;
-    if (defUid && (isDriverOnline(defUid) || isDriverOnline(defDid))) {
-      setSelectedDriverId(defUid);
-    }
-  }, [favoriteDrivers, driverLocations]);
+  // O padrão é sempre chamar qualquer entregador disponível (todos são notificados)
+  // O lojista pode direcionar manualmente se desejar no menu dropdown.
 
   // Determine if selected driver is currently online
   const selectedDriverOnline = !!selectedDriverId && isDriverOnline(selectedDriverId);

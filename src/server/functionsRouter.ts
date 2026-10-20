@@ -126,7 +126,7 @@ function applyAndroidChannel(payload: Record<string, any>) {
     "";
 
   const trimmed = channel ? channel.trim() : "";
-  if (!trimmed) return;
+  if (!trimmed || trimmed === "284688c6-d7ac-4e12-bce7-f38594dcf06c") return;
 
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trimmed);
   if (isUuid) {
@@ -925,7 +925,7 @@ export async function handleEdgeFunction(
       .eq("id", pedidoId)
       .maybeSingle();
 
-    if (!order || order.status !== "pending" || order.driver_id) {
+    if (!order || order.status !== "pending") {
       console.log("[DeliveryNotification:skip]", {
         pedidoId,
         status: order?.status,
@@ -965,74 +965,21 @@ export async function handleEdgeFunction(
       };
     }
 
-    // Step 3: Obter motoristas elegíveis (via RPC ou consulta resiliente)
-    let freeUserIds: string[] = [];
-    let subIds: string[] = [];
-
-    try {
-      const { data: rpcDrivers, error: rpcDriversErr } = await supabase.rpc("get_eligible_drivers_for_push");
-      if (!rpcDriversErr && Array.isArray(rpcDrivers) && rpcDrivers.length > 0) {
-        freeUserIds = Array.from(new Set(rpcDrivers.map((d: any) => d.driver_user_id).filter(Boolean)));
-        subIds = Array.from(new Set(rpcDrivers.map((d: any) => d.subscription_id).filter(Boolean)));
-      }
-    } catch {
-      // ignore
-    }
-
-    if (freeUserIds.length === 0) {
-      // Consulta direta com resiliência
-      const { data: drivers } = await supabase
-        .from("drivers")
-        .select("id, user_id, full_name, is_active, is_online")
-        .eq("is_active", true);
-
-      const unsuspendedDrivers = drivers ?? [];
-      const driverIds = unsuspendedDrivers.map((d) => d.id);
-
-      if (driverIds.length > 0) {
-        const { data: activeDeliveries } = await supabase
-          .from("delivery_requests")
-          .select("driver_id")
-          .in("driver_id", driverIds)
-          .in("status", ["accepted", "in_transit", "picked_up"]);
-
-        const busyDriverIds = new Set((activeDeliveries ?? []).map((d) => d.driver_id));
-        const free = unsuspendedDrivers.filter((d) => !busyDriverIds.has(d.id));
-        freeUserIds = free.map((d) => d.user_id).filter(Boolean);
-      }
-    }
-
-    // Buscar subscriptions se ainda não obtidas
-    if (subIds.length === 0 && freeUserIds.length > 0) {
-      const { data: driverDevices } = await supabase
-        .from("driver_push_devices")
-        .select("subscription_id")
-        .in("driver_id", freeUserIds)
-        .eq("active", true)
-        .not("subscription_id", "is", null);
-
-      const { data: subs } = await supabase
-        .from("push_subscriptions")
-        .select("onesignal_subscription_id")
-        .in("user_id", freeUserIds)
-        .eq("active", true)
-        .not("onesignal_subscription_id", "is", null);
-
-      const combined = [
-        ...(driverDevices ?? []).map((d) => d.subscription_id),
-        ...(subs ?? []).map((s) => s.onesignal_subscription_id),
-      ];
-      subIds = Array.from(new Set(combined.filter(Boolean)));
-    }
+    // Step 3: Obter total de motoristas cadastrados
+    const { count: totalDriversCount } = await supabase
+      .from("drivers")
+      .select("id", { count: "exact", head: true })
+      .eq("is_active", true);
 
     const APP_BASE_URL = getEnvVar("APP_BASE_URL") || "https://duarteentregas.vercel.app";
     const driverFee = Number((order as any)?.driver_fee || 0);
     const feeText = driverFee > 0 ? ` no valor de R$ ${driverFee.toFixed(2)}` : "";
 
-    // Step 4: Montar Payload OneSignal com garantia de entrega
+    // Step 4: Montar Payload OneSignal com garantia de entrega para TODOS os motoristas cadastrados
     const payload: Record<string, any> = {
       app_id: ONESIGNAL_APP_ID,
       target_channel: "push",
+      included_segments: ["Total Subscriptions"],
       headings: {
         pt: "🚚 Nova entrega disponível!",
         en: "New delivery available!",
@@ -1057,20 +1004,6 @@ export async function handleEdgeFunction(
       android_accent_color: "FFF97316",
     };
     applyAndroidChannel(payload);
-
-    // Estratégia de Alvo:
-    // 1. Alvejar por External IDs (user_id do motorista no OneSignal)
-    // 2. Alvejar por Subscription IDs (tokens de aparelhos específicos)
-    // 3. Fail-safe: se ambos estiverem vazios devido a RLS, alvejar o segmento "Active Subscriptions"
-    if (freeUserIds.length > 0) {
-      payload.include_aliases = { external_id: freeUserIds };
-    }
-    if (subIds.length > 0) {
-      payload.include_subscription_ids = subIds;
-    }
-    if (freeUserIds.length === 0 && subIds.length === 0) {
-      payload.included_segments = ["Active Subscriptions"];
-    }
 
     try {
       const osRes = await fetch(ONESIGNAL_API, {

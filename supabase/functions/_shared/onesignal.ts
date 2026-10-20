@@ -7,7 +7,7 @@ export function applyAndroidChannel(payload: Record<string, unknown>) {
     ""
   ).trim();
 
-  if (!channel) return;
+  if (!channel || channel === "284688c6-d7ac-4e12-bce7-f38594dcf06c") return;
 
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(channel);
   if (isUuid) {

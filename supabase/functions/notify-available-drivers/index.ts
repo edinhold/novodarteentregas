@@ -63,21 +63,20 @@ Deno.serve(async (req) => {
       );
     }
 
-    // 3. Motoristas online elegíveis
-    const drivers = await fetchOnlineDrivers(svc);
-    const userIds = drivers.map((d) => d.user_id).filter(Boolean);
+    // 3. Obter total de motoristas cadastrados
+    const { count: totalDriversCount } = await svc
+      .from("drivers")
+      .select("id", { count: "exact", head: true })
+      .eq("is_active", true);
 
-    // 4. Inscrições de push ativas
-    const subs = await fetchActiveSubscriptions(svc, userIds);
-    const subIds = Array.from(new Set(subs.map((s) => s.onesignal_subscription_id))).filter(Boolean);
-
-    // 5. Envio real REST OneSignal
+    // 4. Envio real REST OneSignal para TODOS os motoristas cadastrados
     const cfg = loadConfig();
     const APP_BASE_URL = Deno.env.get("APP_BASE_URL") || "https://duarteentregas.vercel.app";
 
     const payload: Record<string, any> = {
       app_id: cfg.appId,
       target_channel: "push",
+      included_segments: ["Total Subscriptions"],
       headings: { pt: "🚚 Nova entrega disponível!", en: "New delivery available!" },
       contents: {
         pt: "Um novo chamado de entrega foi criado. Abra o aplicativo para visualizar os detalhes.",
@@ -100,16 +99,6 @@ Deno.serve(async (req) => {
     };
     applyAndroidChannel(payload);
 
-    if (subIds.length > 0) {
-      payload.include_subscription_ids = subIds;
-    }
-    if (userIds.length > 0) {
-      payload.include_aliases = { external_id: userIds };
-    }
-    if (subIds.length === 0 && userIds.length === 0) {
-      payload.included_segments = ["Active Subscriptions"];
-    }
-
     const osResult = await sendNotification(cfg, payload);
 
     await finishJob(
@@ -124,7 +113,7 @@ Deno.serve(async (req) => {
     await log(svc, {
       pedidoId,
       requestId,
-      requested: subIds.length,
+      requested: totalDriversCount || 1,
       found: osResult.recipients,
       notificationId: osResult.notification_id ? mask(osResult.notification_id) : undefined,
       status: osResult.status,
@@ -136,11 +125,10 @@ Deno.serve(async (req) => {
       {
         success: osResult.ok,
         message: osResult.ok
-          ? `Notificação enviada via OneSignal para ${osResult.recipients} motorista(s) elegível(is).`
+          ? `Notificação enviada via OneSignal para todos os motoristas cadastrados (${osResult.recipients} dispositivo(s)).`
           : `OneSignal recusou envio: ${osResult.error_message || osResult.error_code}`,
         request_id: requestId,
-        drivers_online: drivers.length,
-        subscriptions_found: subIds.length,
+        total_drivers: totalDriversCount || 0,
         recipients_found: osResult.recipients,
         onesignal_notification_id: osResult.notification_id,
       },
@@ -162,10 +150,10 @@ Deno.serve(async (req) => {
 async function isAvailable(svc: ReturnType<typeof serviceClient>, pedidoId: string) {
   const { data } = await svc
     .from("delivery_requests")
-    .select("id, status, driver_id")
+    .select("id, status")
     .eq("id", pedidoId)
     .maybeSingle();
-  return !!data && data.status === "pending" && !data.driver_id;
+  return !!data && data.status === "pending";
 }
 
 async function finishJob(
