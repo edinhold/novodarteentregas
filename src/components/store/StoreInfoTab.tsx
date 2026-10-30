@@ -639,7 +639,7 @@ const StoreInfoTab = ({ restaurant, userId }: StoreInfoTabProps) => {
                     const lng = parseFloat(e.target.value);
                     if (!isNaN(lat) && !isNaN(lng)) updateMarkerPosition(lat, lng);
                   }}
-                  placeholder="-46.6333"
+                  placeholder="-54.3079"
                   className="text-xs"
                 />
               </div>

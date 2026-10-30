@@ -188,14 +188,25 @@ export function isWithinPrimaveraBounds(lat: number, lng: number): boolean {
  */
 export function extractHouseNumber(text: string): string {
   if (!text) return "";
+  const trimmed = text.trim();
+
+  // Se o texto for apenas o nome de uma rua numerada (ex: "Rua 2", "Rua 15", "Av 1"), não é número de casa
+  if (
+    /^\s*(?:rua|r\.|av\.|avenida|alameda|travessa|tv\.|rodovia|rod\.)\s+\d+[a-zA-Z]?\s*$/i.test(
+      trimmed
+    )
+  ) {
+    return "";
+  }
+
   const patterns = [
     /(?:,|n[ºo°]?|número|num|casa|lote|apto|qd\.?\s*\d+\s*lt\.?)\s*[:.]?\s*(\d{1,6}[a-zA-Z]?)\b/i,
     /,\s*(\d{1,6}[a-zA-Z]?)\b/,
-    /\b(\d{1,6})\s*$/m,
+    /\b(\d{1,6}[a-zA-Z]?)\s*$/m,
   ];
 
   for (const pattern of patterns) {
-    const match = text.match(pattern);
+    const match = trimmed.match(pattern);
     if (match && match[1]) {
       return match[1].trim();
     }
@@ -216,6 +227,14 @@ export function validatePrimaveraFeature(feature: MapboxGeocodeFeature): {
     return { valid: false, reason: "Coordenadas retornadas pela Mapbox são inválidas." };
   }
 
+  // 1. Coordenadas DEVEM estar dentro da área de Primavera do Leste
+  if (!isWithinPrimaveraBounds(lat, lng)) {
+    return {
+      valid: false,
+      reason: "O endereço localizado está fora dos limites de Primavera do Leste - MT.",
+    };
+  }
+
   const context = feature.properties.context || {};
   const placeName = (context.place?.name || "").toLowerCase().trim();
   const regionName = (context.region?.name || "").toLowerCase().trim();
@@ -226,7 +245,7 @@ export function validatePrimaveraFeature(feature: MapboxGeocodeFeature): {
   const fullAddress = (feature.properties.full_address || "").toLowerCase();
   const placeFormatted = (feature.properties.place_formatted || "").toLowerCase();
 
-  // 1. País deve ser Brasil
+  // 2. País deve ser Brasil
   const isBrazil =
     countryCode === "BR" ||
     countryName.includes("brasil") ||
@@ -237,7 +256,7 @@ export function validatePrimaveraFeature(feature: MapboxGeocodeFeature): {
     return { valid: false, reason: "Endereço localizado fora do Brasil." };
   }
 
-  // 2. Estado deve ser Mato Grosso (MT)
+  // 3. Estado deve ser Mato Grosso (MT)
   const isMatoGrosso =
     regionCode === "MT" ||
     regionName.includes("mato grosso") ||
@@ -250,18 +269,11 @@ export function validatePrimaveraFeature(feature: MapboxGeocodeFeature): {
     return { valid: false, reason: "Endereço localizado fora de Mato Grosso (MT)." };
   }
 
-  // 3. Município deve ser Primavera do Leste
-  const isPrimaveraName =
-    placeName.includes("primavera do leste") ||
-    fullAddress.includes("primavera do leste") ||
-    placeFormatted.includes("primavera do leste");
-
-  const withinBounds = isWithinPrimaveraBounds(lat, lng);
-
-  if (!isPrimaveraName && !withinBounds) {
+  // 4. Se a feição identificou especificamente outro município, rejeitar
+  if (placeName && !placeName.includes("primavera do leste")) {
     return {
       valid: false,
-      reason: `O endereço encontrado pertence a outro município (${context.place?.name || "outro município"}). Apenas Primavera do Leste - MT é aceito.`,
+      reason: `O endereço encontrado pertence a outro município (${context.place?.name}). Apenas Primavera do Leste - MT é aceito.`,
     };
   }
 
@@ -281,25 +293,49 @@ export function parseMapboxFeature(
   let street =
     context.address?.street_name ||
     context.street?.name ||
-    feature.properties.name ||
+    (feature.properties.feature_type === "street" || feature.properties.feature_type === "address"
+      ? feature.properties.name
+      : "") ||
     "";
+
+  if (!street && feature.properties.feature_type !== "place") {
+    street = feature.properties.name || "";
+  }
 
   const houseNumber =
     context.address?.address_number ||
-    (context.address?.name && /^\d+$/.test(context.address.name)
+    (context.address?.name && /^\d+[a-zA-Z]?$/.test(context.address.name)
       ? context.address.name
       : "") ||
     userTypedNumber ||
     "";
 
-  if (houseNumber && street.endsWith(` ${houseNumber}`)) {
-    street = street.substring(0, street.length - houseNumber.length - 1).trim();
+  if (houseNumber && street) {
+    const numRegex = new RegExp(`\\s+${houseNumber}$`, "i");
+    if (numRegex.test(street)) {
+      street = street.replace(numRegex, "").trim();
+    }
   }
 
-  const neighborhood =
+  // Bairro / localidade: NUNCA usar name_preferred como fallback genérico pois ele contém o nome da rua!
+  let neighborhood =
     context.neighborhood?.name ||
-    feature.properties.name_preferred ||
+    context.locality?.name ||
+    context.district?.name ||
+    (feature.properties.feature_type === "neighborhood" ? feature.properties.name : "") ||
     "";
+
+  // Se neighborhood for igual ou já estiver contido na rua ou cidade, limpa para evitar duplicidade
+  const lowerStreet = street.toLowerCase();
+  const lowerNeigh = neighborhood.toLowerCase();
+  if (
+    lowerNeigh &&
+    (lowerNeigh === lowerStreet ||
+      lowerStreet.includes(lowerNeigh) ||
+      lowerNeigh.includes("primavera do leste"))
+  ) {
+    neighborhood = "";
+  }
 
   const city = context.place?.name || PRIMAVERA_DO_LESTE.CITY_NAME;
   const state = context.region?.name || PRIMAVERA_DO_LESTE.STATE_NAME;
@@ -393,6 +429,7 @@ export async function searchAddressSuggestions(
   url.searchParams.set("country", "br");
   url.searchParams.set("language", "pt");
   url.searchParams.set("limit", limit.toString());
+  url.searchParams.set("bbox", PRIMAVERA_DO_LESTE.BBOX.join(","));
   url.searchParams.set(
     "proximity",
     `${PRIMAVERA_DO_LESTE.CENTER_LNG_LAT[0]},${PRIMAVERA_DO_LESTE.CENTER_LNG_LAT[1]}`
@@ -419,7 +456,7 @@ export async function searchAddressSuggestions(
     if (response.status === 429) {
       throw new MapboxServiceError(
         "RATE_LIMIT",
-        "Limite de requisições atinga na Mapbox. Aguarde alguns instantes."
+        "Limite de requisições atingido na Mapbox. Aguarde alguns instantes."
       );
     }
     if (!response.ok) {
@@ -880,7 +917,7 @@ export async function calculateMultiStopRoute(
     if (response.status === 429) {
       throw new MapboxServiceError(
         "RATE_LIMIT",
-        "Limite de requisições atinga na Mapbox."
+        "Limite de requisições atingido na Mapbox."
       );
     }
     if (!response.ok) {

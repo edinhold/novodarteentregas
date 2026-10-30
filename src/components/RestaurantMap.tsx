@@ -92,7 +92,7 @@ const isValidCoordinate = (lat?: number | null, lng?: number | null) =>
 const getGeocodeAddress = (restaurant: Restaurant) => {
   const address = restaurant.address?.trim();
   if (!address) return "";
-  return /primavera do leste|\bmt\b|mato grosso/i.test(address)
+  return /primavera do leste/i.test(address)
     ? `${address}, Brasil`
     : `${address}, Primavera do Leste, MT, Brasil`;
 };

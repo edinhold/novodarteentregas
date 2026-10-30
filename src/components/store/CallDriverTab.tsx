@@ -21,8 +21,7 @@ import ReportLocationButton from "@/components/ReportLocationButton";
 import ChatWidget from "@/components/ChatWidget";
 import { useDriverLocations } from "@/hooks/useDriverLocations";
 import L from "leaflet";
-import "leaflet/dist/leaflet.css";
-import { MAP_LAYERS, GOOGLE_MAPS_API_KEY } from "@/config/maps";
+import { MAP_LAYERS } from "@/config/maps";
 import { getBestLocation, isValidCoordinate } from "@/utils/geolocation";
 import {
   searchAddressSuggestions,
@@ -88,6 +87,34 @@ const PROFILE_CONFIG: Record<RouteProfile, { label: string; icon: typeof Car; os
 };
 
 // Mapbox Directions v5 route fetcher — retorna distancia da rota (km), duracao (min) e geometria
+function formatDeliveryAddressWithNumber(address: string, number: string): string {
+  const num = (number || "").trim();
+  let addr = (address || "").trim();
+  if (!num) return addr;
+
+  // Se já contém o número informado (ex: "Rua X, 123" ou "Rua X 123"), não duplica
+  const numRegex = new RegExp(`(?:^|[,\\s])${num}(?:$|[,\\s])`);
+  if (numRegex.test(addr)) {
+    return addr;
+  }
+
+  // Se termina com a cidade/estado (ex: ", Primavera do Leste - MT"), insere o número antes da cidade
+  const cityMatch = addr.match(/,\s*(Primavera do Leste.*)$/i);
+  if (cityMatch && cityMatch.index != null) {
+    const beforeCity = addr.slice(0, cityMatch.index).trim();
+    const citySuffix = cityMatch[1];
+    const parts = beforeCity.split(",").map((p) => p.trim());
+    if (parts.length > 1) {
+      const street = parts[0];
+      const rest = parts.slice(1).join(", ");
+      return `${street}, ${num}, ${rest}, ${citySuffix}`;
+    }
+    return `${beforeCity}, ${num}, ${citySuffix}`;
+  }
+
+  return `${addr}, ${num}`;
+}
+
 async function fetchOSRMRoute(
   fromLat: number, fromLng: number, toLat: number, toLng: number,
   profile: RouteProfile = "driving"
@@ -897,7 +924,6 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
         } else {
           setAddressSuggestions([]);
           setShowSuggestions(false);
-          toast.info("Não foi possível localizar este endereço com precisão. Confira rua, número, bairro e cidade.", { duration: 5000 });
         }
       } catch (err: any) {
         console.error("Geocode error:", err);
@@ -972,37 +998,13 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
         setManualDistanceEnabled(false);
         
         try {
-          if (GOOGLE_MAPS_API_KEY) {
-            const res = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GOOGLE_MAPS_API_KEY}&language=pt-BR`);
-            const data = await res.json();
-            if (data.status === "OK" && data.results?.[0]) {
-              const first = data.results[0];
-              const comps = first.address_components;
-              const streetNumber = comps?.find((c: any) => c.types.includes("street_number"))?.long_name || "";
-              
-              const itemForFormat = { ...first, address: comps };
-              const formatted = formatAddress(itemForFormat, false);
-              
-              setCallForm(f => ({ 
-                ...f, 
-                delivery: formatted,
-                delivery_number: streetNumber 
-              }));
-              return;
-            }
-          }
-
-          try {
-            const parsed = await reverseGeocodeMapbox(lat, lng);
-            if (parsed?.fullAddress) {
-              setCallForm(f => ({
-                ...f,
-                delivery: parsed.fullAddress,
-                delivery_number: parsed.number || f.delivery_number,
-              }));
-            }
-          } catch (err) {
-            console.error("Map click geocode error:", err);
+          const parsed = await reverseGeocodeMapbox(lat, lng);
+          if (parsed?.fullAddress) {
+            setCallForm(f => ({
+              ...f,
+              delivery: parsed.fullAddress,
+              delivery_number: parsed.number || f.delivery_number,
+            }));
           }
         } catch (err) {
           console.error("Map click geocode error:", err);
@@ -1088,9 +1090,6 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
           setManualDistanceEnabled(false);
           
           try {
-
-
-          try {
             const parsed = await reverseGeocodeMapbox(pos.lat, pos.lng);
             if (parsed?.fullAddress) {
               setCallForm(f => ({
@@ -1099,9 +1098,6 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
                 delivery_number: parsed.number || f.delivery_number,
               }));
             }
-          } catch (err) {
-            console.error("Marker drag geocode error:", err);
-          }
           } catch (err) {
             console.error("Marker drag geocode error:", err);
           }
@@ -1185,6 +1181,29 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
     }
   };
 
+  const handleDeliveryNumberBlur = async () => {
+    const num = callForm.delivery_number.trim();
+    if (!num || !callForm.delivery.trim()) return;
+
+    const fullAddr = formatDeliveryAddressWithNumber(callForm.delivery, num);
+    try {
+      const parsed = await geocodeAddressMapbox(fullAddr);
+      if (parsed?.coordinates) {
+        setDeliveryLatLng([parsed.coordinates.latitude, parsed.coordinates.longitude]);
+        setManualDistanceEnabled(false);
+        if (mapRef.current && storeLat && storeLng) {
+          const bounds = L.latLngBounds([
+            [storeLat, storeLng],
+            [parsed.coordinates.latitude, parsed.coordinates.longitude],
+          ]);
+          mapRef.current.fitBounds(bounds, { padding: [40, 40] });
+        }
+      }
+    } catch {
+      // Se não encontrar o número exato, mantém a posição atual da rua
+    }
+  };
+
   const handleCallDriver = async () => {
     if (!callForm.pickup.trim() || !callForm.delivery.trim() || !callForm.delivery_number.trim()) {
       toast.error("Preencha endereço de coleta, entrega e número");
@@ -1193,9 +1212,10 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
 
     let finalDistance = distanceKm;
     let finalLatLng = deliveryLatLng;
-    const finalDeliveryAddress = callForm.delivery_number.trim() 
-      ? `${callForm.delivery}, ${callForm.delivery_number}` 
-      : callForm.delivery;
+    const finalDeliveryAddress = formatDeliveryAddressWithNumber(
+      callForm.delivery,
+      callForm.delivery_number
+    );
 
     // If no coordinates yet, try to use the first suggestion if available
     if (!finalLatLng && addressSuggestions.length > 0) {
@@ -1575,6 +1595,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
                 <Input
                   value={callForm.delivery_number}
                   onChange={(e) => setCallForm(f => ({ ...f, delivery_number: e.target.value }))}
+                  onBlur={handleDeliveryNumberBlur}
                   placeholder="Nº"
                 />
               </div>
@@ -1587,7 +1608,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
                 <ReportLocationButton
                   latitude={deliveryLatLng[0]}
                   longitude={deliveryLatLng[1]}
-                  address={callForm.delivery_number.trim() ? `${callForm.delivery}, ${callForm.delivery_number}` : callForm.delivery}
+                  address={formatDeliveryAddressWithNumber(callForm.delivery, callForm.delivery_number)}
                   userId={user.id}
                 />
               )}
