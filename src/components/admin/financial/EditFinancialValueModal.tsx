@@ -232,7 +232,6 @@ export const EditFinancialValueModal: React.FC<EditFinancialValueModalProps> = (
           .update({
             amount: parsedNewValue,
             net_amount: netValue,
-            updated_at: new Date().toISOString(),
           })
           .eq("id", item.id);
 

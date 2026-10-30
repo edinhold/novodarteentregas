@@ -109,7 +109,7 @@ export const FinancialMaintenanceSection: React.FC<FinancialMaintenanceSectionPr
       if (error) throw error;
 
       toast.success(
-        `Limpeza executada com sucesso! ${data?.total || 0} registros removidos de forma auditada.`
+        `Limpeza executada com sucesso! ${(data as any)?.total || 0} registros removidos de forma auditada.`
       );
 
       setCleanupModalOpen(false);

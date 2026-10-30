@@ -20,9 +20,14 @@ export type PrintScope = "current_page" | "all_filtered" | "selected_only";
 interface FinancialPrintModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  summary: FinancialSummary;
+  summary: Partial<FinancialSummary> & {
+    totalEntries: number;
+    paidToDriversTotal: number;
+    platformRevenueTotal: number;
+    cashBalance: number;
+  };
   periodLabel: string;
-  transactions: UnifiedTransaction[];
+  transactions: any[];
   selectedTxIds?: Set<string>;
   appliedFilters?: {
     search?: string;
@@ -31,7 +36,7 @@ interface FinancialPrintModalProps {
     storeId?: string;
     driverId?: string;
   };
-  currentPageTransactions?: UnifiedTransaction[];
+  currentPageTransactions?: any[];
 }
 
 export const FinancialPrintModal: React.FC<FinancialPrintModalProps> = ({

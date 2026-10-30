@@ -462,6 +462,7 @@ export type Database = {
           geocode_confidence?: string | null
           geocode_source?: string | null
           group_id?: string | null
+          hidden_by_store?: boolean | null
           hidden_for_store?: boolean | null
           id?: string
           notes?: string | null
@@ -489,6 +490,7 @@ export type Database = {
           geocode_confidence?: string | null
           geocode_source?: string | null
           group_id?: string | null
+          hidden_by_store?: boolean | null
           hidden_for_store?: boolean | null
           id?: string
           notes?: string | null
@@ -718,6 +720,57 @@ export type Database = {
         }
         Relationships: []
       }
+      financial_adjustment_logs: {
+        Row: {
+          adjustment_amount: number
+          admin_email: string | null
+          admin_user_id: string
+          created_at: string
+          driver_id: string | null
+          driver_name: string | null
+          id: string
+          movement_type: string
+          new_value: number
+          old_value: number
+          reason: string
+          store_id: string | null
+          store_name: string | null
+          transaction_id: string
+        }
+        Insert: {
+          adjustment_amount: number
+          admin_email?: string | null
+          admin_user_id: string
+          created_at?: string
+          driver_id?: string | null
+          driver_name?: string | null
+          id?: string
+          movement_type: string
+          new_value: number
+          old_value: number
+          reason: string
+          store_id?: string | null
+          store_name?: string | null
+          transaction_id: string
+        }
+        Update: {
+          adjustment_amount?: number
+          admin_email?: string | null
+          admin_user_id?: string
+          created_at?: string
+          driver_id?: string | null
+          driver_name?: string | null
+          id?: string
+          movement_type?: string
+          new_value?: number
+          old_value?: number
+          reason?: string
+          store_id?: string | null
+          store_name?: string | null
+          transaction_id?: string
+        }
+        Relationships: []
+      }
       financial_cleanup_logs: {
         Row: {
           admin_user_id: string
@@ -803,6 +856,9 @@ export type Database = {
           pedido_id: string | null
           platform: string | null
           recipients_count: number | null
+          recipients_found: number | null
+          recipients_requested: number | null
+          request_id: string | null
           response_body_sanitized: Json | null
           response_status: number | null
         }
@@ -815,6 +871,9 @@ export type Database = {
           pedido_id?: string | null
           platform?: string | null
           recipients_count?: number | null
+          recipients_found?: number | null
+          recipients_requested?: number | null
+          request_id?: string | null
           response_body_sanitized?: Json | null
           response_status?: number | null
         }
@@ -827,6 +886,9 @@ export type Database = {
           pedido_id?: string | null
           platform?: string | null
           recipients_count?: number | null
+          recipients_found?: number | null
+          recipients_requested?: number | null
+          request_id?: string | null
           response_body_sanitized?: Json | null
           response_status?: number | null
         }
@@ -844,6 +906,9 @@ export type Database = {
           pedido_id: string
           processed_at: string | null
           recipients_count: number | null
+          recipients_found: number | null
+          recipients_requested: number | null
+          request_id: string | null
           status: string
         }
         Insert: {
@@ -857,6 +922,9 @@ export type Database = {
           pedido_id: string
           processed_at?: string | null
           recipients_count?: number | null
+          recipients_found?: number | null
+          recipients_requested?: number | null
+          request_id?: string | null
           status?: string
         }
         Update: {
@@ -870,6 +938,9 @@ export type Database = {
           pedido_id?: string
           processed_at?: string | null
           recipients_count?: number | null
+          recipients_found?: number | null
+          recipients_requested?: number | null
+          request_id?: string | null
           status?: string
         }
         Relationships: []
@@ -1789,6 +1860,14 @@ export type Database = {
       }
     }
     Functions: {
+      notify_available_drivers: {
+        Args: { p_pedido_id: string }
+        Returns: Json
+      }
+      notify_available_drivers_direct: {
+        Args: { p_pedido_id: string }
+        Returns: Json
+      }
       accept_delivery_group: { Args: { p_group_id: string }; Returns: boolean }
       accept_delivery_request:
         | {

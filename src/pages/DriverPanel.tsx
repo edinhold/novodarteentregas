@@ -537,7 +537,7 @@ const DriverPanel = () => {
       try {
         const { data, error } = await supabase
           .from("delivery_requests")
-          .select("*, restaurants(name, address, phone)")
+          .select("*, restaurants(name, address)")
           .eq("id", pedidoParam)
           .maybeSingle();
 

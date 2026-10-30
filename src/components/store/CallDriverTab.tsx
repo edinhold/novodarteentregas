@@ -89,7 +89,7 @@ const PROFILE_CONFIG: Record<RouteProfile, { label: string; icon: typeof Car; os
 // Mapbox Directions v5 route fetcher — retorna distancia da rota (km), duracao (min) e geometria
 function formatDeliveryAddressWithNumber(address: string, number: string): string {
   const num = (number || "").trim();
-  let addr = (address || "").trim();
+  const addr = (address || "").trim();
   if (!num) return addr;
 
   // Se já contém o número informado (ex: "Rua X, 123" ou "Rua X 123"), não duplica

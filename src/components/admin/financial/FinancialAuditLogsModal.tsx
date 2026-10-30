@@ -45,7 +45,7 @@ export const FinancialAuditLogsModal: React.FC<FinancialAuditLogsModalProps> = (
     enabled: open,
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("financial_adjustment_logs" as any)
+        .from("financial_adjustment_logs")
         .select("*")
         .order("created_at", { ascending: false });
       
@@ -53,7 +53,7 @@ export const FinancialAuditLogsModal: React.FC<FinancialAuditLogsModalProps> = (
         console.warn("Aviso ao buscar logs de auditoria:", error);
         return [];
       }
-      return (data || []) as FinancialAuditLogRecord[];
+      return (data || []) as unknown as FinancialAuditLogRecord[];
     },
   });
 

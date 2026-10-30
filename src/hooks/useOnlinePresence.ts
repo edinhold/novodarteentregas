@@ -8,13 +8,14 @@ import { useAuth } from "@/contexts/AuthContext";
  */
 export function useOnlinePresence(role?: "driver" | "store_owner" | "admin" | "customer") {
   const { user } = useAuth();
+  const userId = user?.id;
   const [onlineIds, setOnlineIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    if (!user) return;
+    if (!userId) return;
     const channel = createFreshChannel(
       "global-presence",
-      { config: { presence: { key: user.id } } },
+      { config: { presence: { key: userId } } },
       true
     );
 
@@ -25,14 +26,14 @@ export function useOnlinePresence(role?: "driver" | "store_owner" | "admin" | "c
       })
       .subscribe(async (status) => {
         if (status === "SUBSCRIBED") {
-          await channel.track({ user_id: user.id, role: role || "user", at: Date.now() });
+          await channel.track({ user_id: userId, role: role || "user", at: Date.now() });
         }
       });
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user?.id, role]);
+  }, [userId, role]);
 
   return { onlineIds, isOnline: (id?: string | null) => !!id && onlineIds.has(id) };
 }

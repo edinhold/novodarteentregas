@@ -109,6 +109,7 @@ export interface DriverEarningRecord {
   driver_id: string;
   delivery_request_id?: string | null;
   amount: number;
+  status?: string | null;
 }
 
 export interface WithdrawalRequestRecord {

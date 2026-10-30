@@ -124,6 +124,12 @@ interface MapboxGeocodeFeature {
       neighborhood?: {
         name?: string;
       };
+      locality?: {
+        name?: string;
+      };
+      district?: {
+        name?: string;
+      };
       postcode?: {
         name?: string;
       };

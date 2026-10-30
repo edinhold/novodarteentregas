@@ -59,7 +59,7 @@ export const FinancialModule: React.FC<FinancialModuleProps> = ({ standalone = f
     queryKey: ["admin-stores-recharge-list"],
     queryFn: async () => {
       const [{ data: restaurants }, { data: credits }] = await Promise.all([
-        supabase.from("restaurants").select("id, name, owner_id, phone").order("name"),
+        supabase.from("restaurants").select("id, name, owner_id").order("name"),
         supabase.from("store_credits").select("user_id, balance"),
       ]);
 
@@ -68,7 +68,7 @@ export const FinancialModule: React.FC<FinancialModuleProps> = ({ standalone = f
         id: r.id,
         name: r.name,
         owner_id: r.owner_id,
-        phone: r.phone,
+        phone: (r as any).phone || "",
         balance: r.owner_id ? (creditsMap.get(r.owner_id) ?? 0) : 0,
       }));
     },

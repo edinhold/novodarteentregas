@@ -5,8 +5,8 @@ function getEnvVar(key: string): string | undefined {
   if (typeof process !== "undefined" && process.env && process.env[key]) {
     return process.env[key];
   }
-  if (typeof import.meta !== "undefined" && import.meta.env && (import.meta.env as any)[key]) {
-    return (import.meta.env as any)[key];
+  if (typeof import.meta !== "undefined" && (import.meta as any)?.env && (import.meta as any).env[key]) {
+    return (import.meta as any).env[key];
   }
   return undefined;
 }
@@ -81,13 +81,12 @@ function mask(value?: string | null): string {
 }
 
 const ONESIGNAL_APP_ID =
-  (typeof import.meta !== "undefined" && import.meta.env?.VITE_ONESIGNAL_APP_ID) ||
   getEnvVar("VITE_ONESIGNAL_APP_ID") ||
   "4f68f47f-63ee-4326-8f98-e63514f2b154";
 
 function resolveOneSignalApiKey(): string {
   try {
-    const vKey = import.meta.env?.VITE_ONESIGNAL_APP_API_KEY;
+    const vKey = getEnvVar("VITE_ONESIGNAL_APP_API_KEY");
     if (typeof vKey === "string" && vKey.trim().length > 0) {
       return vKey.trim();
     }
@@ -120,7 +119,6 @@ const ONESIGNAL_API = "https://api.onesignal.com/notifications?c=push";
 
 function applyAndroidChannel(payload: Record<string, any>) {
   const channel =
-    (typeof import.meta !== "undefined" && import.meta.env?.VITE_ONESIGNAL_ANDROID_CHANNEL_ID) ||
     getEnvVar("ONESIGNAL_ANDROID_CHANNEL_ID") ||
     getEnvVar("VITE_ONESIGNAL_ANDROID_CHANNEL_ID") ||
     "";
@@ -435,7 +433,7 @@ export async function handleEdgeFunction(
         body: JSON.stringify(payload),
       });
 
-      const osData = await osRes.json().catch(() => ({}));
+      const osData: any = await osRes.json().catch(() => ({}));
       const ok = osRes.ok && !!osData?.id && (!osData.errors || osData.errors.length === 0);
 
       await supabase.from("notification_delivery_logs").insert({
@@ -970,6 +968,7 @@ export async function handleEdgeFunction(
       .from("drivers")
       .select("id", { count: "exact", head: true })
       .eq("is_active", true);
+    const totalDrivers = Number(totalDriversCount || 0);
 
     const APP_BASE_URL = getEnvVar("APP_BASE_URL") || "https://duarteentregas.vercel.app";
     const driverFee = Number((order as any)?.driver_fee || 0);
@@ -1015,7 +1014,7 @@ export async function handleEdgeFunction(
         body: JSON.stringify(payload),
       });
 
-      const osData = await osRes.json().catch(() => ({}));
+      const osData: any = await osRes.json().catch(() => ({}));
       const ok = osRes.ok && !!osData?.id && (!osData.errors || osData.errors.length === 0);
       const notificationId = osData?.id ? mask(osData.id) : null;
 
@@ -1026,7 +1025,7 @@ export async function handleEdgeFunction(
           event_type: "nova_entrega",
           status: ok ? "sent" : "failed",
           attempts: 1,
-          recipients_count: osData?.recipients ?? Math.max(freeUserIds.length, subIds.length, 1),
+          recipients_count: osData?.recipients ?? Math.max(totalDrivers, 1),
           onesignal_notification_id: notificationId,
           last_error: ok ? null : JSON.stringify(osData?.errors || osData),
           processed_at: new Date().toISOString(),
@@ -1038,8 +1037,8 @@ export async function handleEdgeFunction(
         pedido_id: pedidoId,
         event_type: "nova_entrega",
         request_id: requestId,
-        recipients_requested: Math.max(freeUserIds.length, subIds.length, 1),
-        recipients_found: osData?.recipients ?? Math.max(freeUserIds.length, subIds.length, 1),
+        recipients_requested: Math.max(totalDrivers, 1),
+        recipients_found: osData?.recipients ?? Math.max(totalDrivers, 1),
         onesignal_notification_id: notificationId,
         response_status: osRes.status,
         response_body_sanitized: JSON.stringify(osData).slice(0, 1000),
@@ -1056,8 +1055,8 @@ export async function handleEdgeFunction(
           message: ok
             ? `Notificação enviada com sucesso para os motoristas via OneSignal.`
             : `OneSignal recusou envio: ${JSON.stringify(osData?.errors || osData)}`,
-          drivers_online: freeUserIds.length,
-          recipients_found: osData?.recipients ?? subIds.length,
+          drivers_online: totalDrivers,
+          recipients_found: osData?.recipients ?? totalDrivers,
           onesignal_notification_id: osData?.id,
         },
       };
@@ -2148,10 +2147,11 @@ export async function handleEdgeFunction(
 
     try {
       try {
-        const { data: { users }, error: listErr } = await supabase.auth.admin.listUsers();
-        if (!listErr && users) {
+        const { data: usersData, error: listErr } = await (supabase.auth.admin as any).listUsers();
+        const users: any[] = usersData?.users || [];
+        if (!listErr && users.length > 0) {
           const cleanPhone = phone ? phone.replace(/\D/g, "") : "";
-          const matchedUser = users.find((u) => {
+          const matchedUser = users.find((u: any) => {
             const uEmailMatches = email && u.email?.toLowerCase() === email.toLowerCase();
             const uPhoneRaw = u.phone ? u.phone.replace(/\D/g, "") : "";
             const uPhoneMatches = cleanPhone && uPhoneRaw && (uPhoneRaw === cleanPhone || uPhoneRaw.endsWith(cleanPhone) || cleanPhone.endsWith(uPhoneRaw));
