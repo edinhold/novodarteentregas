@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase, createFreshChannel } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
-import { playUrgentNotification } from "@/lib/notificationSound";
+import { playUrgentNotification, startDeliveryRingtone, stopDeliveryRingtone } from "@/lib/notificationSound";
 import { cancelDeliveryNotification } from "@/lib/push";
 import { toast } from "sonner";
 
@@ -74,6 +74,7 @@ export function useDeliveryOverlay({ standby, timeoutMs = 30000, onAccepted }: O
   standbyRef.current = standby;
 
   const stopAlerts = useCallback(() => {
+    stopDeliveryRingtone();
     if (soundTimerRef.current) {
       clearInterval(soundTimerRef.current);
       soundTimerRef.current = null;
@@ -91,30 +92,25 @@ export function useDeliveryOverlay({ standby, timeoutMs = 30000, onAccepted }: O
 
   const close = useCallback(() => {
     stopAlerts();
+    stopDeliveryRingtone();
     setDelivery(null);
     setState("empty");
   }, [stopAlerts]);
 
-  const startAlerts = useCallback(() => {
-    try {
-      playUrgentNotification();
-      if ("vibrate" in navigator) navigator.vibrate?.([400, 200, 400, 200, 400]);
-    } catch {}
-    soundTimerRef.current = setInterval(() => {
-      try {
-        playUrgentNotification();
-        if ("vibrate" in navigator) navigator.vibrate?.([400, 200, 400]);
-      } catch {}
-    }, 4000);
+  const startAlerts = useCallback((deliveryId?: string) => {
+    // Inicia o toque contínuo até que alguém aceite ou feche
+    startDeliveryRingtone(deliveryId);
 
     // Local response countdown (UI only — no database polling).
     shownAtRef.current = Date.now();
     setSecondsLeft(Math.ceil(timeoutMs / 1000));
+    if (countdownRef.current) clearInterval(countdownRef.current);
     countdownRef.current = setInterval(() => {
       const remaining = Math.max(0, timeoutMs - (Date.now() - shownAtRef.current));
       setSecondsLeft(Math.ceil(remaining / 1000));
     }, 1000);
 
+    if (autoCloseRef.current) clearTimeout(autoCloseRef.current);
     autoCloseRef.current = setTimeout(() => {
       console.log("[DeliveryOverlay] Sem resposta em", timeoutMs, "ms — oferta segue disponível para outros motoristas");
       close();
@@ -166,7 +162,7 @@ export function useDeliveryOverlay({ standby, timeoutMs = 30000, onAccepted }: O
       if (!id) return;
       if (dismissedRef.current.has(id)) dismissedRef.current.delete(id);
       stopAlerts();
-      startAlerts();
+      startAlerts(id);
       loadDelivery(id);
     },
     [loadDelivery, startAlerts, stopAlerts]
@@ -260,7 +256,7 @@ export function useDeliveryOverlay({ standby, timeoutMs = 30000, onAccepted }: O
           if (deliveryRef.current) return; // prevent multiple overlays
 
           console.log("[DeliveryOverlay] Nova entrega recebida", row.id);
-          startAlerts();
+          startAlerts(row.id);
           loadDelivery(row.id);
 
           // Show OS-level notification so the driver is alerted even when the

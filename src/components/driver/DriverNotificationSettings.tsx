@@ -13,6 +13,9 @@ import {
   setNotificationVolume,
   playNotificationSound,
   playUrgentNotification,
+  startDeliveryRingtone,
+  stopDeliveryRingtone,
+  isDeliveryRingtonePlaying,
   playStandbyAlert,
   setStandbyInterval,
 } from "@/lib/notificationSound";
@@ -26,6 +29,13 @@ const DriverNotificationSettings = () => {
   const { user } = useAuth();
   const [settings, setSettings] = useState<DriverNotificationSettingsState>(loadDriverNotificationSettings);
   const [pendingCount, setPendingCount] = useState(0);
+  const [isRingtoneTesting, setIsRingtoneTesting] = useState(false);
+
+  useEffect(() => {
+    return () => {
+      stopDeliveryRingtone();
+    };
+  }, []);
 
   // Apply sound controls while this tab is open. The standby loop itself is
   // owned by DriverPanel, so it keeps working on mobile after leaving this tab.
@@ -105,22 +115,40 @@ const DriverNotificationSettings = () => {
             max={100}
             step={5}
           />
-          <div className="flex gap-2">
+          <div className="flex flex-col gap-2">
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => playNotificationSound()}
+                className="flex-1 text-xs"
+              >
+                🔔 Testar Normal
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => playUrgentNotification()}
+                className="flex-1 text-xs"
+              >
+                🚨 Testar Toque
+              </Button>
+            </div>
             <Button
               size="sm"
-              variant="outline"
-              onClick={() => playNotificationSound()}
-              className="flex-1 text-xs"
+              variant={isRingtoneTesting ? "destructive" : "secondary"}
+              onClick={() => {
+                if (isRingtoneTesting) {
+                  stopDeliveryRingtone();
+                  setIsRingtoneTesting(false);
+                } else {
+                  startDeliveryRingtone("preview_teste");
+                  setIsRingtoneTesting(true);
+                }
+              }}
+              className="w-full text-xs font-semibold"
             >
-              🔔 Testar Normal
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => playUrgentNotification()}
-              className="flex-1 text-xs"
-            >
-              🚨 Testar Urgente
+              {isRingtoneTesting ? "⏹ Parar Toque Contínuo" : "🔊 Testar Toque Contínuo Incessante"}
             </Button>
           </div>
         </div>

@@ -1,7 +1,15 @@
 import { describe, it, expect, vi } from "vitest";
 import { handleEdgeFunction } from "@/server/functionsRouter";
 import { detectPlatform, deviceName } from "@/lib/push";
-import { setNotificationVolume, getNotificationVolume, playNotificationSound, playUrgentNotification } from "@/lib/notificationSound";
+import { 
+  setNotificationVolume, 
+  getNotificationVolume, 
+  playNotificationSound, 
+  playUrgentNotification,
+  startDeliveryRingtone,
+  stopDeliveryRingtone,
+  isDeliveryRingtonePlaying,
+} from "@/lib/notificationSound";
 
 describe("Notification System & FunctionsRouter", () => {
   it("push-config returns valid configuration", async () => {
@@ -49,6 +57,22 @@ describe("Notification System & FunctionsRouter", () => {
   it("sound triggers execute safely without crashing", () => {
     expect(() => playNotificationSound()).not.toThrow();
     expect(() => playUrgentNotification()).not.toThrow();
+  });
+
+  it("continuous delivery ringtone loops and stops cleanly", () => {
+    expect(isDeliveryRingtonePlaying()).toBe(false);
+    startDeliveryRingtone("test-order-123");
+    expect(isDeliveryRingtonePlaying()).toBe(true);
+    stopDeliveryRingtone("different-order");
+    // Should still be playing because deliveryId didn't match
+    expect(isDeliveryRingtonePlaying()).toBe(true);
+    stopDeliveryRingtone("test-order-123");
+    expect(isDeliveryRingtonePlaying()).toBe(false);
+    // General stop
+    startDeliveryRingtone();
+    expect(isDeliveryRingtonePlaying()).toBe(true);
+    stopDeliveryRingtone();
+    expect(isDeliveryRingtonePlaying()).toBe(false);
   });
 
   it("supabase.functions.invoke proxy works seamlessly and catches edge function calls", async () => {

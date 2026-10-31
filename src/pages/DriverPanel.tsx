@@ -15,7 +15,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { isToday, isThisWeek, isThisMonth } from "date-fns";
-import { playNotificationSound, playUrgentNotification, playStandbyAlert, startStandbyMode, stopStandbyMode, resumeAudioContext, setNotificationVolume, setStandbyInterval, setStandbyGate } from "@/lib/notificationSound";
+import { playNotificationSound, playUrgentNotification, startDeliveryRingtone, stopDeliveryRingtone, playStandbyAlert, startStandbyMode, stopStandbyMode, resumeAudioContext, setNotificationVolume, setStandbyInterval, setStandbyGate } from "@/lib/notificationSound";
 import DriverGPS from "@/components/driver/DriverGPS";
 import { useGPSTracking } from "@/hooks/useGPSTracking";
 import DriverNotificationSettings from "@/components/driver/DriverNotificationSettings";
@@ -368,8 +368,7 @@ const DriverPanel = () => {
     };
   }, []);
 
-  // Standby gate: beep only when there are deliveries available and the driver
-  // is not already doing one.
+  // Standby gate: alerta contínuo enquanto houver corridas disponíveis para o motorista
   const hasAvailableStandbyRequest = pendingRequests.some((request: any) => !rejectedIds.includes(request.id));
   const shouldStandbyAlert = isOnline && !activeRequest && hasAvailableStandbyRequest;
 
@@ -378,15 +377,19 @@ const DriverPanel = () => {
     return () => { setStandbyGate(null); };
   }, [shouldStandbyAlert]);
 
-  // On phones the app may not keep waiting timers reliable in the background,
-  // so also play the standby alert immediately when pending deliveries appear.
+  // Alerta sonoro constante com o toque exclusivo criado até que algum motorista aceite ou a entrega suma
   useEffect(() => {
-    if (notificationSettings.standbyEnabled && shouldStandbyAlert && !hadPendingStandbyRef.current) {
+    if (shouldStandbyAlert) {
       resumeAudioContext();
-      playStandbyAlert();
+      const firstPending = pendingRequests.find((r: any) => !rejectedIds.includes(r.id));
+      startDeliveryRingtone(firstPending?.id);
+    } else {
+      stopDeliveryRingtone();
     }
-    hadPendingStandbyRef.current = shouldStandbyAlert;
-  }, [notificationSettings.standbyEnabled, shouldStandbyAlert]);
+    return () => {
+      stopDeliveryRingtone();
+    };
+  }, [shouldStandbyAlert, pendingRequests, rejectedIds]);
 
 
   // Realtime
@@ -402,13 +405,13 @@ const DriverPanel = () => {
     window.addEventListener('click', handleFirstInteraction);
     window.addEventListener('touchstart', handleFirstInteraction);
 
-    // Silent sync push ("entrega_indisponivel") — refresh the available list.
+    // Silent sync push ("entrega_indisponivel") — parar toque e atualizar lista
     const handleUnavailable = () => {
       stopStandbyMode();
+      stopDeliveryRingtone();
       queryClient.invalidateQueries({ queryKey: ["driver-pending-requests"] });
     };
     window.addEventListener("delivery-unavailable", handleUnavailable);
-
 
     const channel = createFreshChannel("driver-realtime")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "delivery_requests" }, (payload) => {
@@ -416,21 +419,21 @@ const DriverPanel = () => {
         queryClient.invalidateQueries({ queryKey: ["driver-pending-requests"] });
         queryClient.invalidateQueries({ queryKey: ["driver-pending-groups"] });
         
-        // Use a timeout to ensure audio is ready and played clearly
-        setTimeout(() => {
-          playUrgentNotification();
-          toast("🚀 Nova entrega disponível!", { 
-            duration: 10000,
-            action: {
-              label: "Ver",
-              onClick: () => window.scrollTo({ top: 0, behavior: 'smooth' })
-            }
-          });
-        }, 500);
+        // Disparar toque constante imediatamente ao chegar corrida
+        resumeAudioContext();
+        startDeliveryRingtone(payload.new?.id);
+
+        toast("🚀 Nova entrega disponível!", { 
+          duration: 10000,
+          action: {
+            label: "Ver",
+            onClick: () => window.scrollTo({ top: 0, behavior: 'smooth' })
+          }
+        });
 
         if ("Notification" in window && Notification.permission === "granted") {
           new Notification("Nova Entrega!", { 
-            body: "Uma nova solicitação de entrega está disponível.", 
+            body: "Uma nova solicitação de entrega está disponível. Toque para aceitar.", 
             icon: "/favicon.ico"
           });
         }
@@ -444,17 +447,24 @@ const DriverPanel = () => {
         queryClient.invalidateQueries({ queryKey: ["driver-completed-requests", user.id] });
         queryClient.invalidateQueries({ queryKey: ["my-earnings", driverProfile?.id] });
         
-        // If status changed to accepted and I am the driver, or if it was accepted by someone else
+        // Se a entrega foi aceita por qualquer motorista ou cancelada, parar o toque imediatamente
+        if (payload.new?.status !== "pending" || (payload.new?.driver_id && payload.new.driver_id !== user.id)) {
+          stopDeliveryRingtone(payload.new?.id);
+        }
+
         if (payload.new?.status === "accepted") {
           if (payload.new?.driver_id === user.id) {
+            stopDeliveryRingtone();
             playNotificationSound();
             toast.success("✅ Pedido confirmado para você!");
           } else {
-            // Notificar que a corrida foi aceita por outro entregador
+            // Notificar que a corrida foi aceita por outro entregador e parar o som
+            stopDeliveryRingtone(payload.new?.id);
             window.dispatchEvent(new CustomEvent("delivery-unavailable", { detail: { pedidoId: payload.new?.id } }));
           }
         }
         if (payload.new?.status === "cancelled") {
+          stopDeliveryRingtone(payload.new?.id);
           if (payload.new?.driver_id === user.id || payload.old?.driver_id === user.id) {
             toast.error("⚠️ A loja cancelou este chamado de entrega.", { duration: 7000 });
           }
@@ -613,6 +623,8 @@ const DriverPanel = () => {
         toast.success(netFee > 0 ? `Entrega aceita com sucesso! Ganho líquido: R$ ${netFee.toFixed(2)}` : "Entrega aceita com sucesso!");
       }
 
+      stopDeliveryRingtone(requestId);
+      stopDeliveryRingtone();
       void cancelDeliveryNotification(requestId);
       setSelectedNotificationOrder(null);
       setOrderUnavailableMsg(null);
@@ -1100,6 +1112,7 @@ const DriverPanel = () => {
                               <div className="grid grid-cols-2 gap-2">
                                 <Button variant="outline" size="sm" onClick={() => {
                                   setRejectedIds((prev) => [...prev, r.id]);
+                                  stopDeliveryRingtone(r.id);
                                   toast.info("Entrega recusada. Continuará disponível para outros motoristas.");
                                 }}>
                                   Recusar

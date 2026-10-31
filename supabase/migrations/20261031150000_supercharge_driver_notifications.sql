@@ -156,6 +156,7 @@ BEGIN
     'ttl', 3600,
     'content_available', true,
     'android_visibility', 1,
+    'android_sound', 'delivery_ringtone',
     'android_accent_color', 'FFF97316',
     'web_push_options', jsonb_build_object(
       'require_interaction', true,
