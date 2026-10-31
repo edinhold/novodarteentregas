@@ -103,6 +103,19 @@ export async function initPush(): Promise<boolean> {
             await syncCurrentSubscription(authData.user.id);
           }
         });
+
+        // Registrar listener de mudança de permissão (ex: usuário liberou nas configurações)
+        if (OneSignal.Notifications?.addEventListener) {
+          OneSignal.Notifications.addEventListener("permissionChange", async (isGranted: boolean) => {
+            console.log("[OneSignal:permission_change]", isGranted);
+            if (isGranted) {
+              const { data: authData } = await supabase.auth.getUser();
+              if (authData?.user?.id) {
+                await syncCurrentSubscription(authData.user.id);
+              }
+            }
+          });
+        }
       }
     });
 
@@ -113,7 +126,7 @@ export async function initPush(): Promise<boolean> {
   }
 }
 
-/** Registrar dispositivo no backend garantindo apenas 1 dispositivo ativo por motorista */
+/** Registrar dispositivo no backend garantindo que todos os dispositivos ativos do motorista recebam alertas */
 async function registerDeviceWithBackend(
   userId: string,
   subscriptionId: string,
@@ -131,7 +144,7 @@ async function registerDeviceWithBackend(
   });
 
   try {
-    // 1. Invocar Edge Router / Backend RPC para desativar anteriores e ativar este
+    // 1. Invocar Edge Router / Backend RPC para registrar o dispositivo
     const { data, error } = await supabase.functions.invoke("register-driver-device", {
       body: {
         motorista_id: userId,
@@ -157,13 +170,7 @@ async function registerDeviceWithBackend(
       }).catch(() => null);
 
       if (!res || !res.ok) {
-        // Direct DB fallback if RPC fails
-        await supabase
-          .from("driver_push_devices")
-          .update({ active: false, subscription_status: "inactive", updated_at: new Date().toISOString() })
-          .eq("driver_id", userId)
-          .neq("subscription_id", subscriptionId);
-
+        // Direct DB fallback: registrar/atualizar dispositivo do motorista mantendo ativo
         await supabase.from("driver_push_devices").upsert(
           {
             driver_id: userId,
@@ -178,12 +185,6 @@ async function registerDeviceWithBackend(
           },
           { onConflict: "subscription_id" }
         );
-
-        await supabase
-          .from("push_subscriptions")
-          .update({ active: false, subscription_status: "unsubscribed", updated_at: new Date().toISOString() })
-          .eq("user_id", userId)
-          .neq("onesignal_subscription_id", subscriptionId);
 
         await supabase.from("push_subscriptions").upsert(
           {
@@ -234,10 +235,31 @@ export async function enablePush(userId: string, profileType = "driver"): Promis
           permission = perm ? "granted" : "denied";
 
           if (perm) {
+            // Garantir opt-in explícito no OneSignal para renovar tokens inativos
+            try {
+              if (OneSignal.User?.PushSubscription?.optIn) {
+                await OneSignal.User.PushSubscription.optIn();
+              }
+            } catch (optErr) {
+              console.warn("[OneSignal:optIn]", optErr);
+            }
+
             if (userId) {
               await OneSignal.login(userId);
+              try {
+                await OneSignal.User.addTags({
+                  role: "driver",
+                  profile_type: "motorista",
+                  is_driver: "true",
+                  driver_user_id: userId,
+                  last_active: new Date().toISOString(),
+                });
+              } catch (tagErr) {
+                console.warn("[OneSignal:addTags]", tagErr);
+              }
             }
-            subId = OneSignal.User.PushSubscription.id || null;
+
+            subId = OneSignal.User?.PushSubscription?.id || null;
             if (subId && userId) {
               await registerDeviceWithBackend(userId, subId, permission);
             }
@@ -268,7 +290,7 @@ export async function enablePush(userId: string, profileType = "driver"): Promis
   }
 }
 
-/** Sincronizar assinatura atual do motorista */
+/** Sincronizar assinatura atual do motorista garantindo reativação contínua */
 export async function syncCurrentSubscription(userId?: string, profileType = "driver"): Promise<PushState> {
   const platform = detectPlatform();
   const uid = userId ?? (await supabase.auth.getUser()).data.user?.id ?? null;
@@ -293,12 +315,39 @@ export async function syncCurrentSubscription(userId?: string, profileType = "dr
       window.OneSignalDeferred = window.OneSignalDeferred || [];
       window.OneSignalDeferred.push(async (OneSignal: any) => {
         try {
-          perm = OneSignal.Notifications.permission ? "granted" : "denied";
-          subId = OneSignal.User.PushSubscription.id || null;
+          const hasNativePerm = typeof Notification !== "undefined" && Notification.permission === "granted";
+          const osPerm = !!OneSignal.Notifications?.permission;
+          const isGranted = hasNativePerm || osPerm;
+          perm = isGranted ? "granted" : (typeof Notification !== "undefined" ? Notification.permission : "default");
 
-          if (subId && uid && perm === "granted") {
+          if (isGranted) {
+            // Se permissão está concedida, assegurar que a inscrição está ativa (optIn)
+            try {
+              if (OneSignal.User?.PushSubscription?.optedIn === false && OneSignal.User?.PushSubscription?.optIn) {
+                await OneSignal.User.PushSubscription.optIn();
+              }
+            } catch (optErr) {
+              console.warn("[OneSignal:optIn]", optErr);
+            }
+
+            // Associar e taguear motorista no OneSignal
             await OneSignal.login(uid);
-            await registerDeviceWithBackend(uid, subId, perm);
+            try {
+              await OneSignal.User.addTags({
+                role: "driver",
+                profile_type: "motorista",
+                is_driver: "true",
+                driver_user_id: uid,
+                last_seen: new Date().toISOString(),
+              });
+            } catch (tagErr) {
+              console.warn("[OneSignal:addTags]", tagErr);
+            }
+
+            subId = OneSignal.User?.PushSubscription?.id || null;
+            if (subId && uid) {
+              await registerDeviceWithBackend(uid, subId, perm);
+            }
           }
         } catch (e) {
           console.warn("[OneSignal:error]", { reason: "SYNC_FAILED", error: e });

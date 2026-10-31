@@ -76,7 +76,7 @@ Deno.serve(async (req) => {
     const payload: Record<string, any> = {
       app_id: cfg.appId,
       target_channel: "push",
-      included_segments: ["Total Subscriptions"],
+      included_segments: ["Total Subscriptions", "Active Subscriptions"],
       headings: { pt: "🚚 Nova entrega disponível!", en: "New delivery available!" },
       contents: {
         pt: "Um novo chamado de entrega foi criado. Abra o aplicativo para visualizar os detalhes.",
@@ -91,11 +91,23 @@ Deno.serve(async (req) => {
       url: `${APP_BASE_URL}/entregador?pedido=${pedidoId}`,
       collapse_id: `nova_entrega:${pedidoId}`,
       priority: 10,
-      ttl: 300,
+      ttl: 3600,
       content_available: true,
       android_visibility: 1,
-      android_sound: "notification_sound",
       android_accent_color: "FFF97316",
+      web_push_options: {
+        require_interaction: true,
+        vibrate: [300, 100, 300, 100, 300],
+        urgency: "high",
+      },
+      web_buttons: [
+        {
+          id: "aceitar_entrega",
+          text: "Abrir e Aceitar",
+          icon: `${APP_BASE_URL}/favicon.png`,
+          url: `${APP_BASE_URL}/entregador?pedido=${pedidoId}`,
+        },
+      ],
     };
     applyAndroidChannel(payload);
 

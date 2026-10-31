@@ -23,8 +23,20 @@ export function usePushNotifications(userId?: string | null, profileType = "driv
     if (!userId) return;
     let cancelled = false;
 
-    // 1. Sincronização inicial
-    sync();
+    // 1. Sincronização inicial com retry caso o SDK do OneSignal ainda esteja carregando
+    sync().then((res) => {
+      if (
+        !cancelled &&
+        (!res || !res.subscriptionId) &&
+        typeof window !== "undefined" &&
+        "Notification" in window &&
+        Notification.permission === "granted"
+      ) {
+        setTimeout(() => {
+          if (!cancelled) sync();
+        }, 2000);
+      }
+    });
 
     // 2. Validação automática quando o motorista volta ao app (foco de janela)
     const handleVisibility = () => {

@@ -29,3 +29,4 @@ dist-ssr
 # Workspace temporarios do IDE
 brain/
 
+*.tsbuildinfo
