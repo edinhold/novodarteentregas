@@ -1,5 +1,5 @@
 import React from "react";
-import { Phone, ChevronLeft, ChevronRight, Loader2, Navigation, AlertCircle } from "lucide-react";
+import { Phone, ChevronLeft, ChevronRight, Loader2, Navigation, MapPin, ExternalLink } from "lucide-react";
 
 export interface DeliveryCardData {
   id: string;
@@ -21,6 +21,7 @@ interface DriverDarkActionCardProps {
   isLoading?: boolean;
   onPrimaryAction: (request: DeliveryCardData) => void;
   onContactStore: (request: DeliveryCardData) => void;
+  onOpenNavigation?: (app: "google" | "waze") => void;
   onCancelRequest?: (request: DeliveryCardData) => void;
   primaryButtonLabel?: string;
 }
@@ -34,6 +35,7 @@ export const DriverDarkActionCard: React.FC<DriverDarkActionCardProps> = ({
   isLoading = false,
   onPrimaryAction,
   onContactStore,
+  onOpenNavigation,
   onCancelRequest,
   primaryButtonLabel,
 }) => {
@@ -110,6 +112,39 @@ export const DriverDarkActionCard: React.FC<DriverDarkActionCardProps> = ({
                   </span>
                 </div>
               </div>
+
+              {/* Botões de Redirecionamento GPS Externo (Google Maps / Waze) */}
+              {onOpenNavigation && (
+                <div className="pt-1 pb-0.5 space-y-1.5">
+                  <div className="flex items-center justify-between text-[11px] text-zinc-400">
+                    <span className="flex items-center gap-1 text-zinc-300 font-medium">
+                      <Navigation className="w-3 h-3 text-sky-400" />
+                      <span>GPS Rota para {request.status === "picked_up" ? "Entrega" : "Coleta"}:</span>
+                    </span>
+                    <span className="text-[10px] text-zinc-500">Toque para navegar</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => onOpenNavigation("google")}
+                      className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-zinc-800/95 hover:bg-zinc-700 active:scale-95 text-white font-medium text-xs sm:text-sm border border-zinc-700 transition shadow-sm"
+                      title="Navegar no Google Maps"
+                    >
+                      <MapPin className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      <span>Google Maps</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onOpenNavigation("waze")}
+                      className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-zinc-800/95 hover:bg-zinc-700 active:scale-95 text-white font-medium text-xs sm:text-sm border border-zinc-700 transition shadow-sm"
+                      title="Navegar no Waze"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                      <span>Waze</span>
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Botões de Ação */}
               <div className="space-y-2.5 pt-1">

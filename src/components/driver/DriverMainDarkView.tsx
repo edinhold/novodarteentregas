@@ -1,11 +1,12 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import DriverDarkHeader from "./DriverDarkHeader";
 import DriverDarkMap from "./DriverDarkMap";
 import DriverDarkActionCard, { DeliveryCardData } from "./DriverDarkActionCard";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Phone, MessageSquare, X } from "lucide-react";
+import { Phone, MessageSquare, X, Navigation, MapPin, ExternalLink } from "lucide-react";
 import ChatWidget from "@/components/ChatWidget";
+import { geocodeAddress } from "@/services/mapbox";
 
 interface DriverMainDarkViewProps {
   companyName?: string;
@@ -42,6 +43,8 @@ export const DriverMainDarkView: React.FC<DriverMainDarkViewProps> = ({
   const [contactDialogOpen, setContactDialogOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [isAccepting, setIsAccepting] = useState(false);
+  const [geocodedPickup, setGeocodedPickup] = useState<{ lat: number; lng: number; name?: string } | null>(null);
+  const [geocodedDelivery, setGeocodedDelivery] = useState<{ lat: number; lng: number; address?: string } | null>(null);
 
   // Determinar qual chamado deve ser exibido no card inferior:
   // 1. Corrida ativa que já está em andamento com este motorista
@@ -72,8 +75,8 @@ export const DriverMainDarkView: React.FC<DriverMainDarkViewProps> = ({
       }
     : null;
 
-  // Coordenadas para o mapa (suporta delivery_lat/lng e pickup_lat/lng ou latitude/longitude do restaurante)
-  const pickupLocation =
+  // Coordenadas base para o mapa (suporta delivery_lat/lng e pickup_lat/lng ou latitude/longitude do restaurante)
+  const basePickupLocation =
     (activeRequest?.pickup_lat && activeRequest?.pickup_lng)
       ? { lat: Number(activeRequest.pickup_lat), lng: Number(activeRequest.pickup_lng), name: activeRequest.restaurants?.name }
       : (activeRequest?.restaurants?.latitude && activeRequest?.restaurants?.longitude)
@@ -84,12 +87,60 @@ export const DriverMainDarkView: React.FC<DriverMainDarkViewProps> = ({
       ? { lat: Number(currentPending.restaurants.latitude), lng: Number(currentPending.restaurants.longitude), name: currentPending.restaurants.name }
       : null;
 
-  const deliveryLocation =
+  const baseDeliveryLocation =
     (activeRequest?.delivery_lat && activeRequest?.delivery_lng)
       ? { lat: Number(activeRequest.delivery_lat), lng: Number(activeRequest.delivery_lng), address: activeRequest.delivery_address }
       : (currentPending?.delivery_lat && currentPending?.delivery_lng)
       ? { lat: Number(currentPending.delivery_lat), lng: Number(currentPending.delivery_lng), address: currentPending.delivery_address }
       : null;
+
+  // Geocodificação inteligente via Mapbox caso faltem coordenadas numéricas
+  useEffect(() => {
+    let isCancelled = false;
+
+    if (!baseDeliveryLocation && currentDelivery?.deliveryAddress) {
+      geocodeAddress(currentDelivery.deliveryAddress)
+        .then((res) => {
+          if (!isCancelled && res?.coordinates) {
+            setGeocodedDelivery({
+              lat: res.coordinates.latitude,
+              lng: res.coordinates.longitude,
+              address: res.fullAddress || currentDelivery.deliveryAddress,
+            });
+          }
+        })
+        .catch((err) => {
+          console.warn("[DriverMainDarkView] Geocode delivery warning:", err);
+        });
+    } else {
+      setGeocodedDelivery(null);
+    }
+
+    if (!basePickupLocation && currentDelivery?.pickupAddress) {
+      geocodeAddress(currentDelivery.pickupAddress)
+        .then((res) => {
+          if (!isCancelled && res?.coordinates) {
+            setGeocodedPickup({
+              lat: res.coordinates.latitude,
+              lng: res.coordinates.longitude,
+              name: currentDelivery.pickupName,
+            });
+          }
+        })
+        .catch((err) => {
+          console.warn("[DriverMainDarkView] Geocode pickup warning:", err);
+        });
+    } else {
+      setGeocodedPickup(null);
+    }
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [currentDelivery?.id, currentDelivery?.deliveryAddress, currentDelivery?.pickupAddress, baseDeliveryLocation?.lat, basePickupLocation?.lat]);
+
+  const pickupLocation = basePickupLocation || geocodedPickup;
+  const deliveryLocation = baseDeliveryLocation || geocodedDelivery;
 
   const pendingLocations = pendingRequests
     .filter((r) => r.restaurants?.latitude && r.restaurants?.longitude)
@@ -99,6 +150,38 @@ export const DriverMainDarkView: React.FC<DriverMainDarkViewProps> = ({
       lng: Number(r.restaurants.longitude),
       name: r.restaurants.name,
     }));
+
+  // Redirecionamento GPS Externo (Google Maps / Waze)
+  const handleOpenNavigation = (app: "google" | "waze") => {
+    if (!currentDelivery) return;
+
+    // Se já coletou (status === "picked_up"), o destino atual é a Entrega do cliente.
+    // Se acabou de aceitar (status === "accepted" ou "pending"), o destino atual é a Coleta na loja.
+    const isHeadingToDelivery = currentDelivery.status === "picked_up";
+    const targetLoc = isHeadingToDelivery ? deliveryLocation : pickupLocation;
+    const targetAddress = isHeadingToDelivery
+      ? currentDelivery.deliveryAddress
+      : currentDelivery.pickupAddress || currentDelivery.pickupName;
+
+    const lat = targetLoc?.lat;
+    const lng = targetLoc?.lng;
+
+    if (app === "waze") {
+      if (lat && lng) {
+        window.open(`https://waze.com/ul?ll=${lat},${lng}&navigate=yes`, "_blank");
+      } else {
+        window.open(`https://waze.com/ul?q=${encodeURIComponent(targetAddress || "Primavera do Leste")}&navigate=yes`, "_blank");
+      }
+    } else {
+      // Google Maps: aciona diretamente o aplicativo de navegação ou web com rota
+      const originParam = driverPosition ? `&origin=${driverPosition.lat},${driverPosition.lng}` : "";
+      if (lat && lng) {
+        window.open(`https://www.google.com/maps/dir/?api=1${originParam}&destination=${lat},${lng}&travelmode=driving`, "_blank");
+      } else {
+        window.open(`https://www.google.com/maps/dir/?api=1${originParam}&destination=${encodeURIComponent(targetAddress || "Primavera do Leste")}&travelmode=driving`, "_blank");
+      }
+    }
+  };
 
   // Ação primária do botão
   const handlePrimaryAction = async (delivery: DeliveryCardData) => {
@@ -143,7 +226,48 @@ export const DriverMainDarkView: React.FC<DriverMainDarkViewProps> = ({
         onTestSound={onTestSound}
       />
 
-      {/* 2. Área do Mapa Central em Fullscreen */}
+      {/* Banner Superior de Rota Ativa com Atalho para Google Maps / Waze */}
+      {activeRequest && (
+        <div className="absolute top-[68px] inset-x-0 z-20 px-4 pointer-events-none">
+          <div className="max-w-md mx-auto bg-[#18181b]/95 border border-zinc-700/80 rounded-2xl p-2.5 shadow-xl backdrop-blur-md flex items-center justify-between gap-3 pointer-events-auto">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-8 h-8 rounded-xl bg-sky-500/20 text-sky-400 flex items-center justify-center shrink-0">
+                <Navigation className="w-4 h-4 animate-pulse" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-[10px] uppercase font-bold text-sky-400 tracking-wider">
+                  {activeRequest.status === "accepted" ? "A Caminho da Coleta" : "A Caminho da Entrega"}
+                </p>
+                <p className="text-xs font-semibold text-white truncate">
+                  {activeRequest.status === "accepted" ? (activeRequest.restaurants?.name || activeRequest.pickup_address) : activeRequest.delivery_address}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => handleOpenNavigation("google")}
+                className="px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-white text-[11px] font-semibold border border-zinc-600 flex items-center gap-1 active:scale-95 shadow-sm"
+                title="Google Maps"
+              >
+                <MapPin className="w-3 h-3 text-emerald-400" />
+                <span>Maps</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleOpenNavigation("waze")}
+                className="px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-white text-[11px] font-semibold border border-zinc-600 flex items-center gap-1 active:scale-95 shadow-sm"
+                title="Waze"
+              >
+                <ExternalLink className="w-3 h-3 text-sky-400" />
+                <span>Waze</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 2. Área do Mapa Central em Fullscreen (OpenStreetMap como padrão com geocodificação Mapbox) */}
       <DriverDarkMap
         driverPosition={driverPosition}
         heading={heading}
@@ -167,6 +291,7 @@ export const DriverMainDarkView: React.FC<DriverMainDarkViewProps> = ({
           onNext={() => setSelectedPendingIndex((prev) => Math.min(pendingRequests.length - 1, prev + 1))}
           onPrimaryAction={handlePrimaryAction}
           onContactStore={handleContactStore}
+          onOpenNavigation={handleOpenNavigation}
           onCancelRequest={(d) => onCancelRequest?.(d.id)}
         />
       </div>

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { Crosshair } from "lucide-react";
+import { Crosshair, Layers } from "lucide-react";
 import { DEFAULT_CENTER, MAP_LAYERS } from "@/config/maps";
 import { calculateRoute } from "@/services/mapbox";
 
@@ -83,8 +83,9 @@ export const DriverDarkMap: React.FC<DriverDarkMapProps> = ({
   const routePolylineRef = useRef<L.Polyline | null>(null);
 
   const [autoFollow, setAutoFollow] = useState(true);
+  const [mapType, setMapType] = useState<keyof typeof MAP_LAYERS>("streets");
 
-  // Inicialização do Mapa com tema Dark (CartoDB Dark Matter)
+  // Inicialização do Mapa com a camada OpenStreetMap (streets) como padrão
   useEffect(() => {
     if (!containerRef.current) return;
     if (mapRef.current) return;
@@ -100,11 +101,12 @@ export const DriverDarkMap: React.FC<DriverDarkMapProps> = ({
       attributionControl: false,
     }).setView(initialCenter, 16);
 
-    // Camada escura oficial
-    const darkTileUrl = MAP_LAYERS.dark.url;
-    tileLayerRef.current = L.tileLayer(darkTileUrl, {
-      maxZoom: 19,
-      subdomains: "abcd",
+    // Camada oficial: OpenStreetMap (ou selecionada)
+    const currentConfig = MAP_LAYERS[mapType] || MAP_LAYERS.streets;
+    tileLayerRef.current = L.tileLayer(currentConfig.url, {
+      maxZoom: mapType.includes("satellite") || mapType.includes("google") ? 20 : 19,
+      subdomains: mapType === "dark" ? "abcd" : "abc",
+      attribution: currentConfig.attribution,
     }).addTo(map);
 
     map.on("dragstart", () => setAutoFollow(false));
@@ -119,6 +121,22 @@ export const DriverDarkMap: React.FC<DriverDarkMapProps> = ({
       }
     };
   }, []);
+
+  // Atualizar camada do mapa quando o motorista alternar
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const currentConfig = MAP_LAYERS[mapType] || MAP_LAYERS.streets;
+
+    if (tileLayerRef.current) {
+      map.removeLayer(tileLayerRef.current);
+    }
+    tileLayerRef.current = L.tileLayer(currentConfig.url, {
+      maxZoom: mapType.includes("satellite") || mapType.includes("google") ? 20 : 19,
+      subdomains: mapType === "dark" ? "abcd" : "abc",
+      attribution: currentConfig.attribution,
+    }).addTo(map);
+  }, [mapType]);
 
   // Atualização da posição do motorista e orientação da seta
   useEffect(() => {
@@ -311,9 +329,22 @@ export const DriverDarkMap: React.FC<DriverDarkMapProps> = ({
       {/* Contêiner Leaflet do mapa */}
       <div ref={containerRef} className="w-full h-full z-0" />
 
-      {/* Botão Flutuante de Recentralizar (Ícone de Mira / Target)
-          Posicionado no canto inferior direito, logo acima do card inferior */}
-      <div className="absolute right-4 bottom-[235px] sm:bottom-[245px] z-20 pointer-events-auto">
+      {/* Botões Flutuantes: Alternar Camadas e Recentralizar Mira */}
+      <div className="absolute right-4 bottom-[235px] sm:bottom-[245px] z-20 flex flex-col gap-2.5 pointer-events-auto">
+        <button
+          type="button"
+          onClick={() => {
+            const types: (keyof typeof MAP_LAYERS)[] = ["streets", "google", "satellite", "dark"];
+            const next = types[(types.indexOf(mapType) + 1) % types.length];
+            setMapType(next);
+          }}
+          aria-label="Alternar camada do mapa"
+          title={`Camada atual: ${mapType === "streets" ? "OpenStreetMap (Padrão)" : mapType === "google" ? "Google Maps" : mapType === "satellite" ? "Satélite" : "Escuro"}`}
+          className="w-12 h-12 rounded-full bg-[#18181b]/95 hover:bg-zinc-800 text-white border border-white/15 shadow-2xl flex items-center justify-center transition active:scale-95 backdrop-blur-md"
+        >
+          <Layers className="w-5 h-5 text-white" />
+        </button>
+
         <button
           type="button"
           onClick={handleRecenter}
