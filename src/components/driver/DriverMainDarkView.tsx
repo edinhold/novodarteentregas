@@ -46,6 +46,31 @@ export const DriverMainDarkView: React.FC<DriverMainDarkViewProps> = ({
   const [geocodedPickup, setGeocodedPickup] = useState<{ lat: number; lng: number; name?: string } | null>(null);
   const [geocodedDelivery, setGeocodedDelivery] = useState<{ lat: number; lng: number; address?: string } | null>(null);
 
+  const [isDark, setIsDark] = useState(() => {
+    if (typeof window !== "undefined") {
+      const stored = localStorage.getItem("theme");
+      if (stored) return stored === "dark";
+      return document.documentElement.classList.contains("dark");
+    }
+    return true;
+  });
+
+  useEffect(() => {
+    const handleThemeChange = () => {
+      const darkActive =
+        document.documentElement.classList.contains("dark") ||
+        localStorage.getItem("theme") === "dark";
+      setIsDark(darkActive);
+    };
+
+    window.addEventListener("theme-change", handleThemeChange);
+    window.addEventListener("storage", handleThemeChange);
+    return () => {
+      window.removeEventListener("theme-change", handleThemeChange);
+      window.removeEventListener("storage", handleThemeChange);
+    };
+  }, []);
+
   // Determinar qual chamado deve ser exibido no card inferior:
   // 1. Corrida ativa que já está em andamento com este motorista
   // 2. Ou chamada pendente selecionada
@@ -216,8 +241,12 @@ export const DriverMainDarkView: React.FC<DriverMainDarkViewProps> = ({
   };
 
   return (
-    <div className="relative w-full h-full min-h-[100dvh] bg-[#121214] overflow-hidden flex flex-col select-none">
-      {/* 1. Header Superior Dark */}
+    <div
+      className={`relative w-full h-full min-h-[100dvh] overflow-hidden flex flex-col select-none transition-colors duration-300 ${
+        isDark ? "bg-[#121214]" : "bg-slate-100"
+      }`}
+    >
+      {/* 1. Header Superior Dark / Claro */}
       <DriverDarkHeader
         companyName={companyName}
         isOnline={isOnline}
@@ -229,16 +258,30 @@ export const DriverMainDarkView: React.FC<DriverMainDarkViewProps> = ({
       {/* Banner Superior de Rota Ativa com Atalho para Google Maps / Waze */}
       {activeRequest && (
         <div className="absolute top-[68px] inset-x-0 z-20 px-4 pointer-events-none">
-          <div className="max-w-md mx-auto bg-[#18181b]/95 border border-zinc-700/80 rounded-2xl p-2.5 shadow-xl backdrop-blur-md flex items-center justify-between gap-3 pointer-events-auto">
+          <div
+            className={`max-w-md mx-auto rounded-2xl p-2.5 shadow-xl backdrop-blur-md flex items-center justify-between gap-3 pointer-events-auto border transition-colors ${
+              isDark
+                ? "bg-[#18181b]/95 border-zinc-700/80 text-white"
+                : "bg-white/95 border-zinc-200 text-zinc-900 shadow-md"
+            }`}
+          >
             <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-8 h-8 rounded-xl bg-sky-500/20 text-sky-400 flex items-center justify-center shrink-0">
+              <div
+                className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
+                  isDark ? "bg-sky-500/20 text-sky-400" : "bg-sky-100 text-sky-600"
+                }`}
+              >
                 <Navigation className="w-4 h-4 animate-pulse" />
               </div>
               <div className="min-w-0">
-                <p className="text-[10px] uppercase font-bold text-sky-400 tracking-wider">
+                <p className="text-[10px] uppercase font-bold text-sky-500 tracking-wider">
                   {activeRequest.status === "accepted" ? "A Caminho da Coleta" : "A Caminho da Entrega"}
                 </p>
-                <p className="text-xs font-semibold text-white truncate">
+                <p
+                  className={`text-xs font-semibold truncate ${
+                    isDark ? "text-white" : "text-zinc-900"
+                  }`}
+                >
                   {activeRequest.status === "accepted" ? (activeRequest.restaurants?.name || activeRequest.pickup_address) : activeRequest.delivery_address}
                 </p>
               </div>
@@ -247,19 +290,27 @@ export const DriverMainDarkView: React.FC<DriverMainDarkViewProps> = ({
               <button
                 type="button"
                 onClick={() => handleOpenNavigation("google")}
-                className="px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-white text-[11px] font-semibold border border-zinc-600 flex items-center gap-1 active:scale-95 shadow-sm"
+                className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border flex items-center gap-1 active:scale-95 shadow-sm transition ${
+                  isDark
+                    ? "bg-zinc-800 hover:bg-zinc-700 text-white border-zinc-600"
+                    : "bg-zinc-100 hover:bg-zinc-200 text-zinc-900 border-zinc-200"
+                }`}
                 title="Google Maps"
               >
-                <MapPin className="w-3 h-3 text-emerald-400" />
+                <MapPin className="w-3 h-3 text-emerald-500" />
                 <span>Maps</span>
               </button>
               <button
                 type="button"
                 onClick={() => handleOpenNavigation("waze")}
-                className="px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-white text-[11px] font-semibold border border-zinc-600 flex items-center gap-1 active:scale-95 shadow-sm"
+                className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border flex items-center gap-1 active:scale-95 shadow-sm transition ${
+                  isDark
+                    ? "bg-zinc-800 hover:bg-zinc-700 text-white border-zinc-600"
+                    : "bg-zinc-100 hover:bg-zinc-200 text-zinc-900 border-zinc-200"
+                }`}
                 title="Waze"
               >
-                <ExternalLink className="w-3 h-3 text-sky-400" />
+                <ExternalLink className="w-3 h-3 text-sky-500" />
                 <span>Waze</span>
               </button>
             </div>
@@ -298,12 +349,16 @@ export const DriverMainDarkView: React.FC<DriverMainDarkViewProps> = ({
 
       {/* Modal de Opções de Contato com o Estabelecimento */}
       <Dialog open={contactDialogOpen} onOpenChange={setContactDialogOpen}>
-        <DialogContent className="bg-[#18181b] text-white border-zinc-800 max-w-sm rounded-2xl">
+        <DialogContent
+          className={`max-w-sm rounded-2xl ${
+            isDark ? "bg-[#18181b] text-white border-zinc-800" : "bg-white text-zinc-900 border-zinc-200"
+          }`}
+        >
           <DialogHeader>
-            <DialogTitle className="text-white text-base">
+            <DialogTitle className={isDark ? "text-white text-base" : "text-zinc-900 text-base"}>
               Contato com a Loja
             </DialogTitle>
-            <DialogDescription className="text-zinc-400 text-xs">
+            <DialogDescription className={isDark ? "text-zinc-400 text-xs" : "text-zinc-500 text-xs"}>
               {currentDelivery?.pickupName || "Estabelecimento parceiro"}
             </DialogDescription>
           </DialogHeader>
@@ -312,13 +367,17 @@ export const DriverMainDarkView: React.FC<DriverMainDarkViewProps> = ({
             {currentDelivery?.phone ? (
               <Button
                 onClick={handleCallStore}
-                className="w-full bg-white hover:bg-zinc-100 text-black font-semibold h-12 rounded-xl flex items-center justify-center gap-2"
+                className={`w-full font-semibold h-12 rounded-xl flex items-center justify-center gap-2 ${
+                  isDark
+                    ? "bg-white hover:bg-zinc-100 text-black"
+                    : "bg-zinc-900 hover:bg-zinc-800 text-white"
+                }`}
               >
-                <Phone className="w-4 h-4 text-black" />
+                <Phone className={`w-4 h-4 ${isDark ? "text-black" : "text-white"}`} />
                 Ligar ({currentDelivery.phone})
               </Button>
             ) : (
-              <p className="text-xs text-zinc-400 text-center py-1">
+              <p className={`text-xs text-center py-1 ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>
                 Telefone não cadastrado diretamente pela loja.
               </p>
             )}
@@ -330,7 +389,11 @@ export const DriverMainDarkView: React.FC<DriverMainDarkViewProps> = ({
                   setContactDialogOpen(false);
                   setChatOpen(true);
                 }}
-                className="w-full border-white/20 text-white hover:bg-white/10 h-12 rounded-xl flex items-center justify-center gap-2"
+                className={`w-full h-12 rounded-xl flex items-center justify-center gap-2 ${
+                  isDark
+                    ? "border-white/20 text-white hover:bg-white/10"
+                    : "border-zinc-300 text-zinc-900 hover:bg-zinc-100"
+                }`}
               >
                 <MessageSquare className="w-4 h-4" />
                 Abrir Chat com a Loja
@@ -342,12 +405,16 @@ export const DriverMainDarkView: React.FC<DriverMainDarkViewProps> = ({
 
       {/* Modal de Chat Integrado com o Lojista */}
       <Dialog open={chatOpen} onOpenChange={setChatOpen}>
-        <DialogContent className="bg-[#18181b] text-white border-zinc-800 max-w-md rounded-2xl p-4">
+        <DialogContent
+          className={`max-w-md rounded-2xl p-4 ${
+            isDark ? "bg-[#18181b] text-white border-zinc-800" : "bg-white text-zinc-900 border-zinc-200"
+          }`}
+        >
           <DialogHeader className="pb-2">
-            <DialogTitle className="text-white text-base">
+            <DialogTitle className={isDark ? "text-white text-base" : "text-zinc-900 text-base"}>
               Chat com a Loja
             </DialogTitle>
-            <DialogDescription className="text-zinc-400 text-xs">
+            <DialogDescription className={isDark ? "text-zinc-400 text-xs" : "text-zinc-500 text-xs"}>
               {currentDelivery?.pickupName}
             </DialogDescription>
           </DialogHeader>

@@ -19,6 +19,7 @@ const ThemeToggle = () => {
       root.classList.remove("dark");
       localStorage.setItem("theme", "light");
     }
+    window.dispatchEvent(new Event("theme-change"));
   }, [dark]);
 
   return (
@@ -29,7 +30,7 @@ const ThemeToggle = () => {
       className="rounded-full"
       aria-label="Alternar tema claro/escuro"
     >
-      {dark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+      {dark ? <Sun className="w-5 h-5 text-amber-300" /> : <Moon className="w-5 h-5 text-zinc-700" />}
     </Button>
   );
 };

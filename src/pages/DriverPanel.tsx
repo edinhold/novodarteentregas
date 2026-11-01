@@ -943,11 +943,18 @@ const DriverPanel = () => {
             </nav>
           </div>
 
-          <div className="pt-4 border-t border-zinc-800 space-y-2">
+          <div className="pt-4 border-t border-zinc-800 space-y-3">
             <div className="flex items-center justify-between text-xs text-zinc-400">
               <span>Status</span>
               <span className="text-emerald-400 font-semibold">● Disponível</span>
             </div>
+
+            {/* Alternador de Modo Claro / Escuro */}
+            <div className="flex items-center justify-between pt-1 pb-1">
+              <span className="text-xs text-zinc-300">Modo de Exibição</span>
+              <ThemeToggle />
+            </div>
+
             <Button
               variant="outline"
               size="sm"
