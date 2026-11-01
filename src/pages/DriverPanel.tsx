@@ -31,6 +31,8 @@ import ThemeToggle from "@/components/ThemeToggle";
 import GlobalDriverMap from "@/components/GlobalDriverMap";
 import AppSidebar from "@/components/AppSidebar";
 import DeliveryNotifications from "@/components/driver/DeliveryNotifications";
+import DriverMainDarkView from "@/components/driver/DriverMainDarkView";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 
 import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/sidebar";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -61,6 +63,7 @@ const DriverPanel = () => {
   const [activeTab, setActiveTab] = useState("home");
   const isMobile = useIsMobile();
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [notificationSettings, setNotificationSettings] = useState<DriverNotificationSettingsState>(loadDriverNotificationSettings);
   const hadPendingStandbyRef = useRef(false);
 
@@ -213,6 +216,13 @@ const DriverPanel = () => {
   });
 
   const activeRequest = myRequests[0];
+
+  const displayPendingRequests = selectedNotificationOrder
+    ? [
+        selectedNotificationOrder,
+        ...pendingRequests.filter((r: any) => r.id !== selectedNotificationOrder.id && !rejectedIds.includes(r.id)),
+      ]
+    : pendingRequests.filter((r: any) => !rejectedIds.includes(r.id));
 
   // Chat messages
   const { data: chatMessages = [] } = useQuery({
@@ -882,6 +892,101 @@ const DriverPanel = () => {
         timeoutMs={30000}
         onAccepted={() => setActiveTab("home")}
       />
+
+      {/* Drawer Móvel para Navegação no Tema Escuro */}
+      <Sheet open={mobileDrawerOpen} onOpenChange={setMobileDrawerOpen}>
+        <SheetContent side="left" className="bg-[#18181b] text-white border-zinc-800 p-6 flex flex-col justify-between w-72 z-[9999]">
+          <SheetHeader className="sr-only">
+            <SheetTitle>Menu do Motorista</SheetTitle>
+            <SheetDescription>Navegação rápida do painel do motorista</SheetDescription>
+          </SheetHeader>
+
+          <div className="space-y-6">
+            <div className="flex items-center gap-3">
+              <img src={logoDuarte} alt="Logo" className="w-10 h-10 rounded-xl object-cover" />
+              <div>
+                <h3 className="font-bold text-white text-base leading-tight">Duarte Entregas</h3>
+                <p className="text-xs text-zinc-400">{driverProfile?.full_name || "Motorista Parceiro"}</p>
+              </div>
+            </div>
+
+            <nav className="space-y-1">
+              {[
+                { id: "home", label: "Cockpit / Mapa", icon: Home },
+                { id: "finance", label: "Ganhos & PIX", icon: Wallet },
+                { id: "radar", label: "Radar de Entregas", icon: Radar },
+                { id: "history", label: "Histórico", icon: History },
+                { id: "support", label: "Suporte", icon: MessageSquare },
+                { id: "settings", label: "Configurações", icon: Settings },
+              ].map((item) => {
+                const Icon = item.icon;
+                const isActive = activeTab === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => {
+                      setActiveTab(item.id);
+                      setMobileDrawerOpen(false);
+                    }}
+                    className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl text-sm font-medium transition ${
+                      isActive
+                        ? "bg-white text-black font-semibold shadow-md"
+                        : "text-zinc-300 hover:bg-zinc-800 hover:text-white"
+                    }`}
+                  >
+                    <Icon className="w-4 h-4" />
+                    <span>{item.label}</span>
+                  </button>
+                );
+              })}
+            </nav>
+          </div>
+
+          <div className="pt-4 border-t border-zinc-800 space-y-2">
+            <div className="flex items-center justify-between text-xs text-zinc-400">
+              <span>Status</span>
+              <span className="text-emerald-400 font-semibold">● Disponível</span>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                await supabase.auth.signOut();
+                navigate("/auth", { replace: true });
+              }}
+              className="w-full border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white text-xs h-9"
+            >
+              Sair da Conta
+            </Button>
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      {/* Visualização Mobile Fullscreen no Tema Dark Exato da Referência */}
+      {isMobile && activeTab === "home" && (
+        <div className="fixed inset-0 z-40 w-full h-[100dvh] overflow-hidden bg-[#121214]">
+          <DriverMainDarkView
+            companyName="Duarte Entregas"
+            isOnline={isOnline}
+            statusText="Disponível"
+            driverPosition={trackingData.position}
+            heading={trackingData.heading}
+            activeRequest={activeRequest}
+            pendingRequests={displayPendingRequests}
+            onAcceptRequest={acceptRequest}
+            onUpdateStatus={updateStatus}
+            onCancelRequest={(id) => setCancelRequestId(id)}
+            onOpenMenu={() => setMobileDrawerOpen(true)}
+            onTestSound={() => {
+              playUrgentNotification();
+              toast.info("Sirene de chamada testada");
+            }}
+            currentUserId={user?.id}
+          />
+        </div>
+      )}
+
       <div className="flex min-h-screen w-full bg-background overflow-hidden">
         <AppSidebar role="driver" currentTab={activeTab} onTabChange={setActiveTab} />
         
@@ -1001,6 +1106,17 @@ const DriverPanel = () => {
                 </TabsList>
               )}
 
+              {isMobile && activeTab !== "home" && (
+                <Button
+                  size="sm"
+                  onClick={() => setActiveTab("home")}
+                  className="bg-zinc-900 hover:bg-zinc-800 text-white border border-zinc-700 w-full flex items-center justify-center gap-2 h-10 rounded-xl shadow-sm"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  <span>Voltar ao Cockpit / Mapa</span>
+                </Button>
+              )}
+
               <motion.div 
                 key={activeTab}
                 initial={{ opacity: 0, y: 10 }} 
@@ -1008,13 +1124,27 @@ const DriverPanel = () => {
                 className="space-y-4 outline-none"
               >
                 <TabsContent value="home" className="space-y-4 outline-none m-0">
-                  {/* GPS Tracking & Map */}
-                  <DriverGPS
-                    activeRequest={activeRequest}
-                    pendingRequests={pendingRequests}
-                    onAcceptRequest={acceptRequest}
-                    trackingData={trackingData}
-                  />
+                  {/* Visualização Cockpit Dark Mode Oficial */}
+                  <div className="h-[calc(100vh-220px)] min-h-[580px] w-full rounded-2xl overflow-hidden border border-zinc-800 shadow-2xl relative">
+                    <DriverMainDarkView
+                      companyName="Duarte Entregas"
+                      isOnline={isOnline}
+                      statusText="Disponível"
+                      driverPosition={trackingData.position}
+                      heading={trackingData.heading}
+                      activeRequest={activeRequest}
+                      pendingRequests={displayPendingRequests}
+                      onAcceptRequest={acceptRequest}
+                      onUpdateStatus={updateStatus}
+                      onCancelRequest={(id) => setCancelRequestId(id)}
+                      onOpenMenu={() => setMobileDrawerOpen(true)}
+                      onTestSound={() => {
+                        playUrgentNotification();
+                        toast.info("Sirene de chamada testada");
+                      }}
+                      currentUserId={user?.id}
+                    />
+                  </div>
 
                   {/* Active delivery */}
                   {activeRequest && (
