@@ -45,6 +45,7 @@ export const DriverMainDarkView: React.FC<DriverMainDarkViewProps> = ({
   const [isAccepting, setIsAccepting] = useState(false);
   const [geocodedPickup, setGeocodedPickup] = useState<{ lat: number; lng: number; name?: string } | null>(null);
   const [geocodedDelivery, setGeocodedDelivery] = useState<{ lat: number; lng: number; address?: string } | null>(null);
+  const [isStandbyCollapsed, setIsStandbyCollapsed] = useState(false);
 
   const [isDark, setIsDark] = useState(() => {
     if (typeof window !== "undefined") {
@@ -329,6 +330,7 @@ export const DriverMainDarkView: React.FC<DriverMainDarkViewProps> = ({
           const idx = pendingRequests.findIndex((r) => r.id === id);
           if (idx !== -1) setSelectedPendingIndex(idx);
         }}
+        isBottomCardCollapsed={!currentDelivery && isStandbyCollapsed}
       />
 
       {/* 3. Bottom Sheet / Card Inferior de Ação */}
@@ -344,6 +346,8 @@ export const DriverMainDarkView: React.FC<DriverMainDarkViewProps> = ({
           onContactStore={handleContactStore}
           onOpenNavigation={handleOpenNavigation}
           onCancelRequest={(d) => onCancelRequest?.(d.id)}
+          isStandbyCollapsed={isStandbyCollapsed}
+          onToggleStandbyCollapse={setIsStandbyCollapsed}
         />
       </div>
 

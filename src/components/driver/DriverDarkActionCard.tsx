@@ -1,5 +1,17 @@
 import React, { useState, useEffect } from "react";
-import { Phone, ChevronLeft, ChevronRight, Loader2, Navigation, MapPin, ExternalLink } from "lucide-react";
+import {
+  Phone,
+  ChevronLeft,
+  ChevronRight,
+  Loader2,
+  Navigation,
+  MapPin,
+  ExternalLink,
+  ChevronDown,
+  ChevronUp,
+  Bell,
+  Radio,
+} from "lucide-react";
 
 export interface DeliveryCardData {
   id: string;
@@ -24,6 +36,8 @@ interface DriverDarkActionCardProps {
   onOpenNavigation?: (app: "google" | "waze") => void;
   onCancelRequest?: (request: DeliveryCardData) => void;
   primaryButtonLabel?: string;
+  isStandbyCollapsed?: boolean;
+  onToggleStandbyCollapse?: (collapsed: boolean) => void;
 }
 
 export const DriverDarkActionCard: React.FC<DriverDarkActionCardProps> = ({
@@ -38,7 +52,25 @@ export const DriverDarkActionCard: React.FC<DriverDarkActionCardProps> = ({
   onOpenNavigation,
   onCancelRequest,
   primaryButtonLabel,
+  isStandbyCollapsed,
+  onToggleStandbyCollapse,
 }) => {
+  const [internalCollapsed, setInternalCollapsed] = useState(false);
+  const isCollapsed = isStandbyCollapsed !== undefined ? isStandbyCollapsed : internalCollapsed;
+
+  const toggleCollapse = (nextState?: boolean) => {
+    const val = nextState !== undefined ? nextState : !isCollapsed;
+    setInternalCollapsed(val);
+    onToggleStandbyCollapse?.(val);
+  };
+
+  // Se houver uma nova corrida, garantir que o painel expanda automaticamente
+  useEffect(() => {
+    if (request && isCollapsed) {
+      toggleCollapse(false);
+    }
+  }, [request]);
+
   const [isDark, setIsDark] = useState(() => {
     if (typeof window !== "undefined") {
       const stored = localStorage.getItem("theme");
@@ -72,6 +104,73 @@ export const DriverDarkActionCard: React.FC<DriverDarkActionCardProps> = ({
     if (request.status === "picked_up") return "Finalizar Entrega";
     return "Aceitar Corrida e Ir para Coleta";
   };
+
+  // MODO RECOLHIDO (STANDBY COMPACTO):
+  // Quando não há chamados ativos e o motorista recolheu o painel,
+  // exibe uma barra inferior ultra-limpa e touch-friendly que sobe ao tocar.
+  if (!request && isCollapsed) {
+    return (
+      <div className="w-full max-w-lg mx-auto pointer-events-auto px-2 sm:px-0">
+        <div
+          onClick={() => toggleCollapse(false)}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") toggleCollapse(false);
+          }}
+          className={`w-full cursor-pointer select-none px-4 py-3 sm:py-3.5 flex items-center justify-between gap-3 shadow-2xl transition-all duration-300 active:scale-[0.99] border-t ${
+            isDark
+              ? "bg-[#121214] hover:bg-[#18181c] text-white border-white/10 shadow-[0_-10px_35px_rgba(0,0,0,0.85)]"
+              : "bg-white hover:bg-slate-50 text-zinc-900 border-zinc-200 shadow-[0_-8px_25px_rgba(0,0,0,0.12)]"
+          }`}
+          style={{
+            borderRadius: "22px 22px 0 0",
+          }}
+          title="Toque para subir e ver opções"
+        >
+          {/* Indicador de Status com Ponto Pulsante Verde */}
+          <div className="flex items-center gap-3 min-w-0">
+            <span className="relative flex h-3.5 w-3.5 shrink-0">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500 shadow-sm shadow-emerald-500/50"></span>
+            </span>
+
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-xs sm:text-sm tracking-tight truncate">
+                  Aguardando novos chamados...
+                </span>
+                <span
+                  className={`hidden xs:inline-flex text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded ${
+                    isDark
+                      ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20"
+                      : "bg-emerald-100 text-emerald-700 border border-emerald-200"
+                  }`}
+                >
+                  Radar Ativo
+                </span>
+              </div>
+              <p className={`text-[11px] truncate ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>
+                GPS & Sirene conectados • Toque para subir
+              </p>
+            </div>
+          </div>
+
+          {/* Botão de Subir / Expandir */}
+          <div
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold shrink-0 transition-colors ${
+              isDark
+                ? "bg-zinc-800 text-zinc-100 border border-zinc-700 hover:bg-zinc-700"
+                : "bg-zinc-100 text-zinc-800 border border-zinc-300 hover:bg-zinc-200"
+            }`}
+          >
+            <span>Subir</span>
+            <ChevronUp className="w-3.5 h-3.5 text-emerald-500 animate-bounce" />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full max-w-lg mx-auto pointer-events-auto">
@@ -271,29 +370,131 @@ export const DriverDarkActionCard: React.FC<DriverDarkActionCardProps> = ({
               </div>
             </>
           ) : (
-            /* Standby / Sem corridas no momento */
-            <div className="py-4 text-center space-y-2">
-              <div
-                className={`inline-flex items-center justify-center w-10 h-10 rounded-full mb-1 ${
-                  isDark ? "bg-zinc-800 text-emerald-400" : "bg-zinc-100 text-emerald-600"
-                }`}
-              >
-                <Navigation className="w-5 h-5 animate-pulse" />
+            /* Standby / Sem corridas no momento - Organizado com botão de recolher */
+            <div className="space-y-3.5 pt-0.5">
+              {/* Barra de Topo do Standby: Status e Botão de Recolher */}
+              <div className="flex items-center justify-between pb-1 border-b border-white/5">
+                <div
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${
+                    isDark
+                      ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20"
+                      : "bg-emerald-100 text-emerald-700 border border-emerald-200"
+                  }`}
+                >
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  </span>
+                  <span>Disponível no Radar</span>
+                </div>
+
+                {/* Botão de Recolher */}
+                <button
+                  type="button"
+                  onClick={() => toggleCollapse(true)}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition active:scale-95 ${
+                    isDark
+                      ? "bg-zinc-800/90 hover:bg-zinc-700 text-zinc-300 border border-zinc-700"
+                      : "bg-zinc-100 hover:bg-zinc-200 text-zinc-700 border border-zinc-300"
+                  }`}
+                  title="Recolher painel para ver mapa completo"
+                >
+                  <span>Recolher</span>
+                  <ChevronDown className="w-3.5 h-3.5" />
+                </button>
               </div>
-              <h3
-                className={`font-medium text-base ${
-                  isDark ? "text-white" : "text-zinc-900 font-semibold"
+
+              {/* Título Principal */}
+              <div className="text-left space-y-0.5">
+                <h3
+                  className={`font-bold text-base sm:text-lg leading-tight ${
+                    isDark ? "text-white" : "text-zinc-900"
+                  }`}
+                >
+                  Aguardando novos chamados...
+                </h3>
+                <p
+                  className={`text-xs ${
+                    isDark ? "text-zinc-400" : "text-zinc-500"
+                  }`}
+                >
+                  Você está posicionado e pronto para receber entregas. O toque sonoro tocará assim que surgir uma corrida.
+                </p>
+              </div>
+
+              {/* Grid Organizado com 3 Indicadores de Prontidão */}
+              <div className="grid grid-cols-3 gap-2 pt-1">
+                {/* 1. Sirene */}
+                <div
+                  className={`p-2.5 rounded-xl border text-center flex flex-col items-center justify-center gap-1 ${
+                    isDark
+                      ? "bg-zinc-800/60 border-zinc-700/60 text-zinc-200"
+                      : "bg-zinc-50 border-zinc-200 text-zinc-800"
+                  }`}
+                >
+                  <div
+                    className={`w-7 h-7 rounded-lg flex items-center justify-center ${
+                      isDark ? "bg-amber-500/20 text-amber-400" : "bg-amber-100 text-amber-600"
+                    }`}
+                  >
+                    <Bell className="w-3.5 h-3.5 animate-pulse" />
+                  </div>
+                  <span className="text-[11px] font-bold leading-none">Sirene</span>
+                  <span className="text-[9px] text-emerald-500 font-semibold leading-none">Ativa</span>
+                </div>
+
+                {/* 2. GPS */}
+                <div
+                  className={`p-2.5 rounded-xl border text-center flex flex-col items-center justify-center gap-1 ${
+                    isDark
+                      ? "bg-zinc-800/60 border-zinc-700/60 text-zinc-200"
+                      : "bg-zinc-50 border-zinc-200 text-zinc-800"
+                  }`}
+                >
+                  <div
+                    className={`w-7 h-7 rounded-lg flex items-center justify-center ${
+                      isDark ? "bg-sky-500/20 text-sky-400" : "bg-sky-100 text-sky-600"
+                    }`}
+                  >
+                    <Navigation className="w-3.5 h-3.5 animate-pulse" />
+                  </div>
+                  <span className="text-[11px] font-bold leading-none">GPS</span>
+                  <span className="text-[9px] text-sky-500 font-semibold leading-none">Conectado</span>
+                </div>
+
+                {/* 3. Radar */}
+                <div
+                  className={`p-2.5 rounded-xl border text-center flex flex-col items-center justify-center gap-1 ${
+                    isDark
+                      ? "bg-zinc-800/60 border-zinc-700/60 text-zinc-200"
+                      : "bg-zinc-50 border-zinc-200 text-zinc-800"
+                  }`}
+                >
+                  <div
+                    className={`w-7 h-7 rounded-lg flex items-center justify-center ${
+                      isDark ? "bg-emerald-500/20 text-emerald-400" : "bg-emerald-100 text-emerald-600"
+                    }`}
+                  >
+                    <Radio className="w-3.5 h-3.5 animate-pulse" />
+                  </div>
+                  <span className="text-[11px] font-bold leading-none">Radar</span>
+                  <span className="text-[9px] text-emerald-500 font-semibold leading-none">Buscando</span>
+                </div>
+              </div>
+
+              {/* Botão de Rodapé para Recolher e Ampliar o Mapa */}
+              <button
+                type="button"
+                onClick={() => toggleCollapse(true)}
+                className={`w-full py-2.5 px-3 rounded-xl text-xs font-semibold transition flex items-center justify-center gap-1.5 active:scale-95 ${
+                  isDark
+                    ? "bg-zinc-800/80 hover:bg-zinc-800 text-zinc-300 border border-zinc-700/80"
+                    : "bg-zinc-100 hover:bg-zinc-200 text-zinc-700 border border-zinc-200"
                 }`}
               >
-                Aguardando novos chamados...
-              </h3>
-              <p
-                className={`text-xs max-w-xs mx-auto ${
-                  isDark ? "text-zinc-400" : "text-zinc-500"
-                }`}
-              >
-                Você está posicionado e disponível. O toque sonoro tocará assim que uma nova corrida surgir.
-              </p>
+                <ChevronDown className="w-3.5 h-3.5 text-zinc-400" />
+                <span>Recolher painel para ver mapa completo</span>
+              </button>
             </div>
           )}
         </div>

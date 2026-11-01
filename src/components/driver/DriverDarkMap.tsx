@@ -12,6 +12,7 @@ interface DriverDarkMapProps {
   deliveryLocation?: { lat: number; lng: number; address?: string } | null;
   pendingLocations?: Array<{ id: string; lat: number; lng: number; name?: string }>;
   onSelectPending?: (id: string) => void;
+  isBottomCardCollapsed?: boolean;
 }
 
 // Marker customizado do Motorista (círculo azul com seta branca direcional giratória)
@@ -72,6 +73,7 @@ export const DriverDarkMap: React.FC<DriverDarkMapProps> = ({
   deliveryLocation,
   pendingLocations = [],
   onSelectPending,
+  isBottomCardCollapsed = false,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -330,7 +332,13 @@ export const DriverDarkMap: React.FC<DriverDarkMapProps> = ({
       <div ref={containerRef} className="w-full h-full z-0" />
 
       {/* Botões Flutuantes: Alternar Camadas e Recentralizar Mira */}
-      <div className="absolute right-4 bottom-[235px] sm:bottom-[245px] z-20 flex flex-col gap-2.5 pointer-events-auto">
+      <div
+        className={`absolute right-4 z-20 flex flex-col gap-2.5 pointer-events-auto transition-all duration-300 ease-in-out ${
+          isBottomCardCollapsed
+            ? "bottom-[75px]"
+            : "bottom-[235px] sm:bottom-[245px]"
+        }`}
+      >
         <button
           type="button"
           onClick={() => {
