@@ -16,11 +16,39 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// Recupera imediatamente a sessão salva em localStorage para evitar flash/loops de verificação
+const getInitialSession = (): { session: Session | null; user: User | null } => {
+  if (typeof window === "undefined") return { session: null, user: null };
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith("sb-") && key.endsWith("-auth-token")) {
+        const raw = localStorage.getItem(key);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          const s = parsed.currentSession || parsed;
+          if (s && s.user) {
+            return { session: s, user: s.user };
+          }
+        }
+      }
+    }
+  } catch {}
+  return { session: null, user: null };
+};
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [role, setRole] = useState<AppRole | null>(null);
+  const initialRef = useRef(getInitialSession());
+  const [user, setUser] = useState<User | null>(() => initialRef.current.user);
+  const [session, setSession] = useState<Session | null>(() => initialRef.current.session);
+  const [loading, setLoading] = useState(() => !initialRef.current.user);
+  const [role, setRole] = useState<AppRole | null>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("cached_user_role");
+      if (saved) return saved as AppRole;
+    }
+    return null;
+  });
   const [roleLoading, setRoleLoading] = useState(false);
   // Guards against double initialization (React StrictMode / remounts):
   // only ONE getSession() + ONE onAuthStateChange listener may exist.
@@ -92,6 +120,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!uid) {
         setRole(null);
         setRoleLoading(false);
+        try { localStorage.removeItem("cached_user_role"); } catch {}
         return;
       }
       setRoleLoading(true);
@@ -99,6 +128,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const resolved = await resolveRole(uid);
         console.log("[Auth] Role carregada:", resolved);
         setRole(resolved);
+        try { localStorage.setItem("cached_user_role", resolved); } catch {}
       } catch (err) {
         console.error("[Auth] Erro em handleUser:", err);
       } finally {
@@ -147,10 +177,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     console.log("[Auth] Recuperando sessão");
     const sessionTimeout = setTimeout(() => {
       if (!handled) {
-        console.warn("[Auth] getSession timeout (4s), forçando inicialização da aplicação...");
-        apply(null, "timeout");
+        console.warn("[Auth] getSession timeout (2.5s), forçando inicialização da aplicação...");
+        apply(initialRef.current.session, "timeout");
       }
-    }, 4000);
+    }, 2500);
 
     supabase.auth.getSession()
       .then(({ data: { session } }) => {
@@ -170,7 +200,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const signOut = async () => {
-    try { sessionStorage.removeItem("authRedirectDone"); } catch {}
+    try {
+      sessionStorage.removeItem("authRedirectDone");
+      localStorage.removeItem("cached_user_role");
+      localStorage.removeItem("cached_driver_profile");
+    } catch {}
+    setUser(null);
+    setSession(null);
+    setRole(null);
     await supabase.auth.signOut();
   };
 

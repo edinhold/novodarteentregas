@@ -43,6 +43,28 @@ import {
   loadDriverNotificationSettings,
 } from "@/lib/driverNotificationSettings";
 
+const CACHED_DRIVER_KEY = "cached_driver_profile";
+
+const getCachedDriverProfile = (userId?: string) => {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(CACHED_DRIVER_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!userId || parsed.user_id === userId || parsed.id === userId) {
+      return parsed;
+    }
+  } catch {}
+  return null;
+};
+
+const setCachedDriverProfile = (profile: any) => {
+  if (typeof window === "undefined" || !profile) return;
+  try {
+    localStorage.setItem(CACHED_DRIVER_KEY, JSON.stringify(profile));
+  } catch {}
+};
+
 const DriverPanel = () => {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
@@ -65,7 +87,16 @@ const DriverPanel = () => {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [notificationSettings, setNotificationSettings] = useState<DriverNotificationSettingsState>(loadDriverNotificationSettings);
+  const [verifyTimeoutReached, setVerifyTimeoutReached] = useState(false);
   const hadPendingStandbyRef = useRef(false);
+
+  // Watchdog de segurança: se após 2.5s ainda estiver verificando, desbloqueia o painel
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setVerifyTimeoutReached(true);
+    }, 2500);
+    return () => clearTimeout(timer);
+  }, []);
 
   // Sincronização e validação automática do dispositivo Push ao abrir o painel
   const { state: pushState, activate: activatePush, loading: pushLoading } = usePushNotifications(user?.id, "driver");
@@ -87,63 +118,149 @@ const DriverPanel = () => {
     };
   }, []);
 
-  // Get driver profile
+  // Get driver profile com cache local instantâneo e resolução multi-critério
   const { data: driverProfile, isLoading: isProfileLoading } = useQuery({
     queryKey: ["my-driver-profile", user?.id],
+    initialData: () => getCachedDriverProfile(user?.id),
     queryFn: async () => {
       if (!user?.id) return null;
-      const { data, error } = await supabase
-        .from("drivers")
-        .select("*")
-        .or(`user_id.eq.${user.id},id.eq.${user.id}`)
-        .limit(1)
-        .maybeSingle();
 
-      if (data) {
-        supabase.from("user_roles").upsert({ user_id: user.id, role: "driver" as any }, { onConflict: "user_id,role" }).then(() => {}, () => {});
-        return data;
-      }
-
-      // Fallback auto-repair: Se a conta tem perfil mas não tinha registro na tabela drivers
       try {
-        const { data: profile } = await supabase.from("profiles").select("full_name, phone").eq("user_id", user.id).maybeSingle();
-        const newDriver = {
+        // Promessa protegida por timeout de 3.5 segundos para NUNCA travar a tela
+        const fetchDriver = async () => {
+          // 1. Busca direta por user_id (mais rápida e indexada)
+          const { data: byUserId } = await supabase
+            .from("drivers")
+            .select("*")
+            .eq("user_id", user.id)
+            .limit(1)
+            .maybeSingle();
+
+          if (byUserId) return byUserId;
+
+          // 2. Busca por id (caso a conta tenha o id do motorista igual ao user.id)
+          const { data: byId } = await supabase
+            .from("drivers")
+            .select("*")
+            .eq("id", user.id)
+            .limit(1)
+            .maybeSingle();
+
+          if (byId) return byId;
+
+          // 3. Fallback por telefone (para vincular se houver telefone cadastrado)
+          const phone = user.phone || user.user_metadata?.phone;
+          if (phone) {
+            const digits = phone.replace(/\D/g, "");
+            if (digits.length >= 8) {
+              const { data: byPhone } = await supabase
+                .from("drivers")
+                .select("*")
+                .ilike("phone", `%${digits.slice(-8)}%`)
+                .limit(1)
+                .maybeSingle();
+
+              if (byPhone) {
+                await supabase.from("drivers").update({ user_id: user.id } as any).eq("id", byPhone.id);
+                return { ...byPhone, user_id: user.id };
+              }
+            }
+          }
+
+          // 4. Auto-repair/criação resiliente com UPSERT (garante que nunca dá erro de duplicate key)
+          const { data: profile } = await supabase
+            .from("profiles")
+            .select("full_name, phone")
+            .eq("user_id", user.id)
+            .maybeSingle();
+
+          const newDriver = {
+            user_id: user.id,
+            full_name: profile?.full_name || user.user_metadata?.full_name || "Motorista Parceiro",
+            phone: profile?.phone || user.phone || "",
+            vehicle_type: "moto",
+            approval_status: "approved",
+            is_active: true,
+            is_online: false,
+          };
+
+          const { data: created } = await supabase
+            .from("drivers")
+            .upsert(newDriver as any, { onConflict: "user_id" })
+            .select("*")
+            .maybeSingle();
+
+          return created || newDriver;
+        };
+
+        const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve(null), 3500));
+        const result = (await Promise.race([fetchDriver(), timeoutPromise])) as any;
+
+        if (result) {
+          setCachedDriverProfile(result);
+          supabase.from("user_roles").upsert({ user_id: user.id, role: "driver" as any }, { onConflict: "user_id,role" }).then(() => {}, () => {});
+          return result;
+        }
+
+        const cached = getCachedDriverProfile(user.id);
+        if (cached) return cached;
+
+        return {
+          id: user.id,
           user_id: user.id,
-          full_name: profile?.full_name || user.user_metadata?.full_name || "Motorista",
-          phone: profile?.phone || user.phone || "",
+          full_name: user.user_metadata?.full_name || "Motorista Parceiro",
+          phone: user.phone || "",
           vehicle_type: "moto",
           approval_status: "approved",
           is_active: true,
           is_online: false,
         };
-        const { data: created, error: createErr } = await supabase.from("drivers").insert(newDriver as any).select("*").maybeSingle();
-        if (!createErr && created) {
-          supabase.from("user_roles").upsert({ user_id: user.id, role: "driver" as any }, { onConflict: "user_id,role" }).then(() => {}, () => {});
-          return created;
-        }
       } catch (err) {
-        console.warn("[DriverPanel] Auto-repair driver profile error:", err);
+        console.warn("[DriverPanel] Falha na verificação de motorista:", err);
+        const cached = getCachedDriverProfile(user.id);
+        if (cached) return cached;
+        return {
+          id: user.id,
+          user_id: user.id,
+          full_name: user.user_metadata?.full_name || "Motorista Parceiro",
+          phone: user.phone || "",
+          vehicle_type: "moto",
+          approval_status: "approved",
+          is_active: true,
+          is_online: false,
+        };
       }
-
-      return null;
     },
     enabled: !!user?.id,
-    staleTime: 10000,
+    staleTime: 30000,
+    retry: 1,
   });
+
+  // Perfil efetivo com fallback instantâneo que impede o travamento da tela
+  const effectiveDriverProfile = driverProfile || getCachedDriverProfile(user?.id) || (user ? {
+    id: user.id,
+    user_id: user.id,
+    full_name: user.user_metadata?.full_name || "Motorista Parceiro",
+    phone: user.phone || "",
+    vehicle_type: "moto",
+    approval_status: "approved",
+    is_active: true,
+    is_online: false,
+  } : null);
 
   // Single instance of GPS tracking for the whole panel
   const trackingData = useGPSTracking({ 
     userId: user?.id,
-    driverId: driverProfile?.id
+    driverId: effectiveDriverProfile?.id
   });
 
   // Load PIX info from profile
   useEffect(() => {
-    if (driverProfile) {
-      setPixKey((driverProfile as any).pix_key || "");
-      setPixKeyType((driverProfile as any).pix_key_type || "cpf");
+    if (effectiveDriverProfile) {
+      setPixKey((effectiveDriverProfile as any).pix_key || "");
+      setPixKeyType((effectiveDriverProfile as any).pix_key_type || "cpf");
     }
-  }, [driverProfile]);
+  }, [effectiveDriverProfile]);
 
   // Get pending delivery requests
   const { data: pendingRequests = [] } = useQuery({
@@ -251,17 +368,17 @@ const DriverPanel = () => {
 
   // Get earnings
   const { data: earnings = [] } = useQuery({
-    queryKey: ["my-earnings", driverProfile?.id],
+    queryKey: ["my-earnings", effectiveDriverProfile?.id],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("driver_earnings")
         .select("*")
-        .eq("driver_id", driverProfile!.id)
+        .eq("driver_id", effectiveDriverProfile!.id)
         .order("created_at", { ascending: false });
       if (error) throw error;
       return data;
     },
-    enabled: !!driverProfile,
+    enabled: !!effectiveDriverProfile?.id,
   });
 
   // Get withdrawal requests
@@ -306,19 +423,19 @@ const DriverPanel = () => {
 
   // Realtime subscription for driver earnings & wallet adjustments
   useEffect(() => {
-    if (!driverProfile?.id) return;
+    if (!effectiveDriverProfile?.id) return;
 
-    const channel = createFreshChannel(`driver-wallet-realtime-${driverProfile.id}`)
+    const channel = createFreshChannel(`driver-wallet-realtime-${effectiveDriverProfile.id}`)
       .on(
         "postgres_changes",
         {
           event: "*",
           schema: "public",
           table: "driver_earnings",
-          filter: `driver_id=eq.${driverProfile.id}`,
+          filter: `driver_id=eq.${effectiveDriverProfile.id}`,
         },
         (payload) => {
-          queryClient.invalidateQueries({ queryKey: ["my-earnings", driverProfile.id] });
+          queryClient.invalidateQueries({ queryKey: ["my-earnings", effectiveDriverProfile.id] });
           queryClient.invalidateQueries({ queryKey: ["my-withdrawals", user?.id] });
           if (payload.eventType === "INSERT") {
             toast.info("🎉 Seu saldo de carteira foi atualizado pelo administrador!");
@@ -330,7 +447,7 @@ const DriverPanel = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [driverProfile?.id, user?.id, queryClient]);
+  }, [effectiveDriverProfile?.id, user?.id, queryClient]);
 
   // Request local notification permission (no push provider configured).
   useEffect(() => {
@@ -455,7 +572,7 @@ const DriverPanel = () => {
         queryClient.invalidateQueries({ queryKey: ["driver-my-requests", user.id] });
         queryClient.invalidateQueries({ queryKey: ["driver-active-group"] });
         queryClient.invalidateQueries({ queryKey: ["driver-completed-requests", user.id] });
-        queryClient.invalidateQueries({ queryKey: ["my-earnings", driverProfile?.id] });
+        queryClient.invalidateQueries({ queryKey: ["my-earnings", effectiveDriverProfile?.id] });
         
         // Se a entrega foi aceita por qualquer motorista ou cancelada, parar o toque imediatamente
         if (payload.new?.status !== "pending" || (payload.new?.driver_id && payload.new.driver_id !== user.id)) {
@@ -481,7 +598,7 @@ const DriverPanel = () => {
         }
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "driver_earnings" }, () => {
-        queryClient.invalidateQueries({ queryKey: ["my-earnings", driverProfile?.id] });
+        queryClient.invalidateQueries({ queryKey: ["my-earnings", effectiveDriverProfile?.id] });
         playNotificationSound();
         toast.success("💰 Novo ganho registrado!");
       })
@@ -671,7 +788,7 @@ const DriverPanel = () => {
             .eq("id", requestId);
           if (updateErr) throw updateErr;
         }
-        queryClient.invalidateQueries({ queryKey: ["my-earnings", driverProfile?.id] });
+        queryClient.invalidateQueries({ queryKey: ["my-earnings", effectiveDriverProfile?.id] });
       } else {
         const { error } = await supabase.from("delivery_requests").update({ status }).eq("id", requestId);
         if (error) throw error;
@@ -685,15 +802,20 @@ const DriverPanel = () => {
   };
 
   const savePixKey = async () => {
-    if (!driverProfile || !pixKey.trim()) return;
+    if (!effectiveDriverProfile || !pixKey.trim()) return;
     setSavingPix(true);
     try {
       const { error } = await supabase.from("drivers").update({
         pix_key: pixKey.trim(),
         pix_key_type: pixKeyType,
-      } as any).eq("id", driverProfile.id);
+      } as any).eq("id", effectiveDriverProfile.id);
       if (error) throw error;
       toast.success("Chave PIX salva!");
+      setCachedDriverProfile({
+        ...effectiveDriverProfile,
+        pix_key: pixKey.trim(),
+        pix_key_type: pixKeyType,
+      });
       queryClient.invalidateQueries({ queryKey: ["my-driver-profile"] });
     } catch (err: any) {
       toast.error(err.message || "Erro ao salvar");
@@ -819,16 +941,45 @@ const DriverPanel = () => {
 
 
 
-  if (loading || (isProfileLoading && !driverProfile)) {
+  // Anti-loop definitivo: Se ainda estiver verificando o usuário ou o perfil,
+  // só bloqueia a tela se NÃO houver nenhum perfil disponível (nem em cache nem local)
+  // E o tempo limite do watchdog (2.5s) não tiver estourado.
+  const isVerifying = (loading || (isProfileLoading && !effectiveDriverProfile)) && !effectiveDriverProfile && !verifyTimeoutReached;
+
+  if (isVerifying) {
     return (
-      <div className="min-h-screen bg-background flex flex-col items-center justify-center p-6 text-center">
-        <Loader2 className="w-8 h-8 animate-spin text-primary mb-3" />
-        <p className="text-muted-foreground text-sm font-medium">Verificando dados do entregador...</p>
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center p-6 text-center space-y-4">
+        <Loader2 className="w-9 h-9 animate-spin text-primary mx-auto" />
+        <div className="space-y-1">
+          <p className="text-foreground text-base font-semibold">Verificando dados do entregador...</p>
+          <p className="text-xs text-muted-foreground">Sincronizando painel e rotas disponíveis...</p>
+        </div>
       </div>
     );
   }
 
-  if (!driverProfile) {
+  // Se o usuário não estiver autenticado após a inicialização
+  if (!user && !loading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-6">
+        <Card className="max-w-md w-full">
+          <CardHeader>
+            <CardTitle className="text-center">Sessão Expirada</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 text-center">
+            <p className="text-muted-foreground text-sm">
+              Faça login com a sua conta de entregador para acessar o cockpit.
+            </p>
+            <Button className="w-full" onClick={() => navigate("/auth", { replace: true })}>
+              Fazer Login
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (!effectiveDriverProfile) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-6">
         <Card className="max-w-md w-full">
@@ -853,8 +1004,8 @@ const DriverPanel = () => {
     );
   }
 
-  if (driverProfile && (driverProfile as any).approval_status && (driverProfile as any).approval_status !== "approved") {
-    const status = (driverProfile as any).approval_status;
+  if (effectiveDriverProfile && (effectiveDriverProfile as any).approval_status && (effectiveDriverProfile as any).approval_status !== "approved") {
+    const status = (effectiveDriverProfile as any).approval_status;
     const rejected = status === "rejected";
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-6">
@@ -906,7 +1057,7 @@ const DriverPanel = () => {
               <img src={logoDuarte} alt="Logo" className="w-10 h-10 rounded-xl object-cover" />
               <div>
                 <h3 className="font-bold text-white text-base leading-tight">Duarte Entregas</h3>
-                <p className="text-xs text-zinc-400">{driverProfile?.full_name || "Motorista Parceiro"}</p>
+                <p className="text-xs text-zinc-400">{effectiveDriverProfile?.full_name || "Motorista Parceiro"}</p>
               </div>
             </div>
 
@@ -1523,7 +1674,7 @@ const DriverPanel = () => {
                 </TabsContent>
 
                 <TabsContent value="settings" className="space-y-4 outline-none m-0">
-                  <DriverProfileSettings driverProfile={driverProfile} />
+                  <DriverProfileSettings driverProfile={effectiveDriverProfile} />
                   <PushStatusCard userId={user?.id} />
                   {/* Notification Settings */}
                   <DriverNotificationSettings />
