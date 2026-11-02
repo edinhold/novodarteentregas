@@ -22,6 +22,8 @@ import {
   Plus,
   PanelLeftOpen,
   ArrowLeft,
+  DollarSign,
+  Route,
 } from "lucide-react";
 import { searchAddressSuggestions, geocodeAddress, calculateRoute } from "@/services/mapbox";
 import { notifyAvailableDrivers } from "@/lib/push";
@@ -32,6 +34,18 @@ import { DriverPhoto } from "@/components/DriverPhoto";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+
+export interface AddressSuggestionItem {
+  id: string;
+  title: string;
+  subtitle: string;
+  fullAddress: string;
+  street: string;
+  number?: string;
+  neighborhood?: string;
+  lat: number;
+  lng: number;
+}
 
 interface StoreModernDashboardProps {
   user: any;
@@ -73,7 +87,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
   const [additionalNotes, setAdditionalNotes] = useState("");
 
   // Estados de Geocodificação e Autocomplete
-  const [addressSuggestions, setAddressSuggestions] = useState<any[]>([]);
+  const [addressSuggestions, setAddressSuggestions] = useState<AddressSuggestionItem[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [searchingAddress, setSearchingAddress] = useState(false);
   const [deliveryCoordinates, setDeliveryCoordinates] = useState<{ lat: number; lng: number } | null>(null);
@@ -90,12 +104,20 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
   // Rastreamento de localização de motoristas em tempo real
   const { data: driverLocations = [] } = useDriverLocations();
 
-  // Consulta de configuração de taxas da plataforma
+  // Consulta de configuração de taxas da plataforma (Dynamic Pricing, Fee per km, Base fee)
   const { data: deliveryConfig } = useQuery({
     queryKey: ["delivery-config"],
     queryFn: async () => {
-      const { data } = await (supabase as any).rpc("get_public_delivery_config");
-      return Array.isArray(data) ? data[0] : data;
+      try {
+        const { data, error } = await (supabase as any).rpc("get_public_delivery_config");
+        if (!error && data) {
+          return Array.isArray(data) ? data[0] : data;
+        }
+      } catch (e) {
+        console.warn("[StoreModernDashboard] Erro RPC get_public_delivery_config:", e);
+      }
+      const { data: tableData } = await supabase.from("delivery_config").select("*").limit(1).maybeSingle();
+      return tableData;
     },
     staleTime: 1000 * 60 * 5,
   });
@@ -111,9 +133,10 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Busca sugestões de endereço enquanto o lojista digita (com debounce)
+  // Busca sugestões de ruas e endereços enquanto o lojista digita (com debounce)
   useEffect(() => {
-    if (!addressInput.trim() || addressInput.trim().length < 3) {
+    const query = addressInput.trim();
+    if (!query || query.length < 3) {
       setAddressSuggestions([]);
       setShowSuggestions(false);
       return;
@@ -122,26 +145,88 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
     const timer = setTimeout(async () => {
       setSearchingAddress(true);
       try {
-        const proximity = restaurant?.latitude && restaurant?.longitude
-          ? { lat: restaurant.latitude, lng: restaurant.longitude }
-          : undefined;
+        const formatted: AddressSuggestionItem[] = [];
 
-        const results = await searchAddressSuggestions(addressInput, {
-          proximity,
-          limit: 5,
-        });
+        // 1. Busca oficial pela Mapbox (Geocoding Forward com foco em Primavera do Leste)
+        try {
+          const mapboxResults = await searchAddressSuggestions(query, {
+            userNumber: streetNumber.trim() || undefined,
+            limit: 6,
+          });
 
-        setAddressSuggestions(results || []);
-        setShowSuggestions((results || []).length > 0);
+          if (Array.isArray(mapboxResults) && mapboxResults.length > 0) {
+            for (const item of mapboxResults) {
+              const streetName = item.street || item.fullAddress.split(",")[0] || query;
+              const neighborhood = item.neighborhood || "";
+              const num = item.number || "";
+              formatted.push({
+                id: item.mapboxId || `${item.coordinates.latitude},${item.coordinates.longitude}`,
+                title: num ? `${streetName}, ${num}` : streetName,
+                subtitle: [neighborhood, item.city || "Primavera do Leste", item.stateCode || "MT"].filter(Boolean).join(" • "),
+                fullAddress: item.fullAddress,
+                street: streetName,
+                number: num,
+                neighborhood: neighborhood,
+                lat: item.coordinates.latitude,
+                lng: item.coordinates.longitude,
+              });
+            }
+          }
+        } catch (mapboxErr) {
+          console.warn("[StoreModernDashboard] Mapbox suggestions failed, tentando fallback:", mapboxErr);
+        }
+
+        // 2. Fallback complementar no Nominatim (OpenStreetMap) caso Mapbox retorne menos de 3 resultados
+        if (formatted.length < 3) {
+          try {
+            const nomQuery = `${query}, Primavera do Leste, MT, Brasil`;
+            const url = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&countrycodes=br&limit=6&q=${encodeURIComponent(nomQuery)}`;
+            const nomRes = await fetch(url, { headers: { "Accept-Language": "pt-BR" } });
+            if (nomRes.ok) {
+              const nomData = await nomRes.json();
+              if (Array.isArray(nomData)) {
+                for (const n of nomData) {
+                  const addr = n.address || {};
+                  const road = addr.road || addr.pedestrian || addr.suburb || n.display_name.split(",")[0];
+                  const suburb = addr.suburb || addr.neighbourhood || addr.city_district || "";
+                  const houseNum = addr.house_number || "";
+                  const latNum = parseFloat(n.lat);
+                  const lngNum = parseFloat(n.lon);
+                  if (!isNaN(latNum) && !isNaN(lngNum)) {
+                    const alreadyExists = formatted.some(f => Math.abs(f.lat - latNum) < 0.0008 && Math.abs(f.lng - lngNum) < 0.0008);
+                    if (!alreadyExists) {
+                      formatted.push({
+                        id: `nom-${n.place_id || n.osm_id}`,
+                        title: houseNum ? `${road}, ${houseNum}` : road,
+                        subtitle: [suburb, "Primavera do Leste"].filter(Boolean).join(" • "),
+                        fullAddress: n.display_name,
+                        street: road,
+                        number: houseNum,
+                        neighborhood: suburb,
+                        lat: latNum,
+                        lng: lngNum,
+                      });
+                    }
+                  }
+                }
+              }
+            }
+          } catch (nomErr) {
+            console.warn("[StoreModernDashboard] Nominatim fallback failed:", nomErr);
+          }
+        }
+
+        setAddressSuggestions(formatted);
+        setShowSuggestions(formatted.length > 0);
       } catch (err) {
-        console.warn("[StoreModernDashboard] Erro ao buscar endereços:", err);
+        console.warn("[StoreModernDashboard] Erro geral ao buscar endereços:", err);
       } finally {
         setSearchingAddress(false);
       }
     }, 280);
 
     return () => clearTimeout(timer);
-  }, [addressInput, restaurant]);
+  }, [addressInput, streetNumber]);
 
   // Recalcula rota e distância quando coordenadas mudam
   useEffect(() => {
@@ -160,22 +245,27 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
         );
         if (!isCancelled && routeData?.distanceMeters) {
           setEstimatedDistanceKm(Number((routeData.distanceMeters / 1000).toFixed(1)));
+          return;
         }
-      } catch {
-        // Fallback cálculo direto
-        const R = 6371;
-        const dLat = ((deliveryCoordinates.lat - restaurant.latitude) * Math.PI) / 180;
-        const dLon = ((deliveryCoordinates.lng - restaurant.longitude) * Math.PI) / 180;
-        const a =
-          Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-          Math.cos((restaurant.latitude * Math.PI) / 180) *
-            Math.cos((deliveryCoordinates.lat * Math.PI) / 180) *
-            Math.sin(dLon / 2) *
-            Math.sin(dLon / 2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        if (!isCancelled) {
-          setEstimatedDistanceKm(Number((R * c).toFixed(1)));
-        }
+      } catch (err) {
+        console.warn("[StoreModernDashboard] calculateRoute falhou, usando distância geodésica:", err);
+      }
+
+      // Fallback geodésico aproximado
+      const R = 6371;
+      const dLat = ((deliveryCoordinates.lat - restaurant.latitude) * Math.PI) / 180;
+      const dLon = ((deliveryCoordinates.lng - restaurant.longitude) * Math.PI) / 180;
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos((restaurant.latitude * Math.PI) / 180) *
+          Math.cos((deliveryCoordinates.lat * Math.PI) / 180) *
+          Math.sin(dLon / 2) *
+          Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      if (!isCancelled) {
+        // Multiplica por 1.25 para simular o traçado das ruas em grade da cidade
+        const estRoadKm = Number((R * c * 1.25).toFixed(1));
+        setEstimatedDistanceKm(estRoadKm > 0 ? estRoadKm : 2.5);
       }
     };
 
@@ -185,22 +275,43 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
     };
   }, [deliveryCoordinates, restaurant]);
 
-  // Cálculo da estimativa de preço com base na distância
-  const estimatedCost = useMemo(() => {
-    if (!deliveryConfig || estimatedDistanceKm <= 0) return null;
-    const baseFee = Number(deliveryConfig.base_fee ?? 5);
-    const feePerKm = Number(deliveryConfig.fee_per_km ?? 1.5);
-    const minKm = Number(deliveryConfig.min_km ?? 0);
-    const chargeableKm = Math.max(0, estimatedDistanceKm - minKm);
-    return baseFee + chargeableKm * feePerKm;
-  }, [deliveryConfig, estimatedDistanceKm]);
+  // Cálculo exato do valor da corrida (espelhando deduct_credits_for_delivery do backend)
+  const fareDetails = useMemo(() => {
+    const baseFee = Number(deliveryConfig?.base_fee ?? 5);
+    const dynamicEnabled = Boolean(deliveryConfig?.dynamic_pricing_enabled);
+    const dynamicFee = Number(deliveryConfig?.dynamic_fee_per_km ?? 0);
+    const feePerKm = dynamicEnabled && dynamicFee > 0 ? dynamicFee : Number(deliveryConfig?.fee_per_km ?? 1.5);
+    const minKm = Number(deliveryConfig?.min_km ?? 0);
+    const maxKm = Number(deliveryConfig?.max_km ?? 0);
+    const roundKmUp = Boolean(deliveryConfig?.round_km_up ?? false);
 
-  // Seleciona um endereço da lista de sugestões
-  const handleSelectSuggestion = (sug: any) => {
-    const lat = parseFloat(sug.lat);
-    const lon = parseFloat(sug.lon);
-    setAddressInput(sug.display_name.split(",")[0] || sug.display_name);
-    setDeliveryCoordinates({ lat, lng: lon });
+    let effectiveKm = estimatedDistanceKm;
+    if (effectiveKm <= 0 && deliveryCoordinates) {
+      effectiveKm = 3.0; // Distância padrão estimada quando ponto definido
+    }
+
+    if (roundKmUp && effectiveKm > 0) effectiveKm = Math.ceil(effectiveKm);
+    if (minKm > 0 && effectiveKm < minKm) effectiveKm = minKm;
+    if (maxKm > 0 && effectiveKm > maxKm) effectiveKm = maxKm;
+
+    const totalCost = effectiveKm > 0 ? baseFee + (effectiveKm * feePerKm) : baseFee;
+
+    return {
+      baseFee,
+      feePerKm,
+      effectiveKm,
+      totalCost,
+      isCalculated: estimatedDistanceKm > 0,
+    };
+  }, [deliveryConfig, estimatedDistanceKm, deliveryCoordinates]);
+
+  // Seleciona um endereço da lista de sugestões de ruas
+  const handleSelectSuggestion = (sug: AddressSuggestionItem) => {
+    setAddressInput(sug.street || sug.title);
+    if (sug.number) {
+      setStreetNumber(sug.number);
+    }
+    setDeliveryCoordinates({ lat: sug.lat, lng: sug.lng });
     setShowSuggestions(false);
   };
 
@@ -245,6 +356,8 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
 
     const pickupAddress = restaurant?.address || "Primavera do Leste";
 
+    const finalDistanceToCharge = fareDetails.effectiveKm > 0 ? fareDetails.effectiveKm : (finalDistance > 0 ? finalDistance : 3.0);
+
     setIsSubmitting(true);
     try {
       const { data: requestId, error } = await supabase.rpc("deduct_credits_for_delivery", {
@@ -252,7 +365,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
         p_delivery_address: fullAddress,
         p_notes: compiledNotes || null,
         p_restaurant_id: restaurant?.id || null,
-        p_distance_km: finalDistance > 0 ? finalDistance : 3.0,
+        p_distance_km: finalDistanceToCharge,
         p_preferred_driver_id: null,
       } as any);
 
@@ -263,7 +376,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
         void notifyAvailableDrivers(String(requestId));
       }
 
-      toast.success("🚀 Entrega solicitada com sucesso! Notificando motoristas...");
+      toast.success(`🚀 Entrega solicitada! Valor: R$ ${fareDetails.totalCost.toFixed(2).replace(".", ",")}. Notificando motoristas...`);
 
       // Limpa formulário
       setRecipientName("");
@@ -497,25 +610,40 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
                 {/* Lista Dropdown de Sugestões de Endereço */}
                 {showSuggestions && addressSuggestions.length > 0 && (
                   <div
-                    className={`absolute z-30 left-0 right-0 mt-1 rounded-xl border shadow-xl max-h-56 overflow-y-auto divide-y backdrop-blur-md ${
+                    className={`absolute z-30 left-0 right-0 mt-1 rounded-2xl border shadow-2xl max-h-64 overflow-y-auto divide-y backdrop-blur-md animate-in fade-in slide-in-from-top-1 duration-150 ${
                       isDark
-                        ? "bg-[#18181B] border-zinc-700 divide-zinc-800"
-                        : "bg-white border-zinc-200 divide-zinc-100"
+                        ? "bg-[#18181B]/95 border-zinc-700 divide-zinc-800"
+                        : "bg-white/95 border-zinc-200 divide-zinc-100"
                     }`}
                   >
-                    {addressSuggestions.map((sug, idx) => (
+                    <div className="px-3.5 py-1.5 bg-muted/40 text-[10px] font-bold text-muted-foreground uppercase tracking-wider flex items-center justify-between">
+                      <span>Ruas em Primavera do Leste</span>
+                      <span className="text-[#EA580C]">{addressSuggestions.length} encontradas</span>
+                    </div>
+
+                    {addressSuggestions.map((sug) => (
                       <button
-                        key={idx}
+                        key={sug.id}
                         type="button"
                         onClick={() => handleSelectSuggestion(sug)}
-                        className={`w-full px-3.5 py-2.5 text-left text-xs sm:text-sm transition flex items-center gap-2.5 ${
+                        className={`w-full px-3.5 py-2.5 text-left transition flex items-center gap-3 cursor-pointer group ${
                           isDark
-                            ? "hover:bg-zinc-800 text-zinc-200"
-                            : "hover:bg-orange-50/70 text-zinc-800"
+                            ? "hover:bg-zinc-800/80 text-zinc-200"
+                            : "hover:bg-orange-50/80 text-zinc-900"
                         }`}
                       >
-                        <MapPin className="w-3.5 h-3.5 text-[#EA580C] shrink-0" />
-                        <span className="truncate">{sug.display_name}</span>
+                        <div className="w-8 h-8 rounded-xl bg-[#EA580C]/10 text-[#EA580C] group-hover:bg-[#EA580C] group-hover:text-white flex items-center justify-center shrink-0 transition-colors">
+                          <MapPin className="w-4 h-4" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs sm:text-sm font-bold text-foreground truncate group-hover:text-[#EA580C] transition-colors">
+                            {sug.title}
+                          </p>
+                          <p className="text-[11px] text-muted-foreground truncate">
+                            {sug.subtitle}
+                          </p>
+                        </div>
+                        <ChevronRight className="w-4 h-4 text-muted-foreground/60 group-hover:text-[#EA580C] shrink-0" />
                       </button>
                     ))}
                   </div>
@@ -601,32 +729,79 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
                 />
               </div>
 
-              {/* Prévia de Rota e Taxa Estimada */}
-              {estimatedDistanceKm > 0 && (
-                <div
-                  className={`p-2.5 rounded-xl border flex items-center justify-between text-xs ${
-                    isDark
-                      ? "bg-zinc-800/70 border-zinc-700 text-zinc-300"
-                      : "bg-orange-50/70 border-orange-200 text-orange-950"
-                  }`}
-                >
-                  <div className="flex items-center gap-1.5">
-                    <Compass className="w-3.5 h-3.5 text-[#EA580C]" />
-                    <span>Distância: <strong>{estimatedDistanceKm} km</strong></span>
+              {/* Card Destaque: Valor da Corrida e Resumo */}
+              <div
+                className={`p-3.5 sm:p-4 rounded-2xl border transition-all duration-300 space-y-2.5 ${
+                  isDark
+                    ? "bg-[#121214] border-zinc-700/80 shadow-inner"
+                    : "bg-gradient-to-br from-orange-50/70 to-amber-50/50 border-orange-200/90 shadow-xs"
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-10 h-10 rounded-2xl bg-[#EA580C]/15 text-[#EA580C] flex items-center justify-center shrink-0">
+                      <DollarSign className="w-5 h-5 stroke-[2.5]" />
+                    </div>
+                    <div>
+                      <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-muted-foreground block leading-tight">
+                        Valor da Corrida
+                      </span>
+                      <span className="text-xl sm:text-2xl font-black text-[#EA580C] tracking-tight leading-tight">
+                        R$ {fareDetails.totalCost.toFixed(2).replace(".", ",")}
+                      </span>
+                    </div>
                   </div>
-                  {estimatedCost !== null && (
-                    <span className="font-bold text-[#EA580C]">
-                      Taxa estimada: R$ {estimatedCost.toFixed(2)}
+
+                  {fareDetails.isCalculated ? (
+                    <div className="text-right">
+                      <span className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30">
+                        <Route className="w-3.5 h-3.5" />
+                        {estimatedDistanceKm} km
+                      </span>
+                      <span className="text-[10px] text-muted-foreground block mt-0.5">
+                        ~{Math.max(4, Math.round(estimatedDistanceKm * 2.5))} min de trajeto
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="text-right">
+                      <span className="text-[11px] font-semibold text-muted-foreground bg-muted/60 px-2 py-0.5 rounded-md">
+                        Taxa Base
+                      </span>
+                      <span className="text-[10px] text-muted-foreground block mt-0.5">
+                        {addressInput.trim() ? "Aguardando ponto" : "Digite o endereço"}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Linha detalhada de decomposição da taxa e créditos */}
+                <div className="pt-2 border-t border-border/40 flex items-center justify-between text-[11px] text-muted-foreground">
+                  <span>
+                    Taxa R$ {fareDetails.baseFee.toFixed(2).replace(".", ",")}
+                    {fareDetails.isCalculated && ` + ${estimatedDistanceKm} km × R$ ${fareDetails.feePerKm.toFixed(2).replace(".", ",")}/km`}
+                  </span>
+
+                  {credits && (
+                    <span className={`font-semibold ${Number(credits.balance || 0) < fareDetails.totalCost ? "text-red-500 font-bold" : "text-emerald-600 dark:text-emerald-400"}`}>
+                      Saldo: R$ {Number(credits.balance || 0).toFixed(2).replace(".", ",")}
                     </span>
                   )}
                 </div>
-              )}
+
+                {/* Alerta de Saldo Insuficiente */}
+                {credits && Number(credits.balance || 0) < fareDetails.totalCost && (
+                  <div className="flex items-center gap-1.5 p-2 rounded-xl bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 text-[11px] font-medium">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                    <span>Saldo insuficiente na carteira (R$ {Number(credits.balance || 0).toFixed(2)}). Recarregue para chamar.</span>
+                  </div>
+                )}
+              </div>
 
               {/* Botão de Envio (Laranja Largo com Cantos Arredondados) */}
               <button
                 type="submit"
-                disabled={isSubmitting}
-                className="w-full bg-[#EA580C] hover:bg-[#C2410C] text-white font-extrabold text-base py-3.5 px-4 rounded-xl shadow-lg shadow-orange-500/25 transition-all duration-200 active:scale-[0.99] disabled:opacity-60 flex items-center justify-center gap-2 select-none cursor-pointer mt-2"
+                disabled={isSubmitting || (credits && Number(credits.balance || 0) < fareDetails.totalCost)}
+                className="w-full bg-[#EA580C] hover:bg-[#C2410C] text-white font-extrabold text-sm sm:text-base py-3.5 px-4 rounded-xl shadow-lg shadow-orange-500/25 transition-all duration-200 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 select-none cursor-pointer mt-1"
               >
                 {isSubmitting ? (
                   <>
@@ -634,7 +809,10 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
                     <span>Enviando chamado...</span>
                   </>
                 ) : (
-                  <span>Envio</span>
+                  <>
+                    <Bike className="w-5 h-5" />
+                    <span>Confirmar Envio • R$ {fareDetails.totalCost.toFixed(2).replace(".", ",")}</span>
+                  </>
                 )}
               </button>
             </form>
