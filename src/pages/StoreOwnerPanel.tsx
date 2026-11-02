@@ -621,7 +621,7 @@ const StoreOwnerPanel = () => {
             )}
 
             <div className="bg-amber-500/10 border border-amber-500/30 p-2.5 rounded-lg text-[11px] text-amber-800 dark:text-amber-300">
-              💡 <strong>Estorno na Carteira:</strong> O saldo descontado nesta entrega será reembolsado à carteira da sua loja.
+              💡 <strong>Cancelamento Seguro:</strong> Nenhum valor será repassado ao motorista e o saldo da corrida não será descontado da carteira da loja (estorno de 100% dos créditos).
             </div>
           </div>
 

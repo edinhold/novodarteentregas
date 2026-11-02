@@ -109,4 +109,72 @@ describe("Store Delivery Cancellation & Driver Credentials Unit Tests", () => {
     expect(data[0].photo_url).toBe("https://example.com/driver-photo.jpg");
     expect(data[0].driver_code).toBe("MOT-ABC12");
   });
+
+  it("should delete any driver earnings and refund store credits when fallback cancellation is triggered", async () => {
+    const { supabase } = await import("../integrations/supabase/client");
+
+    // Force RPC error to trigger fallback
+    (supabase.rpc as any).mockResolvedValue({ data: null, error: new Error("RPC error") });
+
+    const mockDeleteEarnings = vi.fn().mockReturnThis();
+    const mockEqEarnings = vi.fn().mockResolvedValue({ data: null, error: null });
+
+    const mockSelectRequest = vi.fn().mockReturnThis();
+    const mockEqRequest = vi.fn().mockReturnThis();
+    const mockMaybeSingleRequest = vi.fn().mockResolvedValue({
+      data: {
+        id: "req-fallback",
+        status: "accepted",
+        credit_cost: 15.5,
+        store_owner_id: "owner-123",
+      },
+    });
+
+    const mockUpdateRequest = vi.fn().mockReturnThis();
+    const mockUpsertCredits = vi.fn().mockResolvedValue({ data: null, error: null });
+    const mockSelectCredits = vi.fn().mockReturnThis();
+    const mockMaybeSingleCredits = vi.fn().mockResolvedValue({ data: { balance: 50.0 } });
+
+    (supabase.from as any).mockImplementation((table: string) => {
+      if (table === "driver_earnings") {
+        return {
+          delete: mockDeleteEarnings.mockReturnValue({ eq: mockEqEarnings }),
+        };
+      }
+      if (table === "delivery_requests") {
+        return {
+          select: mockSelectRequest,
+          eq: mockEqRequest,
+          maybeSingle: mockMaybeSingleRequest,
+          update: mockUpdateRequest,
+        };
+      }
+      if (table === "store_credits") {
+        return {
+          select: mockSelectCredits,
+          eq: vi.fn().mockReturnValue({ maybeSingle: mockMaybeSingleCredits }),
+          upsert: mockUpsertCredits,
+        };
+      }
+      return {};
+    });
+
+    const result = await executeStoreDeliveryCancellation("req-fallback", mockQueryClient, "owner-123");
+
+    expect(result).toBe(true);
+    // Verified: driver earnings are deleted
+    expect(mockDeleteEarnings).toHaveBeenCalled();
+    expect(mockEqEarnings).toHaveBeenCalledWith("delivery_request_id", "req-fallback");
+    // Verified: store credits are refunded (50 + 15.5 = 65.5)
+    expect(mockUpsertCredits).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user_id: "owner-123",
+        balance: 65.5,
+      }),
+      { onConflict: "user_id" }
+    );
+    // Verified: query invalidations
+    expect(mockQueryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["my-earnings"] });
+    expect(mockQueryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["my-credits"] });
+  });
 });

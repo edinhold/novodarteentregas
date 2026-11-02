@@ -78,15 +78,8 @@ export async function executeStoreDeliveryCancellation(
             .eq("id", requestId);
         }
 
-        // Delete pending driver earnings
-        await supabase
-          .from("driver_earnings")
-          .delete()
-          .eq("delivery_request_id", requestId)
-          .eq("status", "pending");
-
         // Refund credits back to store owner wallet
-        const refundAmount = Number(request.credit_cost) || 0;
+        const refundAmount = Number(request.credit_cost || 0) || Number((request as any).driver_fee || 0);
         const targetOwnerId = request.store_owner_id || activeUserId;
 
         if (refundAmount > 0 && targetOwnerId) {
@@ -110,18 +103,32 @@ export async function executeStoreDeliveryCancellation(
       }
     }
 
-    // 3. Trigger backend push notification cancellation (non-blocking)
+    // 3. REGRA CRÍTICA: Nenhum valor para o motorista!
+    // Deleta QUALQUER lançamento de ganho para o motorista referente a esta entrega
+    try {
+      const driverEarningsTable = supabase.from("driver_earnings");
+      if (driverEarningsTable && typeof driverEarningsTable.delete === "function") {
+        await driverEarningsTable
+          .delete()
+          .eq("delivery_request_id", requestId);
+      }
+    } catch (earningsErr) {
+      console.warn("[cancelStoreDelivery] Warning deleting driver earnings:", earningsErr);
+    }
+
+    // 4. Trigger backend push notification cancellation (non-blocking)
     void cancelDeliveryNotification(requestId);
 
-    // 4. Invalidate all store and driver queries
+    // 5. Invalidate all store and driver queries
     queryClient.invalidateQueries({ queryKey: ["my-delivery-requests"] });
     queryClient.invalidateQueries({ queryKey: ["my-credits"] });
     queryClient.invalidateQueries({ queryKey: ["my-delivery-groups"] });
     queryClient.invalidateQueries({ queryKey: ["assigned-driver-info"] });
     queryClient.invalidateQueries({ queryKey: ["pending-reassignable"] });
     queryClient.invalidateQueries({ queryKey: ["store-deliveries"] });
+    queryClient.invalidateQueries({ queryKey: ["my-earnings"] });
 
-    toast.success("Corrida cancelada com sucesso. Créditos devolvidos!");
+    toast.success("Corrida cancelada com sucesso! Nenhum valor foi repassado ao motorista e o saldo da loja foi estornado.");
     return true;
   } catch (err: any) {
     console.error("[cancelStoreDelivery] Error cancelling request:", err);

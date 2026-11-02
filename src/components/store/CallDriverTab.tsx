@@ -532,7 +532,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
     : roadDistanceKm > 0 ? "osrm" : (autoDistanceKm > 0 ? "haversine" : "none");
 
   const statusLabels: Record<string, string> = {
-    pending: "Aguardando", accepted: "Aceito", picked_up: "Coletado", delivered: "Finalizado", cancelled: "Cancelado",
+    pending: "Aguardando", accepted: "Aceito", picked_up: "Coletado", delivered: "Finalizado", cancelled: "Corrida Cancelada",
   };
 
   // Fetch OSRM route when both points are set or profile changes

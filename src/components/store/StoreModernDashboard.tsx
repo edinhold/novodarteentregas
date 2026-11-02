@@ -453,6 +453,8 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
       if (statusFilter === "pending") return r.status === "pending";
       if (statusFilter === "accepted") return r.status === "accepted";
       if (statusFilter === "picked_up") return r.status === "picked_up";
+      if (statusFilter === "cancelled") return r.status === "cancelled";
+      if (statusFilter === "all") return true;
       return !["delivered", "cancelled"].includes(r.status);
     });
   }, [requests, statusFilter]);
@@ -461,6 +463,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
   const countPending = useMemo(() => requests.filter((r) => r.status === "pending").length, [requests]);
   const countAccepted = useMemo(() => requests.filter((r) => r.status === "accepted").length, [requests]);
   const countTransit = useMemo(() => requests.filter((r) => r.status === "picked_up").length, [requests]);
+  const countCancelled = useMemo(() => requests.filter((r) => r.status === "cancelled").length, [requests]);
 
   // Corrida para exibição no mini-mapa: prioriza ativa em rota ou aceita
   const displayMapRequest = useMemo(() => {
@@ -989,6 +992,26 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
 
               <button
                 type="button"
+                onClick={() => setStatusFilter("cancelled")}
+                className={`pb-2.5 transition-colors relative whitespace-nowrap ${
+                  statusFilter === "cancelled"
+                    ? "text-red-600 font-extrabold"
+                    : isDark ? "text-zinc-400 hover:text-white" : "text-zinc-500 hover:text-zinc-900"
+                }`}
+              >
+                <span>Canceladas</span>
+                {countCancelled > 0 && (
+                  <span className="ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] bg-red-500/15 text-red-600 font-bold">
+                    {countCancelled}
+                  </span>
+                )}
+                {statusFilter === "cancelled" && (
+                  <span className="absolute bottom-0 inset-x-0 h-0.5 bg-red-600 rounded-full"></span>
+                )}
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setStatusFilter("all")}
                 className={`pb-2.5 transition-colors relative whitespace-nowrap ${
                   statusFilter === "all"
@@ -1010,6 +1033,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
                   const isPending = req.status === "pending";
                   const isAccepted = req.status === "accepted";
                   const isTransit = req.status === "picked_up";
+                  const isCancelled = req.status === "cancelled";
 
                   return (
                     <div
@@ -1036,18 +1060,25 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
                         </p>
 
                         {/* Etapas / Marcos do Pedido Alinhados */}
-                        <div className="flex items-center gap-3 pt-1 text-xs">
-                          <span className={`flex items-center gap-1 font-semibold ${isAccepted || isTransit ? "text-sky-500" : isDark ? "text-zinc-500" : "text-zinc-400"}`}>
-                            <span>Em Coleta</span>
-                          </span>
+                        {isCancelled ? (
+                          <div className="flex items-center gap-1.5 pt-1 text-xs text-red-600 dark:text-red-400 font-bold">
+                            <XCircle className="w-3.5 h-3.5 shrink-0" />
+                            <span>Corrida Cancelada • Valor não cobrado da loja</span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-3 pt-1 text-xs">
+                            <span className={`flex items-center gap-1 font-semibold ${isAccepted || isTransit ? "text-sky-500" : isDark ? "text-zinc-500" : "text-zinc-400"}`}>
+                              <span>Em Coleta</span>
+                            </span>
 
-                          <span className="text-zinc-400">•</span>
+                            <span className="text-zinc-400">•</span>
 
-                          <span className={`flex items-center gap-1.5 font-semibold ${isTransit ? "text-emerald-500" : isDark ? "text-zinc-500" : "text-zinc-400"}`}>
-                            <span className={`w-2 h-2 rounded-full ${isTransit ? "bg-emerald-500 animate-pulse" : "bg-zinc-400"}`}></span>
-                            <span>Em Rota</span>
-                          </span>
-                        </div>
+                            <span className={`flex items-center gap-1.5 font-semibold ${isTransit ? "text-emerald-500" : isDark ? "text-zinc-500" : "text-zinc-400"}`}>
+                              <span className={`w-2 h-2 rounded-full ${isTransit ? "bg-emerald-500 animate-pulse" : "bg-zinc-400"}`}></span>
+                              <span>Em Rota</span>
+                            </span>
+                          </div>
+                        )}
                       </div>
 
                       {/* Lado Direito: Badge "Disponível" / Status e Seta de Ação */}
@@ -1070,6 +1101,12 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
                           </span>
                         )}
 
+                        {isCancelled && (
+                          <span className="px-3 py-1 rounded-full text-xs font-bold bg-red-100 dark:bg-red-950/60 text-red-700 dark:text-red-300 border border-red-300/40">
+                            Corrida Cancelada
+                          </span>
+                        )}
+
                         <ChevronRight className="w-5 h-5 text-zinc-400 group-hover:text-foreground transition-transform group-hover:translate-x-0.5" />
                       </div>
                     </div>
@@ -1082,8 +1119,16 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
                   }`}
                 >
                   <Bike className="w-8 h-8 text-zinc-400 mx-auto" />
-                  <p className="font-semibold text-sm">Nenhuma corrida neste status no momento</p>
-                  <p className="text-xs">Utilize o formulário de Envio para criar uma nova chamada de entrega.</p>
+                  <p className="font-semibold text-sm">
+                    {statusFilter === "cancelled"
+                      ? "Nenhuma corrida cancelada."
+                      : "Nenhuma corrida neste status no momento"}
+                  </p>
+                  <p className="text-xs">
+                    {statusFilter === "cancelled"
+                      ? "As corridas canceladas aparecerão listadas aqui com o estorno confirmado."
+                      : "Utilize o formulário de Envio para criar uma nova chamada de entrega."}
+                  </p>
                 </div>
               )}
             </div>
@@ -1122,16 +1167,42 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
         <DialogContent className={`max-w-md rounded-2xl ${isDark ? "bg-[#18181B] text-white border-zinc-800" : "bg-white text-zinc-900 border-zinc-200"}`}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 font-bold text-base sm:text-lg">
-              <Bike className="w-5 h-5 text-[#EA580C]" />
+              {selectedOrderDetails?.status === "cancelled" ? (
+                <XCircle className="w-5 h-5 text-red-600" />
+              ) : (
+                <Bike className="w-5 h-5 text-[#EA580C]" />
+              )}
               <span>Detalhes da Corrida #{selectedOrderDetails?.id?.slice(0, 8)}</span>
             </DialogTitle>
             <DialogDescription className="text-xs">
-              Status atual: <strong>{selectedOrderDetails?.status === "pending" ? "Aguardando Motorista" : selectedOrderDetails?.status === "accepted" ? "Em Coleta" : "Em Rota"}</strong>
+              Status atual:{" "}
+              <strong className={selectedOrderDetails?.status === "cancelled" ? "text-red-600 font-bold" : ""}>
+                {selectedOrderDetails?.status === "pending"
+                  ? "Aguardando Motorista"
+                  : selectedOrderDetails?.status === "accepted"
+                  ? "Em Coleta"
+                  : selectedOrderDetails?.status === "picked_up"
+                  ? "Em Rota"
+                  : selectedOrderDetails?.status === "cancelled"
+                  ? "Corrida Cancelada"
+                  : selectedOrderDetails?.status || "Em Andamento"}
+              </strong>
             </DialogDescription>
           </DialogHeader>
 
           {selectedOrderDetails && (
             <div className="space-y-4 py-2">
+              {selectedOrderDetails.status === "cancelled" && (
+                <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-800 dark:text-red-300 space-y-1">
+                  <p className="font-bold flex items-center gap-1.5 text-red-600 dark:text-red-400">
+                    <XCircle className="w-4 h-4" /> Corrida Cancelada
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Esta corrida foi cancelada pela loja. Nenhum valor foi repassado ao motorista e o valor não foi descontado da carteira da loja (estorno de 100% dos créditos garantido).
+                  </p>
+                </div>
+              )}
+
               <div className={`p-3.5 rounded-xl border space-y-2 ${isDark ? "bg-zinc-800/60 border-zinc-700" : "bg-zinc-50 border-zinc-200"}`}>
                 <div>
                   <span className="text-[11px] font-semibold text-zinc-400">Coleta</span>
@@ -1149,21 +1220,23 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
                 )}
               </div>
 
-              {/* Botão de Cancelamento */}
-              <div className="pt-1">
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    const req = selectedOrderDetails;
-                    setSelectedOrderDetails(null);
-                    onOpenCancelModal(req.id, null, req.status !== "pending");
-                  }}
-                  className="w-full text-red-600 border-red-300/60 hover:bg-red-500/10 hover:text-red-700 font-semibold text-xs h-10 rounded-xl"
-                >
-                  <XCircle className="w-4 h-4 mr-1.5" />
-                  <span>Cancelar esta Corrida</span>
-                </Button>
-              </div>
+              {/* Botão de Cancelamento (apenas se ainda NÃO estiver cancelada) */}
+              {selectedOrderDetails.status !== "cancelled" && (
+                <div className="pt-1">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      const req = selectedOrderDetails;
+                      setSelectedOrderDetails(null);
+                      onOpenCancelModal(req.id, null, req.status !== "pending");
+                    }}
+                    className="w-full text-red-600 border-red-300/60 hover:bg-red-500/10 hover:text-red-700 font-semibold text-xs h-10 rounded-xl"
+                  >
+                    <XCircle className="w-4 h-4 mr-1.5" />
+                    <span>Cancelar esta Corrida</span>
+                  </Button>
+                </div>
+              )}
             </div>
           )}
         </DialogContent>
