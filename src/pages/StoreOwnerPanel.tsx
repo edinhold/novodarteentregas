@@ -21,20 +21,46 @@ import CreditsTab from "@/components/store/CreditsTab";
 import StoreInfoTab from "@/components/store/StoreInfoTab";
 import FavoritesTab from "@/components/store/FavoritesTab";
 import RadarTab from "@/components/store/RadarTab";
-import AppSidebar from "@/components/AppSidebar";
-import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/sidebar";
-import { useIsMobile } from "@/hooks/use-mobile";
 import AdminSupportPanel from "@/components/AdminSupportPanel";
 import AssignedDriverCard, { ActiveDeliveryRequest } from "@/components/store/AssignedDriverCard";
 import logoDuarte from "@/assets/logo-duarte.jpeg";
 import { executeStoreDeliveryCancellation } from "@/lib/cancelStoreDelivery";
+import { StoreSlimSidebar } from "@/components/store/StoreSlimSidebar";
+import { StoreModernDashboard } from "@/components/store/StoreModernDashboard";
 
 const StoreOwnerPanel = () => {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState("map");
-  const isMobile = useIsMobile();
+  const [activeTab, setActiveTab] = useState("dashboard");
+
+  const [isDark, setIsDark] = useState(() => {
+    if (typeof window !== "undefined") {
+      return document.documentElement.classList.contains("dark") || localStorage.getItem("theme") === "dark";
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    const handleThemeChange = () => {
+      setIsDark(document.documentElement.classList.contains("dark") || localStorage.getItem("theme") === "dark");
+    };
+    window.addEventListener("theme-change", handleThemeChange);
+    return () => window.removeEventListener("theme-change", handleThemeChange);
+  }, []);
+
+  const toggleTheme = () => {
+    const nextDark = !isDark;
+    setIsDark(nextDark);
+    if (nextDark) {
+      document.documentElement.classList.add("dark");
+      localStorage.setItem("theme", "dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+      localStorage.setItem("theme", "light");
+    }
+    window.dispatchEvent(new Event("theme-change"));
+  };
 
   const impersonatedUserId = typeof window !== "undefined" ? sessionStorage.getItem("admin_impersonated_user_id") : null;
   const impersonatedStoreName = typeof window !== "undefined" ? sessionStorage.getItem("admin_impersonated_store_name") : null;
@@ -240,80 +266,163 @@ const StoreOwnerPanel = () => {
   }
 
   return (
-    <SidebarProvider>
-      <div className="flex min-h-screen w-full bg-background overflow-hidden flex-col">
-        {impersonatedUserId && (
-          <div className="bg-amber-500/15 border-b border-amber-500/30 px-4 py-2 text-amber-700 dark:text-amber-300 flex items-center justify-between text-xs sm:text-sm font-medium z-50">
-            <div className="flex items-center gap-2">
-              <span className="bg-amber-500 text-white text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-wider">Admin</span>
-              <span>Acessando painel de: <strong>{impersonatedStoreName || "Lojista"}</strong></span>
-            </div>
-            <button
-              className="px-3 py-1 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-800 dark:text-amber-200 rounded-md text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
-              onClick={() => {
-                sessionStorage.removeItem("admin_impersonated_user_id");
-                sessionStorage.removeItem("admin_impersonated_store_name");
-                navigate("/admin");
-              }}
-            >
-              <ArrowLeft className="w-3.5 h-3.5" />
-              Voltar ao Painel Admin
-            </button>
+    <div className={`flex min-h-screen w-full overflow-hidden flex-col ${isDark ? "dark bg-[#0d0d0f]" : "bg-slate-50"}`}>
+      {impersonatedUserId && (
+        <div className="bg-amber-500/15 border-b border-amber-500/30 px-4 py-2 text-amber-700 dark:text-amber-300 flex items-center justify-between text-xs sm:text-sm font-medium z-50">
+          <div className="flex items-center gap-2">
+            <span className="bg-amber-500 text-white text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-wider">Admin</span>
+            <span>Acessando painel de: <strong>{impersonatedStoreName || "Lojista"}</strong></span>
           </div>
-        )}
-        <div className="flex flex-1 w-full overflow-hidden">
-          <AppSidebar role="store" currentTab={activeTab} onTabChange={setActiveTab} />
-          
-          <SidebarInset className="flex-1 overflow-y-auto">
-            <header className="bg-card border-b px-4 py-3 flex items-center gap-3 sticky top-0 z-30">
-              <SidebarTrigger />
-              <button onClick={() => navigate("/")} className="hover:bg-muted p-1 rounded-full transition-colors ml-1">
-                <ArrowLeft className="w-5 h-5" />
-              </button>
-              <img 
-                src={restaurant?.logo || logoDuarte} 
-                alt={restaurant?.name || "Duarte Delivery"} 
-                className="h-8 w-8 rounded-lg object-cover cursor-pointer hover:opacity-90 transition-opacity" 
-                onClick={() => navigate("/")} 
-              />
-              <h1 className="font-bold text-lg flex-1 truncate">
-                {restaurant?.name ? `Painel - ${restaurant.name}` : "Painel do Lojista"}
-              </h1>
-              <ThemeToggle />
-            </header>
+          <button
+            className="px-3 py-1 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-800 dark:text-amber-200 rounded-md text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+            onClick={() => {
+              sessionStorage.removeItem("admin_impersonated_user_id");
+              sessionStorage.removeItem("admin_impersonated_store_name");
+              navigate("/admin");
+            }}
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            Voltar ao Painel Admin
+          </button>
+        </div>
+      )}
 
-            <main className="p-4 max-w-4xl mx-auto w-full space-y-4">
-              {activeRequest && (
-                <AssignedDriverCard
-                  activeRequest={activeRequest}
-                  onCancelRequest={(reqId, dName, isAcc, dDetails) => handleOpenCancelModal(reqId, dName, isAcc, dDetails)}
-                />
-              )}
+      <div className="flex flex-1 w-full overflow-hidden">
+        {/* Barra Lateral Esquerda (Slim Dark Sidebar) */}
+        <StoreSlimSidebar
+          currentTab={activeTab === "orders" || activeTab === "driver" ? "orders" : activeTab === "settings" ? "settings" : "dashboard"}
+          onTabChange={(tab) => {
+            if (tab === "orders") setActiveTab("orders");
+            else if (tab === "settings") setActiveTab("settings");
+            else setActiveTab("dashboard");
+          }}
+          isDark={isDark}
+          onToggleTheme={toggleTheme}
+          storeName={restaurant?.name || "Loja"}
+        />
 
-              <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                {isMobile && (
-                  <TabsList className="flex w-full overflow-x-auto p-1 rounded-xl mb-4 scrollbar-none gap-1 justify-start bg-muted/50">
-                    <TabsTrigger value="map" className="rounded-lg shrink-0 gap-1 px-3"><MapIcon className="w-4 h-4" /><span className="text-xs">Mapa</span></TabsTrigger>
-                    <TabsTrigger value="driver" className="rounded-lg shrink-0 gap-1 px-3"><Truck className="w-4 h-4" /><span className="text-xs">Entregador</span></TabsTrigger>
-                    <TabsTrigger value="menu" className="rounded-lg shrink-0 gap-1 px-3"><UtensilsCrossed className="w-4 h-4" /><span className="text-xs">Cardápio</span></TabsTrigger>
-                    <TabsTrigger value="favorites" className="rounded-lg shrink-0 gap-1 px-3"><Star className="w-4 h-4" /><span className="text-xs">Favoritos</span></TabsTrigger>
-                    <TabsTrigger value="credits" className="rounded-lg shrink-0 gap-1 px-3"><CreditCard className="w-4 h-4" /><span className="text-xs">Recarga</span></TabsTrigger>
-                    <TabsTrigger value="support" className="rounded-lg shrink-0 gap-1 px-3"><MessageSquare className="w-4 h-4" /><span className="text-xs">Suporte</span></TabsTrigger>
-                    <TabsTrigger value="settings" className="rounded-lg shrink-0 gap-1 px-3"><Settings className="w-4 h-4" /><span className="text-xs">Ajustes</span></TabsTrigger>
-                  </TabsList>
+        {/* Área Central / Conteúdo Principal */}
+        <div className="flex-1 overflow-y-auto flex flex-col min-h-screen min-w-0">
+          {activeTab === "dashboard" ? (
+            <StoreModernDashboard
+              user={user}
+              restaurant={restaurant}
+              requests={requests}
+              credits={credits}
+              activeRequest={activeRequest}
+              onOpenCancelModal={(reqId, dName, isAcc, dDetails) => handleOpenCancelModal(reqId, dName, isAcc, dDetails)}
+              onNavigateTab={(tab) => setActiveTab(tab)}
+              isDark={isDark}
+            />
+          ) : (
+            <div className="flex flex-col flex-1 w-full">
+              {/* Header Secundário com botão Voltar */}
+              <header className={`px-4 sm:px-6 py-3.5 border-b flex items-center justify-between sticky top-0 z-20 backdrop-blur-md transition-colors duration-300 ${
+                isDark ? "bg-[#18181B]/95 border-zinc-800 text-white" : "bg-white/95 border-zinc-200 text-zinc-900"
+              }`}>
+                <div className="flex items-center gap-3">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setActiveTab("dashboard")}
+                    className="gap-2 text-xs font-bold rounded-xl"
+                  >
+                    <ArrowLeft className="w-4 h-4" />
+                    <span>Voltar ao Início (Envio)</span>
+                  </Button>
+                  <h2 className="text-sm sm:text-base font-extrabold truncate">
+                    {activeTab === "orders" && "Histórico & Pedidos"}
+                    {activeTab === "driver" && "Chamados de Entregador"}
+                    {activeTab === "map" && "Radar no Mapa"}
+                    {activeTab === "menu" && "Cardápio do Restaurante"}
+                    {activeTab === "favorites" && "Motoristas Favoritos"}
+                    {activeTab === "credits" && "Carteira & Créditos"}
+                    {activeTab === "support" && "Suporte ao Lojista"}
+                    {activeTab === "settings" && "Configurações do Estabelecimento"}
+                  </h2>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <ThemeToggle />
+                </div>
+              </header>
+
+              <main className="p-4 sm:p-6 max-w-5xl mx-auto w-full space-y-4 flex-1">
+                {activeRequest && activeTab !== "driver" && activeTab !== "orders" && (
+                  <AssignedDriverCard
+                    activeRequest={activeRequest}
+                    onCancelRequest={(reqId, dName, isAcc, dDetails) => handleOpenCancelModal(reqId, dName, isAcc, dDetails)}
+                  />
                 )}
 
-                <motion.div 
+                {/* Sub-navegação de Abas Secundárias */}
+                <div className="flex w-full overflow-x-auto p-1 rounded-xl mb-4 scrollbar-none gap-1 justify-start bg-muted/50">
+                  <button
+                    onClick={() => setActiveTab("dashboard")}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold shrink-0 text-muted-foreground hover:text-foreground"
+                  >
+                    ← Início
+                  </button>
+                  <button
+                    onClick={() => setActiveTab("orders")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold shrink-0 flex items-center gap-1.5 transition ${activeTab === "orders" || activeTab === "driver" ? "bg-background text-foreground shadow-xs font-bold" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    <Truck className="w-3.5 h-3.5" />
+                    <span>Pedidos / Entregador</span>
+                  </button>
+                  <button
+                    onClick={() => setActiveTab("map")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold shrink-0 flex items-center gap-1.5 transition ${activeTab === "map" ? "bg-background text-foreground shadow-xs font-bold" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    <MapIcon className="w-3.5 h-3.5" />
+                    <span>Radar Mapa</span>
+                  </button>
+                  <button
+                    onClick={() => setActiveTab("credits")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold shrink-0 flex items-center gap-1.5 transition ${activeTab === "credits" ? "bg-background text-foreground shadow-xs font-bold" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    <CreditCard className="w-3.5 h-3.5" />
+                    <span>Recarga / Créditos</span>
+                  </button>
+                  <button
+                    onClick={() => setActiveTab("menu")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold shrink-0 flex items-center gap-1.5 transition ${activeTab === "menu" ? "bg-background text-foreground shadow-xs font-bold" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    <UtensilsCrossed className="w-3.5 h-3.5" />
+                    <span>Cardápio</span>
+                  </button>
+                  <button
+                    onClick={() => setActiveTab("favorites")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold shrink-0 flex items-center gap-1.5 transition ${activeTab === "favorites" ? "bg-background text-foreground shadow-xs font-bold" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    <Star className="w-3.5 h-3.5" />
+                    <span>Favoritos</span>
+                  </button>
+                  <button
+                    onClick={() => setActiveTab("support")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold shrink-0 flex items-center gap-1.5 transition ${activeTab === "support" ? "bg-background text-foreground shadow-xs font-bold" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    <MessageSquare className="w-3.5 h-3.5" />
+                    <span>Suporte</span>
+                  </button>
+                  <button
+                    onClick={() => setActiveTab("settings")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold shrink-0 flex items-center gap-1.5 transition ${activeTab === "settings" ? "bg-background text-foreground shadow-xs font-bold" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    <Settings className="w-3.5 h-3.5" />
+                    <span>Configurações</span>
+                  </button>
+                </div>
+
+                <motion.div
                   key={activeTab}
-                  initial={{ opacity: 0, y: 10 }} 
-                  animate={{ opacity: 1, y: 0 }} 
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
                   className="mt-0"
                 >
-                  <TabsContent value="map" className="mt-0 outline-none">
-                    <RadarTab restaurant={restaurant} userId={activeUserId!} />
-                  </TabsContent>
+                  {activeTab === "map" && <RadarTab restaurant={restaurant} userId={activeUserId!} />}
 
-                  <TabsContent value="driver" className="mt-0 outline-none">
+                  {(activeTab === "driver" || activeTab === "orders") && (
                     <CallDriverTab
                       user={user}
                       restaurant={restaurant}
@@ -323,31 +432,21 @@ const StoreOwnerPanel = () => {
                       credits={credits}
                       onNavigateTab={setActiveTab}
                     />
-                  </TabsContent>
+                  )}
 
-                  <TabsContent value="menu" className="mt-0 outline-none">
-                    <MenuTab restaurant={restaurant} />
-                  </TabsContent>
+                  {activeTab === "menu" && <MenuTab restaurant={restaurant} />}
 
-                  <TabsContent value="favorites" className="mt-0 outline-none">
-                    <FavoritesTab restaurant={restaurant} userId={activeUserId!} />
-                  </TabsContent>
+                  {activeTab === "favorites" && <FavoritesTab restaurant={restaurant} userId={activeUserId!} />}
 
-                  <TabsContent value="credits" className="mt-0 outline-none">
-                    <CreditsTab credits={credits} />
-                  </TabsContent>
+                  {activeTab === "credits" && <CreditsTab credits={credits} />}
 
-                  <TabsContent value="support" className="mt-0 outline-none">
-                    <AdminSupportPanel currentUserId={activeUserId!} role="store_owner" />
-                  </TabsContent>
+                  {activeTab === "support" && <AdminSupportPanel currentUserId={activeUserId!} role="store_owner" />}
 
-                  <TabsContent value="settings" className="mt-0 outline-none">
-                    <StoreInfoTab restaurant={restaurant} userId={activeUserId!} />
-                  </TabsContent>
+                  {activeTab === "settings" && <StoreInfoTab restaurant={restaurant} userId={activeUserId!} />}
                 </motion.div>
-              </Tabs>
-            </main>
-          </SidebarInset>
+              </main>
+            </div>
+          )}
         </div>
       </div>
 
@@ -507,7 +606,7 @@ const StoreOwnerPanel = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </SidebarProvider>
+    </div>
   );
 };
 
