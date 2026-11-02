@@ -50,7 +50,7 @@ export const FinancialMaintenanceSection: React.FC<FinancialMaintenanceSectionPr
   const [reason, setReason] = useState("");
   const [confirmText, setConfirmText] = useState("");
   const [incDeliveries, setIncDeliveries] = useState(true);
-  const [incEarnings, setIncEarnings] = useState(true);
+  const [incEarnings, setIncEarnings] = useState(false);
   const [incWithdrawals, setIncWithdrawals] = useState(true);
   const [cleaning, setCleaning] = useState(false);
 

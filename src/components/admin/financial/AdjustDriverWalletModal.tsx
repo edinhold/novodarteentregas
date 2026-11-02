@@ -103,11 +103,17 @@ export const AdjustDriverWalletModal: React.FC<AdjustDriverWalletModalProps> = (
     queryKey: ["admin-driver-balance", selectedDriverId],
     queryFn: async () => {
       if (!selectedDriverId) return 0;
-      const { data, error } = await supabase
-        .from("driver_earnings")
-        .select("amount")
-        .eq("driver_id", selectedDriverId)
-        .eq("status", "pending");
+      // Also fetch driver's user_id to cover both IDs
+      const { data: dRow } = await supabase.from("drivers").select("user_id").eq("id", selectedDriverId).maybeSingle();
+      const uId = dRow?.user_id;
+
+      let query = supabase.from("driver_earnings").select("amount");
+      if (uId && uId !== selectedDriverId) {
+        query = query.or(`driver_id.eq.${selectedDriverId},driver_id.eq.${uId}`);
+      } else {
+        query = query.eq("driver_id", selectedDriverId);
+      }
+      const { data, error } = await query.in("status", ["pending", "requested"]);
 
       if (error) return 0;
       const total = (data || []).reduce((acc, row) => acc + Number(row.amount || 0), 0);

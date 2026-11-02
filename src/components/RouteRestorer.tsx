@@ -16,9 +16,11 @@ const isProtectedPanelRoute = (path: string) =>
 
 const isAuthorizedRoute = (path: string, userRole: string | null): boolean => {
   const impersonatedStoreId = typeof window !== "undefined" ? sessionStorage.getItem("admin_impersonated_user_id") : null;
-  if (path.startsWith("/admin")) return userRole === "admin";
-  if (path.startsWith("/lojas") || path.startsWith("/lojista")) return userRole === "store_owner" || userRole === "admin" || !!impersonatedStoreId;
-  if (path.startsWith("/entregador")) return userRole === "driver" || userRole === "admin";
+  const cachedRole = typeof window !== "undefined" ? localStorage.getItem("cached_user_role") : null;
+  const effectiveRole = userRole || cachedRole;
+  if (path.startsWith("/admin")) return effectiveRole === "admin";
+  if (path.startsWith("/lojas") || path.startsWith("/lojista")) return effectiveRole === "store_owner" || effectiveRole === "admin" || !!impersonatedStoreId;
+  if (path.startsWith("/entregador")) return effectiveRole === "driver" || effectiveRole === "admin";
   return true;
 };
 

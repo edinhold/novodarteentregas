@@ -90,11 +90,11 @@ const DriverPanel = () => {
   const [verifyTimeoutReached, setVerifyTimeoutReached] = useState(false);
   const hadPendingStandbyRef = useRef(false);
 
-  // Watchdog de segurança: se após 2.5s ainda estiver verificando, desbloqueia o painel
+  // Watchdog de segurança: garante que a tela nunca fique bloqueada em caso de lentidão de rede
   useEffect(() => {
     const timer = setTimeout(() => {
       setVerifyTimeoutReached(true);
-    }, 2500);
+    }, 2000);
     return () => clearTimeout(timer);
   }, []);
 
@@ -102,10 +102,18 @@ const DriverPanel = () => {
   const { state: pushState, activate: activatePush, loading: pushLoading } = usePushNotifications(user?.id, "driver");
   const isPushActive = pushState?.permission === "granted" && !!pushState?.subscriptionId;
 
+  // Checagem de token existente em localStorage para evitar redirecionamento indevido no PWA
+  const hasLocalAuthToken = typeof window !== "undefined" && Object.keys(localStorage).some(
+    (k) => k.startsWith("sb-") && k.endsWith("-auth-token")
+  );
+
   useEffect(() => {
     if (loading) return;
-    if (!user) navigate("/auth", { replace: true });
-  }, [loading, user, navigate]);
+    // No PWA ou standalone, só redireciona se realmente NÃO houver sessão nem token salvo e já houver estourado o tempo
+    if (!user && !hasLocalAuthToken && verifyTimeoutReached) {
+      navigate("/auth", { replace: true });
+    }
+  }, [loading, user, hasLocalAuthToken, verifyTimeoutReached, navigate]);
 
   useEffect(() => {
     const handleOnline = () => { setIsOnline(true); toast.success("Internet restabelecida"); };
@@ -128,27 +136,17 @@ const DriverPanel = () => {
       try {
         // Promessa protegida por timeout de 3.5 segundos para NUNCA travar a tela
         const fetchDriver = async () => {
-          // 1. Busca direta por user_id (mais rápida e indexada)
-          const { data: byUserId } = await supabase
+          // 1. Busca abrangente por user_id ou id na tabela drivers
+          const { data: byUserOrId } = await supabase
             .from("drivers")
             .select("*")
-            .eq("user_id", user.id)
+            .or(`user_id.eq.${user.id},id.eq.${user.id}`)
             .limit(1)
             .maybeSingle();
 
-          if (byUserId) return byUserId;
+          if (byUserOrId) return byUserOrId;
 
-          // 2. Busca por id (caso a conta tenha o id do motorista igual ao user.id)
-          const { data: byId } = await supabase
-            .from("drivers")
-            .select("*")
-            .eq("id", user.id)
-            .limit(1)
-            .maybeSingle();
-
-          if (byId) return byId;
-
-          // 3. Fallback por telefone (para vincular se houver telefone cadastrado)
+          // 2. Fallback por telefone (para vincular se houver telefone cadastrado)
           const phone = user.phone || user.user_metadata?.phone;
           if (phone) {
             const digits = phone.replace(/\D/g, "");
@@ -167,7 +165,7 @@ const DriverPanel = () => {
             }
           }
 
-          // 4. Auto-repair/criação resiliente com UPSERT (garante que nunca dá erro de duplicate key)
+          // 3. Auto-repair/criação resiliente com UPSERT (garante que nunca dá erro de duplicate key)
           const { data: profile } = await supabase
             .from("profiles")
             .select("full_name, phone")
@@ -197,7 +195,9 @@ const DriverPanel = () => {
         const result = (await Promise.race([fetchDriver(), timeoutPromise])) as any;
 
         if (result) {
-          setCachedDriverProfile(result);
+          if (result.id && result.user_id) {
+            setCachedDriverProfile(result);
+          }
           supabase.from("user_roles").upsert({ user_id: user.id, role: "driver" as any }, { onConflict: "user_id,role" }).then(() => {}, () => {});
           return result;
         }
@@ -366,20 +366,51 @@ const DriverPanel = () => {
     enabled: !!activeRequest,
   });
 
-  // Get earnings
+  // Get earnings (abranger tanto id da tabela drivers quanto user_id de auth)
+  const driverDbId = driverProfile?.id || (effectiveDriverProfile?.id !== user?.id ? effectiveDriverProfile?.id : null);
+  const currentUid = user?.id;
+
   const { data: earnings = [] } = useQuery({
-    queryKey: ["my-earnings", effectiveDriverProfile?.id],
+    queryKey: ["my-earnings", driverDbId, currentUid],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("driver_earnings")
-        .select("*")
-        .eq("driver_id", effectiveDriverProfile!.id)
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      return data;
+      const ids = Array.from(new Set([driverDbId, currentUid].filter(Boolean))) as string[];
+      if (ids.length === 0) return [];
+
+      let query = supabase.from("driver_earnings").select("*");
+      if (ids.length > 1) {
+        query = query.or(ids.map((id) => `driver_id.eq.${id}`).join(","));
+      } else {
+        query = query.eq("driver_id", ids[0]);
+      }
+
+      const { data, error } = await query.order("created_at", { ascending: false });
+      if (error) {
+        console.warn("[DriverPanel] Falha na busca por id específico, buscando geral via RLS:", error);
+        const { data: fallbackData } = await supabase
+          .from("driver_earnings")
+          .select("*")
+          .order("created_at", { ascending: false });
+        return fallbackData || [];
+      }
+      return data || [];
     },
-    enabled: !!effectiveDriverProfile?.id,
+    enabled: !!(driverDbId || currentUid),
   });
+
+  // Auto-sync do saldo da carteira do motorista ao carregar o painel,
+  // corrigindo eventuais orfãos e garantindo que o saldo acumulado nunca suma
+  useEffect(() => {
+    if (!user?.id) return;
+    (supabase as any)
+      .rpc("sync_driver_wallet_balance", { p_user_id: user.id })
+      .then(() => {
+        queryClient.invalidateQueries({ queryKey: ["my-earnings"] });
+        queryClient.invalidateQueries({ queryKey: ["my-withdrawals"] });
+      })
+      .catch((err: any) => {
+        console.warn("[DriverPanel] Auto-sync wallet:", err?.message);
+      });
+  }, [user?.id, queryClient]);
 
   // Get withdrawal requests
   const { data: withdrawals = [] } = useQuery({
@@ -423,20 +454,20 @@ const DriverPanel = () => {
 
   // Realtime subscription for driver earnings & wallet adjustments
   useEffect(() => {
-    if (!effectiveDriverProfile?.id) return;
+    const targetId = driverDbId || currentUid;
+    if (!targetId) return;
 
-    const channel = createFreshChannel(`driver-wallet-realtime-${effectiveDriverProfile.id}`)
+    const channel = createFreshChannel(`driver-wallet-realtime-${targetId}`)
       .on(
         "postgres_changes",
         {
           event: "*",
           schema: "public",
           table: "driver_earnings",
-          filter: `driver_id=eq.${effectiveDriverProfile.id}`,
         },
         (payload) => {
-          queryClient.invalidateQueries({ queryKey: ["my-earnings", effectiveDriverProfile.id] });
-          queryClient.invalidateQueries({ queryKey: ["my-withdrawals", user?.id] });
+          queryClient.invalidateQueries({ queryKey: ["my-earnings"] });
+          queryClient.invalidateQueries({ queryKey: ["my-withdrawals"] });
           if (payload.eventType === "INSERT") {
             toast.info("🎉 Seu saldo de carteira foi atualizado pelo administrador!");
           }
@@ -447,7 +478,7 @@ const DriverPanel = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [effectiveDriverProfile?.id, user?.id, queryClient]);
+  }, [driverDbId, currentUid, queryClient]);
 
   // Request local notification permission (no push provider configured).
   useEffect(() => {
@@ -927,23 +958,42 @@ const DriverPanel = () => {
     .reduce((sum: number, e: any) => sum + Number(e.amount), 0);
 
   const weekdayNames = ["Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado"];
-  const pendingBalance = earnings
+
+  // Saldo total acumulado na carteira do motorista (status pending + requested)
+  // Conforme regra estrita: NÃO pode sumir nem ser zerado da carteira,
+  // mantendo exatamente o valor exibido na aba motoristas do painel admin,
+  // só diminuindo quando o saque for efetivamente aprovado e pago pelo administrador.
+  const walletAccumulatedBalance = earnings
+    .filter((e: any) => e.status === "pending" || e.status === "requested")
+    .reduce((sum: number, e: any) => sum + Number(e.amount), 0);
+
+  // Saldo livre imediatamente disponível para solicitar nova retirada
+  const pendingAvailable = earnings
     .filter((e: any) => e.status === "pending")
     .reduce((sum: number, e: any) => sum + Number(e.amount), 0);
+
+  // Valor atualmente em análise / processamento de saque aguardando admin
+  const requestedAmount = earnings
+    .filter((e: any) => e.status === "requested")
+    .reduce((sum: number, e: any) => sum + Number(e.amount), 0);
+
+  // Saldo principal exibido como Saldo da Carteira
+  const pendingBalance = walletAccumulatedBalance;
+
   const paymentDay = Number((deliveryConfig as any)?.payment_day ?? 3);
   const isPaymentDay = new Date().getDay() === paymentDay;
   const fixedFee = Number((deliveryConfig as any)?.withdrawal_fixed_fee ?? 1.00);
   const earlyFeePercent = (deliveryConfig as any)?.early_withdrawal_fee_percent !== undefined && (deliveryConfig as any)?.early_withdrawal_fee_percent !== null
     ? Number((deliveryConfig as any).early_withdrawal_fee_percent)
     : 10;
-  const feeAmountPreview = isPaymentDay ? fixedFee : (pendingBalance * earlyFeePercent) / 100;
-  const netPreview = Math.max(pendingBalance - feeAmountPreview, 0);
+  const feeAmountPreview = isPaymentDay ? fixedFee : (pendingAvailable * earlyFeePercent) / 100;
+  const netPreview = Math.max(pendingAvailable - feeAmountPreview, 0);
 
 
 
   // Anti-loop definitivo: Se ainda estiver verificando o usuário ou o perfil,
   // só bloqueia a tela se NÃO houver nenhum perfil disponível (nem em cache nem local)
-  // E o tempo limite do watchdog (2.5s) não tiver estourado.
+  // E o tempo limite do watchdog (2.0s) não tiver estourado.
   const isVerifying = (loading || (isProfileLoading && !effectiveDriverProfile)) && !effectiveDriverProfile && !verifyTimeoutReached;
 
   if (isVerifying) {
@@ -958,8 +1008,8 @@ const DriverPanel = () => {
     );
   }
 
-  // Se o usuário não estiver autenticado após a inicialização
-  if (!user && !loading) {
+  // Se o usuário não estiver autenticado após a inicialização e o watchdog
+  if (!user && !loading && (!hasLocalAuthToken || verifyTimeoutReached)) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-6">
         <Card className="max-w-md w-full">
@@ -1059,6 +1109,25 @@ const DriverPanel = () => {
                 <h3 className="font-bold text-white text-base leading-tight">Duarte Entregas</h3>
                 <p className="text-xs text-zinc-400">{effectiveDriverProfile?.full_name || "Motorista Parceiro"}</p>
               </div>
+            </div>
+
+            {/* Saldo da Carteira do Motorista no Menu Lateral */}
+            <div className="bg-zinc-800/80 p-3 rounded-xl border border-zinc-700/60 flex items-center justify-between">
+              <div>
+                <p className="text-[10px] text-zinc-400 uppercase font-semibold">Saldo em Carteira</p>
+                <p className="text-base font-extrabold text-emerald-400">R$ {walletAccumulatedBalance.toFixed(2)}</p>
+              </div>
+              <Button 
+                size="sm" 
+                variant="ghost" 
+                className="h-8 text-xs text-white hover:bg-zinc-700 px-2"
+                onClick={() => {
+                  setActiveTab("finance");
+                  setMobileDrawerOpen(false);
+                }}
+              >
+                Ver Carteira
+              </Button>
             </div>
 
             <nav className="space-y-1">
@@ -1457,16 +1526,28 @@ const DriverPanel = () => {
                     <Card className="bg-primary/5 border-primary/20">
                       <CardContent className="p-4 text-center">
                         <p className="text-2xl font-extrabold text-primary">R$ {totalEarnings.toFixed(2)}</p>
-                        <p className="text-xs text-muted-foreground">Total Ganho</p>
+                        <p className="text-xs text-muted-foreground">Total Histórico</p>
                       </CardContent>
                     </Card>
-                    <Card className="bg-accent/5 border-accent/20">
+                    <Card className="bg-emerald-500/10 border-emerald-500/30">
                       <CardContent className="p-4 text-center">
-                        <p className="text-2xl font-extrabold text-accent">R$ {pendingBalance.toFixed(2)}</p>
-                        <p className="text-xs text-muted-foreground">Saldo Atual</p>
+                        <p className="text-2xl font-extrabold text-emerald-600 dark:text-emerald-400">R$ {walletAccumulatedBalance.toFixed(2)}</p>
+                        <p className="text-xs text-muted-foreground font-medium">Saldo Atual (Carteira)</p>
                       </CardContent>
                     </Card>
                   </div>
+
+                  {/* Informação sobre valor em solicitação de saque */}
+                  {requestedAmount > 0 && (
+                    <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-center space-y-1">
+                      <p className="text-xs font-bold text-amber-700 dark:text-amber-400">
+                        ⏳ R$ {requestedAmount.toFixed(2)} em análise de saque pelo administrador
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        Este valor continua registrado com segurança na sua carteira até o pagamento ser finalizado pelo financeiro.
+                      </p>
+                    </div>
+                  )}
 
                   {/* Earnings Report */}
                   <Card>
@@ -1527,7 +1608,7 @@ const DriverPanel = () => {
                   </Card>
 
                   {/* Withdrawal */}
-                  {pendingBalance > 0 && (
+                  {pendingAvailable > 0 ? (
                     <Card className="border-accent/30 bg-accent/5">
                       <CardHeader className="pb-2">
                         <CardTitle className="text-base flex items-center gap-2"><Wallet className="w-4 h-4" /> Solicitar Saque</CardTitle>
@@ -1555,8 +1636,8 @@ const DriverPanel = () => {
                         )}
                         <div className="bg-background rounded-lg p-3 space-y-1 border">
                           <div className="flex justify-between text-sm">
-                            <span>Saldo disponível</span>
-                            <span className="font-bold">R$ {pendingBalance.toFixed(2)}</span>
+                            <span>Saldo disponível para saque</span>
+                            <span className="font-bold">R$ {pendingAvailable.toFixed(2)}</span>
                           </div>
                           <div className="flex justify-between text-sm text-muted-foreground">
                             <span>
@@ -1567,7 +1648,7 @@ const DriverPanel = () => {
                             <span className="font-mono text-destructive">- R$ {feeAmountPreview.toFixed(2)}</span>
                           </div>
                           <div className="flex justify-between text-sm font-bold border-t pt-1.5 mt-1">
-                            <span>Valor a receber</span>
+                            <span>Valor líquido a receber</span>
                             <span className="text-primary text-lg font-mono">R$ {netPreview.toFixed(2)}</span>
                           </div>
                         </div>
@@ -1578,7 +1659,16 @@ const DriverPanel = () => {
                         </Button>
                       </CardContent>
                     </Card>
-                  )}
+                  ) : requestedAmount > 0 ? (
+                    <Card className="border-muted bg-muted/20">
+                      <CardContent className="p-4 text-center space-y-1.5">
+                        <p className="text-xs font-semibold text-foreground">Solicitação de saque em análise</p>
+                        <p className="text-xs text-muted-foreground">
+                          Seu saldo de R$ {requestedAmount.toFixed(2)} foi solicitado e está em processamento pelo administrador.
+                        </p>
+                      </CardContent>
+                    </Card>
+                  ) : null}
 
                   {/* Withdrawal History */}
                   {withdrawals.length > 0 && (

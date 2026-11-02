@@ -32,11 +32,12 @@ const Index = () => {
   // uma vez por sessão do navegador (evita loop ao voltar para a home).
   useEffect(() => {
     if (loading || roleLoading) return;
-    if (!user || !role) return;
+    const currentRole = role || (typeof window !== "undefined" ? (localStorage.getItem("cached_user_role") as any) : null);
+    if (!user || !currentRole) return;
     if (redirectedRef.current) return;
 
     const alreadyRedirected = sessionStorage.getItem("authRedirectDone") === user.id;
-    const target = ROLE_HOME[role];
+    const target = ROLE_HOME[currentRole];
     if (!target || alreadyRedirected) return;
 
     redirectedRef.current = true;
