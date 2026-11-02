@@ -285,3 +285,4 @@ $$;
 GRANT EXECUTE ON FUNCTION public.complete_delivery(uuid) TO authenticated, service_role;
 
 NOTIFY pgrst, 'reload schema';
+

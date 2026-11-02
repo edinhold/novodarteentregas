@@ -116,6 +116,7 @@ const FeesConfigTab = () => {
       if (error) throw error;
       toast.success("Configuração de taxas salva com sucesso!");
       queryClient.invalidateQueries({ queryKey: ["delivery-config"] });
+      queryClient.invalidateQueries({ queryKey: ["public-delivery-config"] });
       queryClient.invalidateQueries({ queryKey: ["financial-delivery-config"] });
     } catch (err: any) {
       toast.error(err.message || "Erro ao salvar configuração");

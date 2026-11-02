@@ -171,51 +171,62 @@ export const StoreMiniTrackingMap: React.FC<StoreMiniTrackingMapProps> = ({
         const routeData = await calculateRoute(
           { lat: pLat, lng: pLng },
           { lat: destLat, lng: destLng },
-          "driving"
+          { profile: "driving" }
         );
 
         if (isCancelled || !mapRef.current) return;
 
-        if (routeData?.geometry && routeData.geometry.length > 0) {
-          setRouteDistance(`${(routeData.distanceMeters / 1000).toFixed(1)} km`);
+        const geom = routeData?.geometry && routeData.geometry.length > 0
+          ? routeData.geometry
+          : ([
+              [pLat, pLng],
+              [destLat, destLng],
+            ] as [number, number][]);
 
-          if (!routeLineRef.current) {
-            routeLineRef.current = L.polyline(routeData.geometry, {
-              color: "#2563EB",
-              weight: 4.5,
-              opacity: 0.9,
-              lineJoin: "round",
-            }).addTo(map);
-          } else {
-            routeLineRef.current.setLatLngs(routeData.geometry);
-          }
+        const distText = routeData?.distanceKm
+          ? `${routeData.distanceKm} km`
+          : routeData?.distanceMeters
+          ? `${(routeData.distanceMeters / 1000).toFixed(1)} km`
+          : null;
+        if (distText) setRouteDistance(distText);
 
-          // Ajusta zoom para enquadrar perfeitamente rota e marcadores
-          const bounds = L.latLngBounds([
-            [pLat, pLng],
-            [destLat, destLng],
-            [mLat, mLng],
-          ]);
-          map.fitBounds(bounds, { padding: [25, 25], maxZoom: 16 });
+        if (!routeLineRef.current) {
+          routeLineRef.current = L.polyline(geom, {
+            color: "#2563EB",
+            weight: 4.5,
+            opacity: 0.9,
+            lineJoin: "round",
+          }).addTo(map);
         } else {
-          // Fallback linha direta se a API de rota não responder
-          const directLine: [number, number][] = [
-            [pLat, pLng],
-            [destLat, destLng],
-          ];
-          if (!routeLineRef.current) {
-            routeLineRef.current = L.polyline(directLine, {
-              color: "#2563EB",
-              weight: 3.5,
-              dashArray: "6, 8",
-              opacity: 0.8,
-            }).addTo(map);
-          } else {
-            routeLineRef.current.setLatLngs(directLine);
-          }
+          routeLineRef.current.setLatLngs(geom);
         }
-      } catch {
-        // Fallback silencioso
+
+        // Ajusta zoom para enquadrar perfeitamente rota e marcadores
+        const bounds = L.latLngBounds([
+          [pLat, pLng],
+          [destLat, destLng],
+          [mLat, mLng],
+        ]);
+        map.fitBounds(bounds, { padding: [25, 25], maxZoom: 16 });
+      } catch (err) {
+        console.warn("[StoreMiniTrackingMap] Erro ao traçar rota:", err);
+        if (isCancelled || !mapRef.current) return;
+        const directLine: [number, number][] = [
+          [pLat, pLng],
+          [destLat, destLng],
+        ];
+        if (!routeLineRef.current) {
+          routeLineRef.current = L.polyline(directLine, {
+            color: "#2563EB",
+            weight: 3.5,
+            dashArray: "6, 8",
+            opacity: 0.8,
+          }).addTo(map);
+        } else {
+          routeLineRef.current.setLatLngs(directLine);
+        }
+        const bounds = L.latLngBounds([[pLat, pLng], [destLat, destLng]]);
+        map.fitBounds(bounds, { padding: [25, 25], maxZoom: 16 });
       }
     };
 

@@ -408,7 +408,61 @@ function buildPrimaveraQuery(rawInput: string): string {
 }
 
 /**
- * 1. AUTOCOMPLETE & BUSCA DE SUGESTÕES (Mapbox Geocoding v6 Forward)
+ * Fallback via OpenStreetMap Nominatim com foco exclusivo em Primavera do Leste - MT
+ */
+async function fetchNominatimSuggestions(
+  query: string,
+  limit: number = 5,
+  detectedNumber?: string,
+  signal?: AbortSignal
+): Promise<MapboxParsedAddress[]> {
+  const results: MapboxParsedAddress[] = [];
+  try {
+    const nomQuery = `${query}, Primavera do Leste, MT, Brasil`;
+    const nomUrl = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&countrycodes=br&limit=${limit}&q=${encodeURIComponent(nomQuery)}`;
+    const nomRes = await fetch(nomUrl, {
+      signal,
+      headers: { "Accept-Language": "pt-BR", "User-Agent": "DuarteEntregasApp/1.0" },
+    });
+    if (nomRes.ok) {
+      const nomData = await nomRes.json();
+      if (Array.isArray(nomData)) {
+        for (const item of nomData) {
+          const latNum = parseFloat(item.lat);
+          const lonNum = parseFloat(item.lon);
+          if (isValidCoordinate(latNum, lonNum) && isWithinPrimaveraBounds(latNum, lonNum)) {
+            const addr = item.address || {};
+            const road = addr.road || addr.pedestrian || addr.suburb || (item.display_name ? item.display_name.split(",")[0] : query);
+            const suburb = addr.suburb || addr.neighbourhood || addr.city_district || "";
+            const hNum = addr.house_number || detectedNumber || "";
+            results.push({
+              fullAddress: item.display_name || `${road}${hNum ? ", " + hNum : ""}, Primavera do Leste - MT`,
+              street: road,
+              number: hNum,
+              neighborhood: suburb,
+              city: "Primavera do Leste",
+              state: "Mato Grosso",
+              stateCode: "MT",
+              country: "Brasil",
+              postalCode: addr.postcode || "",
+              coordinates: { latitude: latNum, longitude: lonNum },
+              lngLat: [lonNum, latNum],
+              mapboxId: `osm-${item.place_id || item.osm_id || Math.random().toString(36).substring(7)}`,
+              featureType: "address",
+              isValidPrimavera: true,
+            });
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("[NominatimFallback] Erro ao buscar endereços:", err);
+  }
+  return results;
+}
+
+/**
+ * 1. AUTOCOMPLETE & BUSCA DE SUGESTÕES (Mapbox Geocoding v6 Forward + OpenStreetMap Fallback)
  */
 export async function searchAddressSuggestions(
   query: string,
@@ -418,7 +472,7 @@ export async function searchAddressSuggestions(
     userNumber?: string;
   } = {}
 ): Promise<MapboxParsedAddress[]> {
-  const token = assertMapboxToken();
+  const token = hasMapboxToken() ? assertMapboxToken() : "";
   const trimmed = query.trim();
 
   if (trimmed.length < 3) {
@@ -428,6 +482,10 @@ export async function searchAddressSuggestions(
   const detectedNumber = options.userNumber || extractHouseNumber(trimmed);
   const fullQuery = buildPrimaveraQuery(trimmed);
   const limit = options.limit || 5;
+
+  if (!token) {
+    return fetchNominatimSuggestions(trimmed, limit, detectedNumber, options.signal);
+  }
 
   const url = new URL(MAPBOX_GEOCODE_FORWARD_URL);
   url.searchParams.set("q", fullQuery);
@@ -453,28 +511,14 @@ export async function searchAddressSuggestions(
 
     clearTimeout(timeoutId);
 
-    if (response.status === 401 || response.status === 403) {
-      throw new MapboxServiceError(
-        "AUTH_ERROR",
-        "Chave de acesso da Mapbox inválida ou não autorizada. Verifique as configurações."
-      );
-    }
-    if (response.status === 429) {
-      throw new MapboxServiceError(
-        "RATE_LIMIT",
-        "Limite de requisições atingido na Mapbox. Aguarde alguns instantes."
-      );
-    }
     if (!response.ok) {
-      throw new MapboxServiceError(
-        "MAPBOX_API_ERROR",
-        `Erro no serviço de mapas Mapbox (${response.status})`
-      );
+      console.warn(`[searchAddressSuggestions] Mapbox retornou status ${response.status}, usando Nominatim.`);
+      return fetchNominatimSuggestions(trimmed, limit, detectedNumber, activeSignal);
     }
 
     const data = (await response.json()) as MapboxGeocodeResponse;
     if (!data || !Array.isArray(data.features)) {
-      return [];
+      return fetchNominatimSuggestions(trimmed, limit, detectedNumber, activeSignal);
     }
 
     const parsedList: MapboxParsedAddress[] = [];
@@ -485,19 +529,27 @@ export async function searchAddressSuggestions(
       }
     }
 
-    return parsedList;
+    // Se a Mapbox retornou menos que o limite, complementa com Nominatim
+    if (parsedList.length < limit) {
+      const nomFallbacks = await fetchNominatimSuggestions(trimmed, limit - parsedList.length, detectedNumber, activeSignal);
+      for (const n of nomFallbacks) {
+        const already = parsedList.some(
+          (p) => Math.abs(p.coordinates.latitude - n.coordinates.latitude) < 0.0008 &&
+                 Math.abs(p.coordinates.longitude - n.coordinates.longitude) < 0.0008
+        );
+        if (!already) {
+          parsedList.push(n);
+        }
+      }
+    }
+
+    return parsedList.length > 0 ? parsedList : fetchNominatimSuggestions(trimmed, limit, detectedNumber, activeSignal);
   } catch (error: any) {
     if (error?.name === "AbortError") {
       return [];
     }
-    if (error instanceof MapboxServiceError) {
-      throw error;
-    }
-    throw new MapboxServiceError(
-      "NETWORK_ERROR",
-      "Falha ao conectar com o serviço da Mapbox.",
-      error
-    );
+    console.warn("[searchAddressSuggestions] Mapbox falhou, ativando fallback Nominatim:", error);
+    return fetchNominatimSuggestions(trimmed, limit, detectedNumber, options.signal);
   }
 }
 
@@ -629,18 +681,90 @@ export async function reverseGeocode(
 }
 
 /**
- * 4. CÁLCULO DE ROTA OFICIAL (Mapbox Directions API v5)
+ * Fallback de rota viária utilizando OpenStreetMap / OSRM
+ */
+async function fetchOSRMRouteFallback(
+  origin: { lat: number; lng: number },
+  destination: { lat: number; lng: number },
+  profile: RouteProfile = "driving",
+  signal?: AbortSignal
+): Promise<MapboxRouteResult | null> {
+  try {
+    const osrmProfile = profile === "cycling" ? "bike" : profile === "walking" ? "foot" : "driving";
+    const osrmUrl = `https://router.project-osrm.org/route/v1/${osrmProfile}/${origin.lng},${origin.lat};${destination.lng},${destination.lat}?overview=full&geometries=geojson`;
+    const res = await fetch(osrmUrl, { signal });
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.routes && data.routes.length > 0) {
+        const route = data.routes[0];
+        const distanceMeters = Number(route.distance) || 0;
+        const durationSeconds = Number(route.duration) || 0;
+        const coords = Array.isArray(route.geometry?.coordinates)
+          ? (route.geometry.coordinates.map(([lon, lat]: [number, number]) => [lat, lon]) as [number, number][])
+          : [];
+        return {
+          distanceMeters,
+          distanceKm: Number((distanceMeters / 1000).toFixed(2)),
+          durationSeconds,
+          durationMin: durationSeconds / 60,
+          geometry: coords,
+          profile,
+        };
+      }
+    }
+  } catch (err) {
+    console.warn("[OSRMRouteFallback] Erro no cálculo OSRM:", err);
+  }
+  return null;
+}
+
+/**
+ * Fallback geodésico calibrado para a malha urbana de Primavera do Leste
+ */
+function calculateHaversineFallback(
+  origin: { lat: number; lng: number },
+  destination: { lat: number; lng: number },
+  profile: RouteProfile = "driving"
+): MapboxRouteResult {
+  const R = 6371;
+  const dLat = ((destination.lat - origin.lat) * Math.PI) / 180;
+  const dLon = ((destination.lng - origin.lng) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((origin.lat * Math.PI) / 180) *
+      Math.cos((destination.lat * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const rawDistKm = R * c;
+  const gridDistKm = Math.max(0.5, Number((rawDistKm * 1.25).toFixed(2)));
+  const distanceMeters = gridDistKm * 1000;
+  const durationMin = (gridDistKm / 28) * 60;
+
+  return {
+    distanceMeters,
+    distanceKm: gridDistKm,
+    durationSeconds: durationMin * 60,
+    durationMin,
+    geometry: [
+      [origin.lat, origin.lng],
+      [destination.lat, destination.lng],
+    ],
+    profile,
+  };
+}
+
+/**
+ * 4. CÁLCULO DE ROTA OFICIAL (Mapbox Directions API v5 com Fallback OSRM/OSM)
  */
 export async function calculateRoute(
   origin: { lat: number; lng: number },
   destination: { lat: number; lng: number },
-  options: {
+  options: RouteProfile | {
     profile?: RouteProfile;
     signal?: AbortSignal;
   } = {}
 ): Promise<MapboxRouteResult> {
-  const token = assertMapboxToken();
-
   if (!isValidCoordinate(origin.lat, origin.lng)) {
     throw new MapboxServiceError(
       "INVALID_COORDINATES",
@@ -654,7 +778,23 @@ export async function calculateRoute(
     );
   }
 
-  const profile = options.profile || "driving";
+  const profile: RouteProfile =
+    typeof options === "string"
+      ? options
+      : options?.profile || "driving";
+  const activeSignal =
+    typeof options === "object" && options?.signal
+      ? options.signal
+      : undefined;
+
+  const token = hasMapboxToken() ? assertMapboxToken() : "";
+
+  // Se não houver token configurado, vai direto para OSRM
+  if (!token) {
+    const osrmRes = await fetchOSRMRouteFallback(origin, destination, profile, activeSignal);
+    return osrmRes || calculateHaversineFallback(origin, destination, profile);
+  }
+
   const mapboxProfile =
     profile === "cycling"
       ? "cycling"
@@ -674,85 +814,54 @@ export async function calculateRoute(
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), MAPBOX_REQUEST_TIMEOUT_MS);
-    const activeSignal = options.signal || controller.signal;
+    const effSignal = activeSignal || controller.signal;
 
     const response = await fetch(url.toString(), {
-      signal: activeSignal,
+      signal: effSignal,
       headers: { Accept: "application/json" },
     });
 
     clearTimeout(timeoutId);
 
-    if (response.status === 401 || response.status === 403) {
-      throw new MapboxServiceError(
-        "AUTH_ERROR",
-        "Chave de acesso da Mapbox não autorizada para serviço de rotas."
-      );
-    }
-    if (response.status === 429) {
-      throw new MapboxServiceError(
-        "RATE_LIMIT",
-        "Limite de requisições de rota atingido."
-      );
-    }
-    if (!response.ok) {
-      throw new MapboxServiceError(
-        "MAPBOX_API_ERROR",
-        `Erro no cálculo de rota (${response.status})`
-      );
+    if (response.ok) {
+      const data = await response.json();
+      if (data?.routes && data.routes.length > 0) {
+        const route = data.routes[0];
+        const distanceMeters = Number(route.distance);
+        if (Number.isFinite(distanceMeters) && distanceMeters >= 0) {
+          const distanceKm = Number((distanceMeters / 1000).toFixed(2));
+          const durationSeconds = Number(route.duration) || 0;
+          const durationMin = durationSeconds / 60;
+          const leafletGeometry: [number, number][] = Array.isArray(route.geometry?.coordinates)
+            ? (route.geometry.coordinates.map(([lon, lat]: [number, number]) => [lat, lon]) as [number, number][])
+            : [];
+
+          return {
+            distanceMeters,
+            distanceKm,
+            durationSeconds,
+            durationMin,
+            geometry: leafletGeometry,
+            profile,
+          };
+        }
+      }
     }
 
-    const data = await response.json();
-    if (data.code === "NoRoute" || !data.routes || data.routes.length === 0) {
-      throw new MapboxServiceError(
-        "ROUTE_NOT_FOUND",
-        "Não foi possível encontrar uma rota transitável entre os dois pontos."
-      );
+    console.warn(`[calculateRoute] Mapbox retornou status ${response.status}, ativando OSRM...`);
+    const osrmFallback = await fetchOSRMRouteFallback(origin, destination, profile, activeSignal);
+    if (osrmFallback) return osrmFallback;
+  } catch (err: any) {
+    if (err?.name === "AbortError") {
+      throw new MapboxServiceError("NETWORK_ERROR", "Cálculo de rota cancelado.");
     }
-
-    const route = data.routes[0];
-    const distanceMeters = Number(route.distance);
-    if (!Number.isFinite(distanceMeters) || distanceMeters < 0) {
-      throw new MapboxServiceError(
-        "MAPBOX_API_ERROR",
-        "Distância retornada pela Mapbox é inválida."
-      );
-    }
-
-    // CONVERSÃO ÚNICA DE METROS PARA QUILÔMETROS
-    const distanceKm = distanceMeters / 1000;
-    const durationSeconds = Number(route.duration) || 0;
-    const durationMin = durationSeconds / 60;
-
-    // Converte geometria Mapbox [lng, lat] para formato Leaflet [lat, lng]
-    const leafletGeometry: [number, number][] = Array.isArray(route.geometry?.coordinates)
-      ? route.geometry.coordinates.map(([lon, lat]: [number, number]) => [lat, lon])
-      : [];
-
-    return {
-      distanceMeters,
-      distanceKm,
-      durationSeconds,
-      durationMin,
-      geometry: leafletGeometry,
-      profile,
-    };
-  } catch (error: any) {
-    if (error?.name === "AbortError") {
-      throw new MapboxServiceError(
-        "NETWORK_ERROR",
-        "Cálculo de rota cancelado."
-      );
-    }
-    if (error instanceof MapboxServiceError) {
-      throw error;
-    }
-    throw new MapboxServiceError(
-      "NETWORK_ERROR",
-      "Falha de conexão com a API de rotas da Mapbox.",
-      error
-    );
+    console.warn("[calculateRoute] Mapbox falhou, tentando fallback OSRM:", err);
+    const osrmFallback = await fetchOSRMRouteFallback(origin, destination, profile, activeSignal);
+    if (osrmFallback) return osrmFallback;
   }
+
+  // Fallback seguro final: malha viária geodésica calibrada
+  return calculateHaversineFallback(origin, destination, profile);
 }
 
 /**
