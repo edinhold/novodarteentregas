@@ -41,3 +41,4 @@ WHERE id = '79cbe5e0-8dc5-4048-b86d-50a11fa8761e' AND latitude IS NULL;
 UPDATE public.restaurants
 SET latitude = -15.5595, longitude = -54.3079, updated_at = now()
 WHERE latitude IS NULL OR longitude IS NULL;
+
