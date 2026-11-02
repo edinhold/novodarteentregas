@@ -3,7 +3,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { supabase, createFreshChannel } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArrowLeft, Truck, UtensilsCrossed, CreditCard, Store, Map as MapIcon, Star, RefreshCw, Route, MessageSquare, Settings, XCircle, Loader2, Phone, MessageCircle, Car } from "lucide-react";
+import { ArrowLeft, Truck, UtensilsCrossed, CreditCard, Store, Map as MapIcon, Star, RefreshCw, Route, MessageSquare, Settings, XCircle, Loader2, Phone, MessageCircle, Car, PanelLeftOpen } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -60,6 +60,25 @@ const StoreOwnerPanel = () => {
       localStorage.setItem("theme", "light");
     }
     window.dispatchEvent(new Event("theme-change"));
+  };
+
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("store_sidebar_collapsed");
+      if (saved !== null) return saved === "true";
+      return true; // Recolhido por padrão
+    }
+    return true;
+  });
+
+  const toggleSidebarCollapse = () => {
+    setIsSidebarCollapsed((prev) => {
+      const next = !prev;
+      if (typeof window !== "undefined") {
+        localStorage.setItem("store_sidebar_collapsed", String(next));
+      }
+      return next;
+    });
   };
 
   const impersonatedUserId = typeof window !== "undefined" ? sessionStorage.getItem("admin_impersonated_user_id") : null;
@@ -299,6 +318,9 @@ const StoreOwnerPanel = () => {
           isDark={isDark}
           onToggleTheme={toggleTheme}
           storeName={restaurant?.name || "Loja"}
+          isCollapsed={isSidebarCollapsed}
+          onToggleCollapse={toggleSidebarCollapse}
+          onGoBackHome={() => navigate("/")}
         />
 
         {/* Área Central / Conteúdo Principal */}
@@ -313,6 +335,9 @@ const StoreOwnerPanel = () => {
               onOpenCancelModal={(reqId, dName, isAcc, dDetails) => handleOpenCancelModal(reqId, dName, isAcc, dDetails)}
               onNavigateTab={(tab) => setActiveTab(tab)}
               isDark={isDark}
+              isSidebarCollapsed={isSidebarCollapsed}
+              onToggleSidebar={toggleSidebarCollapse}
+              onGoBackHome={() => navigate("/")}
             />
           ) : (
             <div className="flex flex-col flex-1 w-full">
@@ -320,7 +345,21 @@ const StoreOwnerPanel = () => {
               <header className={`px-4 sm:px-6 py-3.5 border-b flex items-center justify-between sticky top-0 z-20 backdrop-blur-md transition-colors duration-300 ${
                 isDark ? "bg-[#18181B]/95 border-zinc-800 text-white" : "bg-white/95 border-zinc-200 text-zinc-900"
               }`}>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 sm:gap-3">
+                  {/* Botão de Expandir Menu Lateral quando recolhido */}
+                  {isSidebarCollapsed && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={toggleSidebarCollapse}
+                      className="gap-1.5 text-xs font-bold rounded-xl border-orange-500/30 text-[#EA580C] hover:bg-orange-500/10"
+                      title="Abrir menu lateral"
+                    >
+                      <PanelLeftOpen className="w-4 h-4 text-[#EA580C]" />
+                      <span className="hidden sm:inline">Menu</span>
+                    </Button>
+                  )}
+
                   <Button
                     variant="outline"
                     size="sm"
@@ -329,6 +368,15 @@ const StoreOwnerPanel = () => {
                   >
                     <ArrowLeft className="w-4 h-4" />
                     <span>Voltar ao Início (Envio)</span>
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => navigate("/")}
+                    className="gap-1 text-xs text-muted-foreground hover:text-foreground hidden sm:flex"
+                    title="Voltar para a página inicial"
+                  >
+                    <span>Sair</span>
                   </Button>
                   <h2 className="text-sm sm:text-base font-extrabold truncate">
                     {activeTab === "orders" && "Histórico & Pedidos"}
@@ -606,6 +654,20 @@ const StoreOwnerPanel = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Botão Flutuante para Expandir / Voltar Menu Lateral quando recolhido */}
+      {isSidebarCollapsed && (
+        <button
+          type="button"
+          onClick={toggleSidebarCollapse}
+          className="fixed left-3 bottom-6 z-40 p-3 rounded-2xl bg-[#EA580C] hover:bg-[#C2410C] text-white shadow-xl shadow-orange-500/30 transition-all duration-200 active:scale-95 flex items-center gap-2 group border border-orange-400/40 select-none cursor-pointer"
+          title="Expandir / Voltar menu lateral"
+          aria-label="Expandir / Voltar menu lateral"
+        >
+          <PanelLeftOpen className="w-5 h-5 transition-transform group-hover:scale-110" />
+          <span className="text-xs font-bold hidden sm:inline">Menu</span>
+        </button>
+      )}
     </div>
   );
 };

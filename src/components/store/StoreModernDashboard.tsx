@@ -20,6 +20,8 @@ import {
   ExternalLink,
   CheckCircle2,
   Plus,
+  PanelLeftOpen,
+  ArrowLeft,
 } from "lucide-react";
 import { searchAddressSuggestions, geocodeAddress, calculateRoute } from "@/services/mapbox";
 import { notifyAvailableDrivers } from "@/lib/push";
@@ -40,6 +42,9 @@ interface StoreModernDashboardProps {
   onOpenCancelModal: (requestId: string, driverName?: string | null, isAccepted?: boolean, driverDetails?: any | null) => void;
   onNavigateTab?: (tab: string) => void;
   isDark?: boolean;
+  isSidebarCollapsed?: boolean;
+  onToggleSidebar?: () => void;
+  onGoBackHome?: () => void;
 }
 
 export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
@@ -51,6 +56,9 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
   onOpenCancelModal,
   onNavigateTab,
   isDark = false,
+  isSidebarCollapsed = false,
+  onToggleSidebar,
+  onGoBackHome,
 }) => {
   const queryClient = useQueryClient();
   const formCardRef = useRef<HTMLDivElement>(null);
@@ -336,21 +344,49 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
     <div className={`flex flex-col flex-1 w-full min-h-screen transition-colors duration-300 ${isDark ? "bg-[#0d0d0f] text-white" : "bg-slate-50 text-zinc-900"}`}>
       {/* 1. Cabeçalho Superior (Header Limpo e Branco / Dark) */}
       <header
-        className={`w-full px-5 sm:px-8 py-3.5 border-b flex items-center justify-between sticky top-0 z-20 backdrop-blur-md shadow-xs transition-colors duration-300 ${
+        className={`w-full px-4 sm:px-8 py-3.5 border-b flex items-center justify-between sticky top-0 z-20 backdrop-blur-md shadow-xs transition-colors duration-300 ${
           isDark
             ? "bg-[#18181B]/95 border-zinc-800 text-white"
             : "bg-white/95 border-zinc-200/80 text-zinc-900"
         }`}
       >
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-[#EA580C] text-white flex items-center justify-center shadow-md shadow-orange-500/20">
+        <div className="flex items-center gap-2 sm:gap-3">
+          {/* Botão de Expandir / Voltar o Menu Lateral quando recolhido */}
+          {isSidebarCollapsed && onToggleSidebar && (
+            <button
+              type="button"
+              onClick={onToggleSidebar}
+              className="px-2.5 py-1.5 rounded-xl bg-orange-500/10 hover:bg-orange-500/20 text-[#EA580C] border border-orange-500/30 transition-all flex items-center gap-1.5 text-xs font-bold active:scale-95 shadow-xs"
+              title="Expandir menu lateral"
+              aria-label="Expandir menu lateral"
+            >
+              <PanelLeftOpen className="w-4 h-4 text-[#EA580C]" />
+              <span className="hidden sm:inline">Menu</span>
+            </button>
+          )}
+
+          {/* Botão de Voltar para a Página Inicial */}
+          {onGoBackHome && (
+            <button
+              type="button"
+              onClick={onGoBackHome}
+              className="px-2.5 py-1.5 rounded-xl hover:bg-muted text-muted-foreground hover:text-foreground border border-transparent hover:border-border transition-all flex items-center gap-1 text-xs font-semibold"
+              title="Voltar para a página inicial"
+              aria-label="Voltar para a página inicial"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span className="hidden md:inline">Início</span>
+            </button>
+          )}
+
+          <div className="w-9 h-9 rounded-xl bg-[#EA580C] text-white flex items-center justify-center shadow-md shadow-orange-500/20 shrink-0">
             <Bike className="w-5 h-5" />
           </div>
           <div>
-            <h1 className="font-extrabold text-base sm:text-lg tracking-tight leading-none text-foreground">
+            <h1 className="font-extrabold text-sm sm:text-lg tracking-tight leading-none text-foreground">
               Duarte Entregas - Painel da Loja
             </h1>
-            <p className={`text-[11px] font-medium leading-tight mt-1 ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>
+            <p className={`text-[10px] sm:text-[11px] font-medium leading-tight mt-1 ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>
               {restaurant?.name || "Estabelecimento Parceiro"} • Primavera do Leste
             </p>
           </div>
