@@ -65,16 +65,14 @@ const DriversTab = () => {
   const { data: earnings = [] } = useQuery({
     queryKey: ["admin-driver-earnings"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("driver_earnings").select("*").in("status", ["pending", "requested"]);
+      const { data, error } = await supabase.from("driver_earnings").select("*").eq("status", "pending");
       if (error) throw error;
       return data;
     },
   });
 
-  const getDriverEarnings = (driverId: string, userId?: string | null) => {
-    return earnings
-      .filter((e) => e.driver_id === driverId || (userId && e.driver_id === userId))
-      .reduce((sum, e) => sum + Number(e.amount), 0);
+  const getDriverEarnings = (driverId: string) => {
+    return earnings.filter((e) => e.driver_id === driverId).reduce((sum, e) => sum + Number(e.amount), 0);
   };
 
   // Password Confirmation Dialog State
@@ -313,7 +311,7 @@ const DriversTab = () => {
                   <TableCell className="capitalize">{d.vehicle_type}</TableCell>
                   <TableCell>{d.vehicle_plate || "—"}</TableCell>
                   <TableCell className="font-semibold text-accent">
-                    R$ {getDriverEarnings(d.id, d.user_id).toFixed(2)}
+                    R$ {getDriverEarnings(d.id).toFixed(2)}
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-col gap-1">
@@ -420,7 +418,7 @@ const DriversTab = () => {
               <div className="bg-muted/50 rounded-lg p-3 flex items-center justify-between gap-2">
                 <div>
                   <p className="text-xs text-muted-foreground">Saldo Atual (A Receber)</p>
-                  <p className="text-xl font-extrabold text-accent">R$ {getDriverEarnings(viewDriver.id, viewDriver.user_id).toFixed(2)}</p>
+                  <p className="text-xl font-extrabold text-accent">R$ {getDriverEarnings(viewDriver.id).toFixed(2)}</p>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <Button
