@@ -92,6 +92,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
   const [searchingAddress, setSearchingAddress] = useState(false);
   const [deliveryCoordinates, setDeliveryCoordinates] = useState<{ lat: number; lng: number } | null>(null);
   const [estimatedDistanceKm, setEstimatedDistanceKm] = useState<number>(0);
+  const [loadingRoute, setLoadingRoute] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const suggestionsRef = useRef<HTMLDivElement>(null);
 
@@ -232,10 +233,13 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
   useEffect(() => {
     if (!deliveryCoordinates || !restaurant?.latitude || !restaurant?.longitude) {
       setEstimatedDistanceKm(0);
+      setLoadingRoute(false);
       return;
     }
 
     let isCancelled = false;
+    setLoadingRoute(true);
+
     const calc = async () => {
       try {
         const routeData = await calculateRoute(
@@ -245,6 +249,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
         );
         if (!isCancelled && routeData?.distanceMeters) {
           setEstimatedDistanceKm(Number((routeData.distanceMeters / 1000).toFixed(1)));
+          setLoadingRoute(false);
           return;
         }
       } catch (err) {
@@ -266,6 +271,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
         // Multiplica por 1.25 para simular o traçado das ruas em grade da cidade
         const estRoadKm = Number((R * c * 1.25).toFixed(1));
         setEstimatedDistanceKm(estRoadKm > 0 ? estRoadKm : 2.5);
+        setLoadingRoute(false);
       }
     };
 
@@ -275,8 +281,18 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
     };
   }, [deliveryCoordinates, restaurant]);
 
-  // Cálculo exato do valor da corrida (espelhando deduct_credits_for_delivery do backend)
+  // Cálculo exato do valor total da corrida conforme configurado no painel admin
+  // Só calcula quando o endereço estiver preenchido, sem expor taxa base
   const fareDetails = useMemo(() => {
+    const hasAddress = Boolean(addressInput.trim().length >= 3);
+    if (!hasAddress) {
+      return {
+        totalCost: null,
+        isCalculated: false,
+        effectiveKm: 0,
+      };
+    }
+
     const baseFee = Number(deliveryConfig?.base_fee ?? 5);
     const dynamicEnabled = Boolean(deliveryConfig?.dynamic_pricing_enabled);
     const dynamicFee = Number(deliveryConfig?.dynamic_fee_per_km ?? 0);
@@ -289,21 +305,44 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
     if (effectiveKm <= 0 && deliveryCoordinates) {
       effectiveKm = 3.0; // Distância padrão estimada quando ponto definido
     }
+    if (effectiveKm <= 0 && hasAddress) {
+      effectiveKm = 3.0; // Distância de segurança enquanto calcula rota
+    }
 
     if (roundKmUp && effectiveKm > 0) effectiveKm = Math.ceil(effectiveKm);
     if (minKm > 0 && effectiveKm < minKm) effectiveKm = minKm;
     if (maxKm > 0 && effectiveKm > maxKm) effectiveKm = maxKm;
 
-    const totalCost = effectiveKm > 0 ? baseFee + (effectiveKm * feePerKm) : baseFee;
+    const totalCost = baseFee + (effectiveKm * feePerKm);
 
     return {
-      baseFee,
-      feePerKm,
-      effectiveKm,
       totalCost,
       isCalculated: estimatedDistanceKm > 0,
+      effectiveKm,
     };
-  }, [deliveryConfig, estimatedDistanceKm, deliveryCoordinates]);
+  }, [deliveryConfig, estimatedDistanceKm, deliveryCoordinates, addressInput]);
+
+  // Geocodifica e calcula automaticamente quando o lojista termina de digitar o endereço
+  const handleAddressBlur = async () => {
+    if (addressInput.trim().length >= 3 && !deliveryCoordinates) {
+      setLoadingRoute(true);
+      try {
+        const geo = await geocodeAddress(`${addressInput.trim()}, Primavera do Leste`).catch(() => null);
+        if (geo?.coordinates) {
+          setDeliveryCoordinates({
+            lat: geo.coordinates.latitude,
+            lng: geo.coordinates.longitude,
+          });
+        } else {
+          setEstimatedDistanceKm(3.0);
+        }
+      } catch {
+        setEstimatedDistanceKm(3.0);
+      } finally {
+        setLoadingRoute(false);
+      }
+    }
+  };
 
   // Seleciona um endereço da lista de sugestões de ruas
   const handleSelectSuggestion = (sug: AddressSuggestionItem) => {
@@ -591,6 +630,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
                     value={addressInput}
                     onChange={(e) => setAddressInput(e.target.value)}
                     onFocus={() => addressSuggestions.length > 0 && setShowSuggestions(true)}
+                    onBlur={handleAddressBlur}
                     placeholder="Rua, avenida ou bairro em Primavera..."
                     className={`w-full px-3.5 py-2.5 pr-8 rounded-xl border text-xs sm:text-sm transition outline-none ${
                       isDark
@@ -729,78 +769,92 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
                 />
               </div>
 
-              {/* Card Destaque: Valor da Corrida e Resumo */}
-              <div
-                className={`p-3.5 sm:p-4 rounded-2xl border transition-all duration-300 space-y-2.5 ${
-                  isDark
-                    ? "bg-[#121214] border-zinc-700/80 shadow-inner"
-                    : "bg-gradient-to-br from-orange-50/70 to-amber-50/50 border-orange-200/90 shadow-xs"
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-10 h-10 rounded-2xl bg-[#EA580C]/15 text-[#EA580C] flex items-center justify-center shrink-0">
-                      <DollarSign className="w-5 h-5 stroke-[2.5]" />
-                    </div>
-                    <div>
-                      <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-muted-foreground block leading-tight">
-                        Valor da Corrida
-                      </span>
-                      <span className="text-xl sm:text-2xl font-black text-[#EA580C] tracking-tight leading-tight">
-                        R$ {fareDetails.totalCost.toFixed(2).replace(".", ",")}
-                      </span>
-                    </div>
+              {/* Exibição do Valor Total da Corrida: apenas após o preenchimento do endereço, sem exibir taxa base */}
+              {addressInput.trim().length >= 3 ? (
+                loadingRoute ? (
+                  <div
+                    className={`p-3.5 rounded-2xl border flex items-center justify-center gap-2 text-xs font-semibold ${
+                      isDark ? "bg-[#18181B] border-zinc-700 text-[#EA580C]" : "bg-orange-50/80 border-orange-200 text-[#EA580C]"
+                    }`}
+                  >
+                    <Loader2 className="w-4 h-4 animate-spin text-[#EA580C]" />
+                    <span>Calculando valor total da corrida...</span>
                   </div>
+                ) : fareDetails.totalCost !== null ? (
+                  <div
+                    className={`p-3.5 sm:p-4 rounded-2xl border transition-all duration-300 space-y-2.5 ${
+                      isDark
+                        ? "bg-[#121214] border-zinc-700/80 shadow-inner"
+                        : "bg-gradient-to-br from-orange-50/70 to-amber-50/50 border-orange-200/90 shadow-xs"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-10 h-10 rounded-2xl bg-[#EA580C]/15 text-[#EA580C] flex items-center justify-center shrink-0">
+                          <DollarSign className="w-5 h-5 stroke-[2.5]" />
+                        </div>
+                        <div>
+                          <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-muted-foreground block leading-tight">
+                            Valor Total da Corrida
+                          </span>
+                          <span className="text-xl sm:text-2xl font-black text-[#EA580C] tracking-tight leading-tight">
+                            R$ {fareDetails.totalCost.toFixed(2).replace(".", ",")}
+                          </span>
+                        </div>
+                      </div>
 
-                  {fareDetails.isCalculated ? (
-                    <div className="text-right">
-                      <span className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30">
-                        <Route className="w-3.5 h-3.5" />
-                        {estimatedDistanceKm} km
-                      </span>
-                      <span className="text-[10px] text-muted-foreground block mt-0.5">
-                        ~{Math.max(4, Math.round(estimatedDistanceKm * 2.5))} min de trajeto
-                      </span>
+                      {fareDetails.isCalculated && (
+                        <div className="text-right">
+                          <span className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30">
+                            <Route className="w-3.5 h-3.5" />
+                            {estimatedDistanceKm} km
+                          </span>
+                          <span className="text-[10px] text-muted-foreground block mt-0.5">
+                            ~{Math.max(4, Math.round(estimatedDistanceKm * 2.5))} min de trajeto
+                          </span>
+                        </div>
+                      )}
                     </div>
-                  ) : (
-                    <div className="text-right">
-                      <span className="text-[11px] font-semibold text-muted-foreground bg-muted/60 px-2 py-0.5 rounded-md">
-                        Taxa Base
+
+                    {/* Informações complementares de saldo (SEM taxa base para evitar confusão) */}
+                    <div className="pt-2 border-t border-border/40 flex items-center justify-between text-[11px] text-muted-foreground">
+                      <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        Valor calculado por quilometragem e rota
                       </span>
-                      <span className="text-[10px] text-muted-foreground block mt-0.5">
-                        {addressInput.trim() ? "Aguardando ponto" : "Digite o endereço"}
-                      </span>
+
+                      {credits && (
+                        <span className={`font-semibold ${Number(credits.balance || 0) < fareDetails.totalCost ? "text-red-500 font-bold" : "text-foreground"}`}>
+                          Saldo em conta: R$ {Number(credits.balance || 0).toFixed(2).replace(".", ",")}
+                        </span>
+                      )}
                     </div>
-                  )}
-                </div>
 
-                {/* Linha detalhada de decomposição da taxa e créditos */}
-                <div className="pt-2 border-t border-border/40 flex items-center justify-between text-[11px] text-muted-foreground">
-                  <span>
-                    Taxa R$ {fareDetails.baseFee.toFixed(2).replace(".", ",")}
-                    {fareDetails.isCalculated && ` + ${estimatedDistanceKm} km × R$ ${fareDetails.feePerKm.toFixed(2).replace(".", ",")}/km`}
-                  </span>
-
-                  {credits && (
-                    <span className={`font-semibold ${Number(credits.balance || 0) < fareDetails.totalCost ? "text-red-500 font-bold" : "text-emerald-600 dark:text-emerald-400"}`}>
-                      Saldo: R$ {Number(credits.balance || 0).toFixed(2).replace(".", ",")}
-                    </span>
-                  )}
-                </div>
-
-                {/* Alerta de Saldo Insuficiente */}
-                {credits && Number(credits.balance || 0) < fareDetails.totalCost && (
-                  <div className="flex items-center gap-1.5 p-2 rounded-xl bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 text-[11px] font-medium">
-                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                    <span>Saldo insuficiente na carteira (R$ {Number(credits.balance || 0).toFixed(2)}). Recarregue para chamar.</span>
+                    {/* Alerta de Saldo Insuficiente */}
+                    {credits && Number(credits.balance || 0) < fareDetails.totalCost && (
+                      <div className="flex items-center gap-1.5 p-2 rounded-xl bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 text-[11px] font-medium">
+                        <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                        <span>Saldo insuficiente na carteira (R$ {Number(credits.balance || 0).toFixed(2).replace(".", ",")}). Recarregue para chamar.</span>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
+                ) : null
+              ) : (
+                /* Card Orientativo exibido antes do endereço ser informado */
+                <div
+                  className={`p-3 rounded-xl border border-dashed flex items-center justify-center gap-2 text-xs transition-colors ${
+                    isDark ? "border-zinc-800 bg-zinc-900/30 text-zinc-500" : "border-zinc-200 bg-slate-50/60 text-zinc-500"
+                  }`}
+                >
+                  <MapPin className="w-3.5 h-3.5 text-[#EA580C] shrink-0" />
+                  <span>Preencha o endereço de entrega para calcular o valor total da corrida</span>
+                </div>
+              )}
 
               {/* Botão de Envio (Laranja Largo com Cantos Arredondados) */}
               <button
                 type="submit"
-                disabled={isSubmitting || (credits && Number(credits.balance || 0) < fareDetails.totalCost)}
+                disabled={isSubmitting || loadingRoute || !addressInput.trim() || (fareDetails.totalCost !== null && credits && Number(credits.balance || 0) < fareDetails.totalCost)}
                 className="w-full bg-[#EA580C] hover:bg-[#C2410C] text-white font-extrabold text-sm sm:text-base py-3.5 px-4 rounded-xl shadow-lg shadow-orange-500/25 transition-all duration-200 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 select-none cursor-pointer mt-1"
               >
                 {isSubmitting ? (
@@ -808,10 +862,20 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
                     <Loader2 className="w-5 h-5 animate-spin text-white" />
                     <span>Enviando chamado...</span>
                   </>
-                ) : (
+                ) : loadingRoute ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin text-white" />
+                    <span>Calculando valor...</span>
+                  </>
+                ) : addressInput.trim().length >= 3 && fareDetails.totalCost !== null ? (
                   <>
                     <Bike className="w-5 h-5" />
                     <span>Confirmar Envio • R$ {fareDetails.totalCost.toFixed(2).replace(".", ",")}</span>
+                  </>
+                ) : (
+                  <>
+                    <Bike className="w-5 h-5" />
+                    <span>Solicitar Entrega</span>
                   </>
                 )}
               </button>
