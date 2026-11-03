@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { searchAddressSuggestions, geocodeAddress, calculateRoute } from "@/services/mapbox";
 import { DEFAULT_CENTER, resolveStoreCoordinates } from "@/config/maps";
+import { isValidCoordinate } from "@/utils/geolocation";
 import { notifyAvailableDrivers } from "@/lib/push";
 import { useDriverLocations } from "@/hooks/useDriverLocations";
 import StoreMiniTrackingMap from "./StoreMiniTrackingMap";
@@ -576,9 +577,11 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
     }
   };
 
-  // Filtra as entregas conforme a aba ativa
+  // Filtra as entregas conforme a aba ativa com proteção defensiva total
   const filteredRequests = useMemo(() => {
+    if (!Array.isArray(requests)) return [];
     return requests.filter((r) => {
+      if (!r) return false;
       if (statusFilter === "pending") return r.status === "pending";
       if (statusFilter === "accepted") return r.status === "accepted";
       if (statusFilter === "picked_up") return r.status === "picked_up";
@@ -588,28 +591,35 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
     });
   }, [requests, statusFilter]);
 
-  // Contagem para as abas
-  const countPending = useMemo(() => requests.filter((r) => r.status === "pending").length, [requests]);
-  const countAccepted = useMemo(() => requests.filter((r) => r.status === "accepted").length, [requests]);
-  const countTransit = useMemo(() => requests.filter((r) => r.status === "picked_up").length, [requests]);
-  const countCancelled = useMemo(() => requests.filter((r) => r.status === "cancelled").length, [requests]);
+  // Contagem para as abas com proteção contra nulos
+  const countPending = useMemo(() => (Array.isArray(requests) ? requests.filter((r) => r?.status === "pending").length : 0), [requests]);
+  const countAccepted = useMemo(() => (Array.isArray(requests) ? requests.filter((r) => r?.status === "accepted").length : 0), [requests]);
+  const countTransit = useMemo(() => (Array.isArray(requests) ? requests.filter((r) => r?.status === "picked_up").length : 0), [requests]);
+  const countCancelled = useMemo(() => (Array.isArray(requests) ? requests.filter((r) => r?.status === "cancelled").length : 0), [requests]);
 
   // Corrida para exibição no mini-mapa: prioriza ativa em rota ou aceita
   const displayMapRequest = useMemo(() => {
-    return requests.find((r) => r.status === "picked_up") ||
-      requests.find((r) => r.status === "accepted") ||
-      requests.find((r) => r.status === "pending") ||
-      null;
+    if (!Array.isArray(requests)) return null;
+    return (
+      requests.find((r) => r?.status === "picked_up") ||
+      requests.find((r) => r?.status === "accepted") ||
+      requests.find((r) => r?.status === "pending") ||
+      null
+    );
   }, [requests]);
 
   // Coordenadas do motorista da corrida exibida no mini-mapa
   const currentDriverPos = useMemo(() => {
-    if (!displayMapRequest?.driver_id) return null;
+    if (!displayMapRequest?.driver_id || !Array.isArray(driverLocations)) return null;
     const dl = driverLocations.find(
-      (d: any) => d.user_id === displayMapRequest.driver_id || d.driver_id === displayMapRequest.driver_id
+      (d: any) => d && (d.user_id === displayMapRequest.driver_id || d.driver_id === displayMapRequest.driver_id)
     );
-    if (dl?.latitude && dl?.longitude) {
-      return { lat: dl.latitude, lng: dl.longitude };
+    if (dl) {
+      const lat = Number(dl.latitude);
+      const lng = Number(dl.longitude);
+      if (isValidCoordinate(lat, lng)) {
+        return { lat, lng };
+      }
     }
     return null;
   }, [displayMapRequest, driverLocations]);
@@ -626,10 +636,11 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
     geocodeAddress(displayMapRequest.delivery_address)
       .then((parsed) => {
         if (!isCancelled && parsed?.coordinates) {
-          setActiveRequestCoords({
-            lat: parsed.coordinates.latitude,
-            lng: parsed.coordinates.longitude,
-          });
+          const lat = Number(parsed.coordinates.latitude);
+          const lng = Number(parsed.coordinates.longitude);
+          if (isValidCoordinate(lat, lng)) {
+            setActiveRequestCoords({ lat, lng });
+          }
         }
       })
       .catch(() => {});
@@ -641,9 +652,13 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
 
   // Coordenadas de entrega da corrida exibida no mini-mapa
   const mapDeliveryLocation = useMemo(() => {
-    if (deliveryCoordinates) return deliveryCoordinates;
-    if (activeRequestCoords) return activeRequestCoords;
-    if (storeCoords) {
+    if (deliveryCoordinates && isValidCoordinate(deliveryCoordinates.lat, deliveryCoordinates.lng)) {
+      return deliveryCoordinates;
+    }
+    if (activeRequestCoords && isValidCoordinate(activeRequestCoords.lat, activeRequestCoords.lng)) {
+      return activeRequestCoords;
+    }
+    if (storeCoords && isValidCoordinate(storeCoords.lat, storeCoords.lng)) {
       return { lat: storeCoords.lat + 0.008, lng: storeCoords.lng + 0.009 };
     }
     return null;
@@ -1055,7 +1070,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
                 Entregas ativas
               </h2>
               <span className={`text-xs font-semibold ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>
-                Total: <strong>{requests.filter((r) => !["delivered", "cancelled"].includes(r.status)).length}</strong> em andamento
+                Total: <strong>{(Array.isArray(requests) ? requests.filter((r) => r && !["delivered", "cancelled"].includes(r.status)) : []).length}</strong> em andamento
               </span>
             </div>
 
@@ -1212,7 +1227,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
                             {restaurant?.name || "Pizzaria Piacenza"}
                           </h4>
                           <span className={`text-[10px] font-mono font-medium ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>
-                            #{req.id.slice(0, 6)}
+                            #{req?.id ? String(req.id).slice(0, 6) : "------"}
                           </span>
                         </div>
 
@@ -1301,7 +1316,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
               <div className="w-full sm:w-80 md:w-96 h-56 sm:h-64 rounded-2xl overflow-hidden shadow-lg border border-border/80">
                 <StoreMiniTrackingMap
                   pickupLocation={
-                    storeCoords
+                    storeCoords && isValidCoordinate(storeCoords.lat, storeCoords.lng)
                       ? { lat: storeCoords.lat, lng: storeCoords.lng, name: restaurant?.name || "Loja" }
                       : null
                   }
@@ -1333,7 +1348,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
               ) : (
                 <Bike className="w-5 h-5 text-[#EA580C]" />
               )}
-              <span>Detalhes da Corrida #{selectedOrderDetails?.id?.slice(0, 8)}</span>
+              <span>Detalhes da Corrida #{selectedOrderDetails?.id ? String(selectedOrderDetails.id).slice(0, 8) : "--------"}</span>
             </DialogTitle>
             <DialogDescription className="text-xs">
               Status atual:{" "}
@@ -1410,7 +1425,9 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
                     onClick={() => {
                       const req = selectedOrderDetails;
                       setSelectedOrderDetails(null);
-                      onOpenCancelModal(req.id, null, req.status !== "pending");
+                      if (req?.id) {
+                        onOpenCancelModal(req.id, null, req.status !== "pending");
+                      }
                     }}
                     className="w-full text-red-600 border-red-300/60 hover:bg-red-500/10 hover:text-red-700 font-semibold text-xs h-10 rounded-xl"
                   >

@@ -138,22 +138,23 @@ const StoreOwnerPanel = () => {
     enabled: !!activeUserId,
   });
 
-  const activeRequest = requests.find((r) =>
-    !["delivered", "cancelled"].includes(r.status)
+  const activeRequest = (Array.isArray(requests) ? requests : []).find((r) =>
+    r && !["delivered", "cancelled"].includes(r.status)
   ) || null;
 
   const { data: chatMessages = [] } = useQuery({
     queryKey: ["chat-messages", activeRequest?.id],
     queryFn: async () => {
+      if (!activeRequest?.id) return [];
       const { data, error } = await supabase
         .from("chat_messages")
         .select("*")
-        .eq("delivery_request_id", activeRequest!.id)
+        .eq("delivery_request_id", activeRequest.id)
         .order("created_at");
       if (error) throw error;
-      return data;
+      return data || [];
     },
-    enabled: !!activeRequest,
+    enabled: !!activeRequest?.id,
   });
 
   // Modal de Justificativa de Cancelamento no Painel Principal da Loja

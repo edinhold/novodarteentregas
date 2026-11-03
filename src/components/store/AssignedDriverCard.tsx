@@ -234,7 +234,7 @@ export const AssignedDriverCard = ({ activeRequest, onCancelRequest }: AssignedD
               Aguardando motorista aceitar a entrega
             </CardTitle>
             <Badge variant="outline" className="text-xs bg-amber-500/10 border-amber-500/30 text-amber-800 dark:text-amber-300 font-mono font-bold">
-              Chamada #{activeRequest.id.slice(0, 8)}
+              Chamada #{activeRequest?.id ? String(activeRequest.id).slice(0, 8) : "--------"}
             </Badge>
           </div>
         </CardHeader>
@@ -288,7 +288,7 @@ export const AssignedDriverCard = ({ activeRequest, onCancelRequest }: AssignedD
   if (isAcceptedOrTransit) {
     const waNumber = driver?.phone ? normalizeWhatsAppNumber(driver.phone) : "";
     const waMessage = encodeURIComponent(
-      `Olá! Sou da loja referente à entrega #${activeRequest.id.slice(0, 8)}.`
+      `Olá! Sou da loja referente à entrega #${activeRequest?.id ? String(activeRequest.id).slice(0, 8) : "--------"}.`
     );
     const waUrl = waNumber ? `https://wa.me/${waNumber}?text=${waMessage}` : "";
     const driverCode =
@@ -313,7 +313,7 @@ export const AssignedDriverCard = ({ activeRequest, onCancelRequest }: AssignedD
               {statusHeading}
             </CardTitle>
             <Badge className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-mono font-bold">
-              Entrega #{activeRequest.id.slice(0, 8)}
+              Entrega #{activeRequest?.id ? String(activeRequest.id).slice(0, 8) : "--------"}
             </Badge>
           </div>
         </CardHeader>
