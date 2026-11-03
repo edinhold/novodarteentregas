@@ -1,6 +1,7 @@
 import { notifyAvailableDrivers } from "@/lib/push";
 import { executeStoreDeliveryCancellation } from "@/lib/cancelStoreDelivery";
 import AssignedDriverCard from "@/components/store/AssignedDriverCard";
+import MapErrorBoundary from "@/components/MapErrorBoundary";
 import { DriverPhoto } from "@/components/DriverPhoto";
 import { normalizeWhatsAppNumber, formatPhoneNumber } from "@/lib/phoneUtils";
 import { useState, useEffect, useRef, useCallback } from "react";
@@ -188,7 +189,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
             full_name: d.full_name || prof?.full_name || "Motorista",
             phone: d.phone || prof?.phone || "",
             photo_url: d.photo_url || prof?.avatar_url || null,
-            driver_code: d.driver_code || `MOT-${(d.user_id || d.id || "").slice(0, 5).toUpperCase()}`,
+            driver_code: d.driver_code || `MOT-${String(d.user_id || d.id || "").slice(0, 5).toUpperCase()}`,
             vehicle_plate: d.vehicle_plate || "Não informada",
             vehicle_type: d.vehicle_type || "Moto",
           };
@@ -202,7 +203,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
               full_name: p.full_name || "Motorista",
               phone: p.phone || "",
               photo_url: p.avatar_url || null,
-              driver_code: `MOT-${p.id.slice(0, 5).toUpperCase()}`,
+              driver_code: `MOT-${String(p?.id || "").slice(0, 5).toUpperCase()}`,
               vehicle_plate: "Não informada",
               vehicle_type: "Moto",
             });
@@ -396,11 +397,13 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
     }
   };
 
-  const visibleRequests = (requests || []).filter((r: any) => {
-    if (r.hidden_by_store) return false;
+  const visibleRequests = (Array.isArray(requests) ? requests : []).filter((r: any) => {
+    if (!r || r.hidden_by_store) return false;
     if (historyPeriodFilter === "all") return true;
+    if (!r.created_at) return true;
 
     const reqDate = new Date(r.created_at).getTime();
+    if (isNaN(reqDate)) return true;
     const now = Date.now();
 
     if (historyPeriodFilter === "today") {
@@ -1054,17 +1057,25 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
   // Update store marker
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !storeLat || !storeLng) return;
+    if (!map || !isValidCoordinate(storeLat, storeLng)) return;
 
-    if (storeMarkerRef.current) map.removeLayer(storeMarkerRef.current);
+    try {
+      if (storeMarkerRef.current) {
+        try {
+          map.removeLayer(storeMarkerRef.current);
+        } catch {}
+      }
 
-    storeMarkerRef.current = L.marker([storeLat, storeLng], { icon: storeIcon })
-      .addTo(map)
-      .bindPopup(`<b>🏪 ${restaurant?.name || "Sua Loja"}</b>`);
+      storeMarkerRef.current = L.marker([storeLat, storeLng], { icon: storeIcon })
+        .addTo(map)
+        .bindPopup(`<b>🏪 ${restaurant?.name || "Sua Loja"}</b>`);
 
-    // Only set view if not manual dragging or searching
-    if (!deliveryLatLng && !searchingAddress) {
-      map.setView([storeLat, storeLng], map.getZoom());
+      // Only set view if not manual dragging or searching
+      if (!deliveryLatLng && !searchingAddress) {
+        map.setView([storeLat, storeLng], map.getZoom());
+      }
+    } catch (err) {
+      console.warn("[CallDriverTab] Erro ao atualizar marcador da loja:", err);
     }
   }, [storeLat, storeLng, restaurant?.name]);
 
@@ -1073,64 +1084,74 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
     const map = mapRef.current;
     if (!map) return;
 
-    if (deliveryMarkerRef.current) {
-      map.removeLayer(deliveryMarkerRef.current);
-      deliveryMarkerRef.current = null;
-    }
-    if (routeLineRef.current) {
-      map.removeLayer(routeLineRef.current);
-      routeLineRef.current = null;
-    }
+    try {
+      if (deliveryMarkerRef.current) {
+        try {
+          map.removeLayer(deliveryMarkerRef.current);
+        } catch {}
+        deliveryMarkerRef.current = null;
+      }
+      if (routeLineRef.current) {
+        try {
+          map.removeLayer(routeLineRef.current);
+        } catch {}
+        routeLineRef.current = null;
+      }
 
-    if (deliveryLatLng) {
-      deliveryMarkerRef.current = L.marker(deliveryLatLng, { icon: deliveryIcon, draggable: true })
-        .addTo(map)
-        .bindPopup("<b>📍 Ponto de Entrega</b><br><small>Arraste para ajustar</small>")
-        .openPopup();
+      if (deliveryLatLng && isValidCoordinate(deliveryLatLng[0], deliveryLatLng[1])) {
+        deliveryMarkerRef.current = L.marker(deliveryLatLng, { icon: deliveryIcon, draggable: true })
+          .addTo(map)
+          .bindPopup("<b>📍 Ponto de Entrega</b><br><small>Arraste para ajustar</small>")
+          .openPopup();
 
-      // Reverse geocode on drag end
-      deliveryMarkerRef.current.on("dragend", async () => {
-        const pos = deliveryMarkerRef.current?.getLatLng();
-        if (pos) {
-          setDeliveryLatLng([pos.lat, pos.lng]);
-          setManualDistanceEnabled(false);
-          
+        // Reverse geocode on drag end
+        deliveryMarkerRef.current.on("dragend", async () => {
           try {
-            const parsed = await reverseGeocodeMapbox(pos.lat, pos.lng);
-            if (parsed?.fullAddress) {
-              setCallForm(f => ({
-                ...f,
-                delivery: parsed.fullAddress,
-                delivery_number: parsed.number || f.delivery_number,
-              }));
+            const pos = deliveryMarkerRef.current?.getLatLng();
+            if (pos && isValidCoordinate(pos.lat, pos.lng)) {
+              setDeliveryLatLng([pos.lat, pos.lng]);
+              setManualDistanceEnabled(false);
+              
+              const parsed = await reverseGeocodeMapbox(pos.lat, pos.lng);
+              if (parsed?.fullAddress) {
+                setCallForm(f => ({
+                  ...f,
+                  delivery: parsed.fullAddress,
+                  delivery_number: parsed.number || f.delivery_number,
+                }));
+              }
             }
           } catch (err) {
             console.error("Marker drag geocode error:", err);
           }
+        });
+
+        if (isValidCoordinate(storeLat, storeLng)) {
+          const lineCoords = routeCoords.length > 0
+            ? routeCoords
+            : [[storeLat, storeLng] as [number, number], deliveryLatLng];
+
+          const profileColors: Record<RouteProfile, string> = {
+            driving: "hsl(var(--primary))",
+            cycling: "#22c55e",
+            walking: "#f59e0b",
+          };
+
+          routeLineRef.current = L.polyline(lineCoords, {
+            color: routeCoords.length > 0 ? profileColors[routeProfile] : "#94a3b8",
+            weight: routeCoords.length > 0 ? 5 : 3,
+            dashArray: routeCoords.length > 0 ? undefined : "8 4",
+            opacity: 0.85,
+          }).addTo(map);
+
+          const bounds = routeLineRef.current.getBounds();
+          if (bounds.isValid()) {
+            map.fitBounds(bounds, { padding: [40, 40] });
+          }
         }
-      });
-
-      if (storeLat && storeLng) {
-        const lineCoords = routeCoords.length > 0
-          ? routeCoords
-          : [[storeLat, storeLng] as [number, number], deliveryLatLng];
-
-        const profileColors: Record<RouteProfile, string> = {
-          driving: "hsl(var(--primary))",
-          cycling: "#22c55e",
-          walking: "#f59e0b",
-        };
-
-        routeLineRef.current = L.polyline(lineCoords, {
-          color: routeCoords.length > 0 ? profileColors[routeProfile] : "#94a3b8",
-          weight: routeCoords.length > 0 ? 5 : 3,
-          dashArray: routeCoords.length > 0 ? undefined : "8 4",
-          opacity: 0.85,
-        }).addTo(map);
-
-        const bounds = routeLineRef.current.getBounds();
-        map.fitBounds(bounds, { padding: [40, 40] });
       }
+    } catch (err) {
+      console.warn("[CallDriverTab] Erro no efeito de rota de entrega:", err);
     }
   }, [deliveryLatLng, storeLat, storeLng, routeCoords, routeProfile]);
 
@@ -1146,35 +1167,52 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
     const map = mapRef.current;
     if (!map) return;
 
-    driverMarkersRef.current.forEach(m => map.removeLayer(m));
-    driverMarkersRef.current = [];
+    try {
+      driverMarkersRef.current.forEach((m) => {
+        try {
+          map.removeLayer(m);
+        } catch {}
+      });
+      driverMarkersRef.current = [];
 
-    let nearest: typeof nearestDriverInfo = null;
+      let nearest: typeof nearestDriverInfo = null;
 
-    driverLocations.forEach((d: any) => {
-      const speedKmh = d.speed ? Math.round(d.speed * 3.6) : 0;
-      const marker = L.marker([d.latitude, d.longitude], { icon: driverMapIcon })
-        .addTo(map)
-        .bindPopup(`<b>🚴 Entregador</b><br/>${speedKmh > 0 ? `${speedKmh} km/h` : "Parado"}`);
-      driverMarkersRef.current.push(marker);
+      (Array.isArray(driverLocations) ? driverLocations : []).forEach((d: any) => {
+        if (!d) return;
+        const lat = Number(d.latitude);
+        const lng = Number(d.longitude);
+        if (!isValidCoordinate(lat, lng)) return;
 
-      if (storeLat && storeLng) {
-        const dist = haversineKm(storeLat, storeLng, d.latitude, d.longitude);
-        const avgSpeed = speedKmh > 3 ? speedKmh : 25;
-        const eta = (dist / avgSpeed) * 60;
-        if (!nearest || dist < nearest.distanceKm) {
-          nearest = { distanceKm: dist, etaMinutes: eta, speedKmh };
+        const speedKmh = d.speed ? Math.round(d.speed * 3.6) : 0;
+        try {
+          const marker = L.marker([lat, lng], { icon: driverMapIcon })
+            .addTo(map)
+            .bindPopup(`<b>🚴 Entregador</b><br/>${speedKmh > 0 ? `${speedKmh} km/h` : "Parado"}`);
+          driverMarkersRef.current.push(marker);
+        } catch (err) {
+          console.warn("[CallDriverTab] Erro ao criar marcador do motorista:", err);
         }
+
+        if (isValidCoordinate(storeLat, storeLng)) {
+          const dist = haversineKm(storeLat, storeLng, lat, lng);
+          const avgSpeed = speedKmh > 3 ? speedKmh : 25;
+          const eta = (dist / avgSpeed) * 60;
+          if (!nearest || dist < nearest.distanceKm) {
+            nearest = { distanceKm: dist, etaMinutes: eta, speedKmh };
+          }
+        }
+      });
+
+      setNearestDriverInfo(nearest);
+
+      if (nearest && nearest.distanceKm <= 0.5 && !proximityAlertRef.current) {
+        proximityAlertRef.current = true;
+        toast.info("🚴 Entregador está a menos de 500m!", { duration: 5000 });
+      } else if (!nearest || nearest.distanceKm > 0.5) {
+        proximityAlertRef.current = false;
       }
-    });
-
-    setNearestDriverInfo(nearest);
-
-    if (nearest && nearest.distanceKm <= 0.5 && !proximityAlertRef.current) {
-      proximityAlertRef.current = true;
-      toast.info("🚴 Entregador está a menos de 500m!", { duration: 5000 });
-    } else if (!nearest || nearest.distanceKm > 0.5) {
-      proximityAlertRef.current = false;
+    } catch (e) {
+      console.warn("[CallDriverTab] Erro no efeito de motoristas:", e);
     }
   }, [driverLocations, storeLat, storeLng]);
 
@@ -1440,7 +1478,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
             <div className="grid grid-cols-3 gap-2">
               <div className="rounded-lg bg-muted/50 p-2.5 text-center">
                 <Route className="w-4 h-4 mx-auto mb-1 text-primary" />
-                <p className="text-sm font-bold">{distanceKm.toFixed(1)} km</p>
+                <p className="text-sm font-bold">{(distanceKm || 0).toFixed(1)} km</p>
                 <p className="text-[10px] text-muted-foreground">
                   {distanceSource === "osrm" ? "Por rota" : distanceSource === "manual" ? "Manual" : "Aprox."}
                 </p>
@@ -1479,7 +1517,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
                 <p className="text-lg font-bold text-primary">
                   {nearestDriverInfo.distanceKm < 1
                     ? `${Math.round(nearestDriverInfo.distanceKm * 1000)}m`
-                    : `${nearestDriverInfo.distanceKm.toFixed(1)}km`}
+                    : `${(nearestDriverInfo.distanceKm || 0).toFixed(1)}km`}
                 </p>
                 <p className="text-[10px] text-muted-foreground">Distância</p>
               </div>
@@ -1677,7 +1715,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
               <div className="flex-1">
                 <p className="text-sm font-semibold">Valor da corrida: <span className="text-primary">R$ {(deliveryCost ?? 0).toFixed(2).replace(".", ",")}</span></p>
                 <p className="text-xs text-muted-foreground">
-                  Taxa fixa R$ {baseFee.toFixed(2).replace(".", ",")} + {distanceKm.toFixed(1)} km × R$ {feePerKm.toFixed(2).replace(".", ",")} = R$ {(feePerKm * distanceKm).toFixed(2).replace(".", ",")}
+                  Taxa fixa R$ {(baseFee || 0).toFixed(2).replace(".", ",")} + {(distanceKm || 0).toFixed(1)} km × R$ {(feePerKm || 0).toFixed(2).replace(".", ",")} = R$ {((feePerKm || 0) * (distanceKm || 0)).toFixed(2).replace(".", ",")}
                 </p>
                 <div className="flex items-center gap-2 mt-1">
                   <Route className="w-3 h-3 text-muted-foreground" />
@@ -1841,10 +1879,10 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
                     <div className="flex justify-between items-start gap-2 flex-wrap pb-2 border-b border-border/40">
                       <div className="space-y-0.5">
                         <div className="flex items-center gap-2">
-                          <span className="text-sm font-extrabold font-mono text-primary">#{r.id.slice(0, 8)}</span>
+                          <span className="text-sm font-extrabold font-mono text-primary">#{r?.id ? String(r.id).slice(0, 8) : "--------"}</span>
                           <span className="text-xs text-muted-foreground font-medium flex items-center gap-1">
                             <Clock className="w-3.5 h-3.5" />
-                            {new Date(r.created_at).toLocaleDateString("pt-BR")} às {new Date(r.created_at).toLocaleTimeString("pt-BR", { hour: '2-digit', minute: '2-digit' })}
+                            {r?.created_at ? `${new Date(r.created_at).toLocaleDateString("pt-BR")} às ${new Date(r.created_at).toLocaleTimeString("pt-BR", { hour: '2-digit', minute: '2-digit' })}` : "Hoje"}
                           </span>
                         </div>
                       </div>
@@ -1903,7 +1941,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
                           {driverPhone && (
                             <div className="flex items-center gap-1.5 sm:ml-auto">
                               <a
-                                href={`https://wa.me/${normalizeWhatsAppNumber(driverPhone)}?text=${encodeURIComponent(`Olá ${driverName}, sou da loja referente à entrega #${r.id.slice(0, 8)}.`)}`}
+                                href={`https://wa.me/${normalizeWhatsAppNumber(driverPhone)}?text=${encodeURIComponent(`Olá ${driverName}, sou da loja referente à entrega #${r?.id ? String(r.id).slice(0, 8) : "--------"}.`)}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold bg-[#25D366] hover:bg-[#20bd5a] text-white rounded-lg shadow-xs transition-colors"
@@ -2217,4 +2255,12 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
   );
 };
 
-export default CallDriverTab;
+const SafeCallDriverTab = (props: CallDriverTabProps) => {
+  return (
+    <MapErrorBoundary fallbackHeight="500px">
+      <CallDriverTab {...props} />
+    </MapErrorBoundary>
+  );
+};
+
+export default SafeCallDriverTab;
