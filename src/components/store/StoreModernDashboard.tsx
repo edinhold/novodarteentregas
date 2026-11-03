@@ -30,6 +30,7 @@ import { DEFAULT_CENTER } from "@/config/maps";
 import { notifyAvailableDrivers } from "@/lib/push";
 import { useDriverLocations } from "@/hooks/useDriverLocations";
 import StoreMiniTrackingMap from "./StoreMiniTrackingMap";
+import { AssignedDriverCard } from "./AssignedDriverCard";
 import { normalizeWhatsAppNumber, formatPhoneNumber } from "@/lib/phoneUtils";
 import { DriverPhoto } from "@/components/DriverPhoto";
 import { Badge } from "@/components/ui/badge";
@@ -98,7 +99,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
   const suggestionsRef = useRef<HTMLDivElement>(null);
 
   // Estado das Abas de Filtragem de Entregas Ativas
-  const [statusFilter, setStatusFilter] = useState<"pending" | "accepted" | "picked_up" | "all">("pending");
+  const [statusFilter, setStatusFilter] = useState<"pending" | "accepted" | "picked_up" | "cancelled" | "all">("pending");
 
   // Estado para Modal de Detalhes da Corrida
   const [selectedOrderDetails, setSelectedOrderDetails] = useState<any | null>(null);
@@ -121,7 +122,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
       const { data: tableData } = await supabase.from("delivery_config").select("*").limit(1).maybeSingle();
       return tableData;
     },
-    staleTime: 1000 * 60 * 5,
+    staleTime: 1000 * 30, // 30s para atualizar taxas com rapidez caso o admin altere
   });
 
   // Fecha sugestões ao clicar fora
@@ -231,7 +232,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
   }, [addressInput, streetNumber]);
 
   // Coordenadas resolvidas da loja (com fallback inteligente e auto-geocodificação se nulas no banco)
-  const [storeCoords, setStoreCoords] = useState<{ lat: number; lng: number } | null>(() => {
+  const [storeCoords, setStoreCoords] = useState<{ lat: number; lng: number }>(() => {
     if (restaurant?.latitude && restaurant?.longitude) {
       const latNum = Number(restaurant.latitude);
       const lngNum = Number(restaurant.longitude);
@@ -239,7 +240,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
         return { lat: latNum, lng: lngNum };
       }
     }
-    return null;
+    return { lat: DEFAULT_CENTER.lat, lng: DEFAULT_CENTER.lng };
   });
 
   // Tenta geocodificar o endereço da loja caso latitude/longitude estejam nulos no banco
@@ -466,9 +467,13 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
       }
     }
 
-    const fullAddress = streetNumber.trim()
-      ? `${addressInput.trim()}, ${streetNumber.trim()} - Primavera do Leste`
-      : `${addressInput.trim()} - Primavera do Leste`;
+    let cleanAddress = addressInput.trim();
+    // Remove sufixos duplicados de cidade se já estiverem presentes
+    cleanAddress = cleanAddress.replace(/,?\s*-?\s*Primavera do Leste(\s*-?\s*MT)?(\s*-?\s*Brasil)?/gi, "").trim();
+
+    const fullAddress = streetNumber.trim() && !cleanAddress.includes(streetNumber.trim())
+      ? `${cleanAddress}, ${streetNumber.trim()} - Primavera do Leste`
+      : `${cleanAddress} - Primavera do Leste`;
 
     // Compila observações completas
     const notesParts: string[] = [];
@@ -742,7 +747,14 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
                   <input
                     type="text"
                     value={addressInput}
-                    onChange={(e) => setAddressInput(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setAddressInput(val);
+                      if (!val.trim()) {
+                        setDeliveryCoordinates(null);
+                        setEstimatedDistanceKm(0);
+                      }
+                    }}
                     onFocus={() => addressSuggestions.length > 0 && setShowSuggestions(true)}
                     onBlur={handleAddressBlur}
                     placeholder="Rua, avenida ou bairro em Primavera..."
@@ -1329,7 +1341,28 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
                     <p className="text-xs text-foreground">{selectedOrderDetails.notes}</p>
                   </div>
                 )}
+                {(selectedOrderDetails.credit_cost || selectedOrderDetails.driver_fee) && (
+                  <div className="flex items-center justify-between pt-1.5 border-t border-border/40">
+                    <span className="text-[11px] font-semibold text-zinc-400">Valor da Corrida</span>
+                    <span className="text-sm font-black text-[#EA580C]">
+                      R$ {Number(selectedOrderDetails.credit_cost || selectedOrderDetails.driver_fee || 0).toFixed(2).replace(".", ",")}
+                    </span>
+                  </div>
+                )}
               </div>
+
+              {/* Informações completas do motorista vinculado (se já aceito) */}
+              {selectedOrderDetails.driver_id && selectedOrderDetails.status !== "cancelled" && (
+                <div className="pt-1">
+                  <AssignedDriverCard
+                    activeRequest={selectedOrderDetails}
+                    onCancelRequest={(reqId, dName, isAcc, dDetails) => {
+                      setSelectedOrderDetails(null);
+                      onOpenCancelModal(reqId, dName, isAcc, dDetails);
+                    }}
+                  />
+                </div>
+              )}
 
               {/* Botão de Cancelamento (apenas se ainda NÃO estiver cancelada) */}
               {selectedOrderDetails.status !== "cancelled" && (
