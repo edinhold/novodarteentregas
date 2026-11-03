@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -42,7 +42,7 @@ const FeesConfigTab = () => {
     dynamic_fee_per_km: "2.5",
   });
 
-  const { data: config } = useQuery({
+  const { data: rawConfig } = useQuery({
     queryKey: ["delivery-config"],
     queryFn: async () => {
       const { data, error } = await supabase.from("delivery_config").select("*").limit(1).maybeSingle();
@@ -50,6 +50,11 @@ const FeesConfigTab = () => {
       return data;
     },
   });
+
+  const config = useMemo(() => {
+    if (!rawConfig) return null;
+    return Array.isArray(rawConfig) ? rawConfig[0] : rawConfig;
+  }, [rawConfig]);
 
   useEffect(() => {
     if (config) {

@@ -26,7 +26,7 @@ import {
   Route,
 } from "lucide-react";
 import { searchAddressSuggestions, geocodeAddress, calculateRoute } from "@/services/mapbox";
-import { DEFAULT_CENTER } from "@/config/maps";
+import { DEFAULT_CENTER, resolveStoreCoordinates } from "@/config/maps";
 import { notifyAvailableDrivers } from "@/lib/push";
 import { useDriverLocations } from "@/hooks/useDriverLocations";
 import StoreMiniTrackingMap from "./StoreMiniTrackingMap";
@@ -108,7 +108,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
   const { data: driverLocations = [] } = useDriverLocations();
 
   // Consulta de configuração de taxas da plataforma (Dynamic Pricing, Fee per km, Base fee)
-  const { data: deliveryConfig } = useQuery({
+  const { data: rawDeliveryConfig } = useQuery({
     queryKey: ["delivery-config"],
     queryFn: async () => {
       try {
@@ -120,10 +120,15 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
         console.warn("[StoreModernDashboard] Erro RPC get_public_delivery_config:", e);
       }
       const { data: tableData } = await supabase.from("delivery_config").select("*").limit(1).maybeSingle();
-      return tableData;
+      return Array.isArray(tableData) ? tableData[0] : tableData;
     },
     staleTime: 1000 * 30, // 30s para atualizar taxas com rapidez caso o admin altere
   });
+
+  const deliveryConfig = useMemo(() => {
+    if (!rawDeliveryConfig) return null;
+    return Array.isArray(rawDeliveryConfig) ? rawDeliveryConfig[0] : rawDeliveryConfig;
+  }, [rawDeliveryConfig]);
 
   // Fecha sugestões ao clicar fora
   useEffect(() => {
@@ -233,25 +238,15 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
 
   // Coordenadas resolvidas da loja (com fallback inteligente e auto-geocodificação se nulas no banco)
   const [storeCoords, setStoreCoords] = useState<{ lat: number; lng: number }>(() => {
-    if (restaurant?.latitude && restaurant?.longitude) {
-      const latNum = Number(restaurant.latitude);
-      const lngNum = Number(restaurant.longitude);
-      if (!isNaN(latNum) && !isNaN(lngNum) && latNum !== 0 && lngNum !== 0) {
-        return { lat: latNum, lng: lngNum };
-      }
-    }
-    return { lat: DEFAULT_CENTER.lat, lng: DEFAULT_CENTER.lng };
+    return resolveStoreCoordinates(restaurant);
   });
 
   // Tenta geocodificar o endereço da loja caso latitude/longitude estejam nulos no banco
   useEffect(() => {
-    if (restaurant?.latitude && restaurant?.longitude) {
-      const latNum = Number(restaurant.latitude);
-      const lngNum = Number(restaurant.longitude);
-      if (!isNaN(latNum) && !isNaN(lngNum) && latNum !== 0 && lngNum !== 0) {
-        setStoreCoords({ lat: latNum, lng: lngNum });
-        return;
-      }
+    const coords = resolveStoreCoordinates(restaurant);
+    if (coords.lat !== DEFAULT_CENTER.lat || coords.lng !== DEFAULT_CENTER.lng) {
+      setStoreCoords(coords);
+      return;
     }
 
     let isCancelled = false;
@@ -260,16 +255,16 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
         try {
           const parsed = await geocodeAddress(`${restaurant.address.trim()}, Primavera do Leste`);
           if (!isCancelled && parsed?.coordinates) {
-            const coords = { lat: parsed.coordinates.latitude, lng: parsed.coordinates.longitude };
-            setStoreCoords(coords);
+            const resolved = { lat: parsed.coordinates.latitude, lng: parsed.coordinates.longitude };
+            setStoreCoords(resolved);
 
             // Persiste no banco de dados para acelerar todas as próximas consultas da loja
             if (restaurant?.id) {
               void supabase
                 .from("restaurants")
                 .update({
-                  latitude: coords.lat,
-                  longitude: coords.lng,
+                  latitude: resolved.lat,
+                  longitude: resolved.lng,
                   updated_at: new Date().toISOString(),
                 })
                 .eq("id", restaurant.id)
@@ -365,10 +360,10 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
       };
     }
 
-    const baseFee = Number(deliveryConfig?.base_fee ?? 5);
+    const baseFee = Number(deliveryConfig?.base_fee ?? 5.3);
     const dynamicEnabled = Boolean(deliveryConfig?.dynamic_pricing_enabled);
     const dynamicFee = Number(deliveryConfig?.dynamic_fee_per_km ?? 0);
-    const feePerKm = dynamicEnabled && dynamicFee > 0 ? dynamicFee : Number(deliveryConfig?.fee_per_km ?? 1.5);
+    const feePerKm = dynamicEnabled && dynamicFee > 0 ? dynamicFee : Number(deliveryConfig?.fee_per_km ?? 1.7);
     const minKm = Number(deliveryConfig?.min_km ?? 0);
     const maxKm = Number(deliveryConfig?.max_km ?? 0);
     const roundKmUp = Boolean(deliveryConfig?.round_km_up ?? false);
@@ -453,7 +448,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
           if (storeCoords) {
             try {
               const r = await calculateRoute(storeCoords, finalCoordinates, { profile: "driving" });
-              if (r?.distanceKm) {
+              if (r?.distanceKm && r.distanceKm > 0) {
                 finalDistance = r.distanceKm;
                 setEstimatedDistanceKm(r.distanceKm);
               }
@@ -464,6 +459,34 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
         }
       } catch (geoErr) {
         console.warn("[StoreModernDashboard] Geocode no submit:", geoErr);
+      }
+    }
+
+    // Se as coordenadas de entrega existem mas a distância ainda não foi calculada (ou rota em andamento)
+    if (finalCoordinates && (finalDistance <= 0 || !finalDistance) && storeCoords) {
+      try {
+        const r = await calculateRoute(storeCoords, finalCoordinates, { profile: "driving" });
+        if (r?.distanceKm && r.distanceKm > 0) {
+          finalDistance = r.distanceKm;
+          setEstimatedDistanceKm(r.distanceKm);
+        }
+      } catch {
+        // Fallback viário geodésico calibrado
+      }
+
+      if (finalDistance <= 0 || !finalDistance) {
+        const R = 6371;
+        const dLat = ((finalCoordinates.lat - storeCoords.lat) * Math.PI) / 180;
+        const dLon = ((finalCoordinates.lng - storeCoords.lng) * Math.PI) / 180;
+        const a =
+          Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+          Math.cos((storeCoords.lat * Math.PI) / 180) *
+            Math.cos((finalCoordinates.lat * Math.PI) / 180) *
+            Math.sin(dLon / 2) *
+            Math.sin(dLon / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        finalDistance = Math.max(1.0, Number((R * c * 1.30).toFixed(1)));
+        setEstimatedDistanceKm(finalDistance);
       }
     }
 
@@ -488,6 +511,21 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
     // Passa a quilometragem viária real calculada para o backend
     const distanceToSend = finalDistance > 0 ? finalDistance : (fareDetails.rawKm > 0 ? fareDetails.rawKm : 2.5);
 
+    const roundKmUp = Boolean(deliveryConfig?.round_km_up ?? false);
+    const minKm = Number(deliveryConfig?.min_km ?? 0);
+    const maxKm = Number(deliveryConfig?.max_km ?? 0);
+    const baseFee = Number(deliveryConfig?.base_fee ?? 5.3);
+    const dynamicEnabled = Boolean(deliveryConfig?.dynamic_pricing_enabled);
+    const dynamicFee = Number(deliveryConfig?.dynamic_fee_per_km ?? 0);
+    const feePerKm = dynamicEnabled && dynamicFee > 0 ? dynamicFee : Number(deliveryConfig?.fee_per_km ?? 1.7);
+
+    let effectiveKm = distanceToSend;
+    if (roundKmUp && effectiveKm > 0) effectiveKm = Math.ceil(effectiveKm);
+    if (minKm > 0 && effectiveKm < minKm) effectiveKm = minKm;
+    if (maxKm > 0 && effectiveKm > maxKm) effectiveKm = maxKm;
+
+    const finalCalculatedCost = fareDetails.totalCost ?? (baseFee + (effectiveKm * feePerKm));
+
     setIsSubmitting(true);
     try {
       const { data: requestId, error } = await supabase.rpc("deduct_credits_for_delivery", {
@@ -506,7 +544,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
         void notifyAvailableDrivers(String(requestId));
       }
 
-      toast.success(`🚀 Entrega solicitada! Valor: R$ ${(fareDetails.totalCost ?? 0).toFixed(2).replace(".", ",")}. Notificando motoristas...`);
+      toast.success(`🚀 Entrega solicitada! Valor: R$ ${finalCalculatedCost.toFixed(2).replace(".", ",")}. Notificando motoristas...`);
 
       // Limpa formulário
       setRecipientName("");

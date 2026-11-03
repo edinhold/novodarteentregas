@@ -21,7 +21,7 @@ import ReportLocationButton from "@/components/ReportLocationButton";
 import ChatWidget from "@/components/ChatWidget";
 import { useDriverLocations } from "@/hooks/useDriverLocations";
 import L from "leaflet";
-import { MAP_LAYERS } from "@/config/maps";
+import { MAP_LAYERS, resolveStoreCoordinates } from "@/config/maps";
 import { getBestLocation, isValidCoordinate } from "@/utils/geolocation";
 import {
   searchAddressSuggestions,
@@ -495,19 +495,25 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
     },
   });
 
-  // Delivery config loaded for price calculations
-  const configLoaded = !!deliveryConfig;
-  const baseFee = Number((deliveryConfig as any)?.base_fee ?? 0);
-  const isDynamicPricing = !!(deliveryConfig as any)?.dynamic_pricing_enabled && Number((deliveryConfig as any)?.dynamic_fee_per_km ?? 0) > 0;
-  const feePerKm = isDynamicPricing 
-    ? Number((deliveryConfig as any).dynamic_fee_per_km) 
-    : Number((deliveryConfig as any)?.fee_per_km ?? 0);
-  const minKm = Number((deliveryConfig as any)?.min_km ?? 0);
-  const maxKm = Number((deliveryConfig as any)?.max_km ?? 0);
-  const roundKmUp = !!(deliveryConfig as any)?.round_km_up;
+  const configObj = useMemo(() => {
+    if (!deliveryConfig) return null;
+    return Array.isArray(deliveryConfig) ? deliveryConfig[0] : deliveryConfig;
+  }, [deliveryConfig]);
 
-  const storeLat = storeLatLng?.[0] ?? restaurant?.latitude;
-  const storeLng = storeLatLng?.[1] ?? restaurant?.longitude;
+  // Delivery config loaded for price calculations
+  const configLoaded = !!configObj;
+  const baseFee = Number(configObj?.base_fee ?? 5.3);
+  const isDynamicPricing = !!configObj?.dynamic_pricing_enabled && Number(configObj?.dynamic_fee_per_km ?? 0) > 0;
+  const feePerKm = isDynamicPricing 
+    ? Number(configObj.dynamic_fee_per_km) 
+    : Number(configObj?.fee_per_km ?? 1.7);
+  const minKm = Number(configObj?.min_km ?? 0);
+  const maxKm = Number(configObj?.max_km ?? 0);
+  const roundKmUp = !!configObj?.round_km_up;
+
+  const fallbackCoords = resolveStoreCoordinates(restaurant);
+  const storeLat = storeLatLng?.[0] ?? (restaurant?.latitude ? Number(restaurant.latitude) : fallbackCoords.lat);
+  const storeLng = storeLatLng?.[1] ?? (restaurant?.longitude ? Number(restaurant.longitude) : fallbackCoords.lng);
 
   // Distance logic: manual override > OSRM road > Haversine fallback
   const autoDistanceKm = roadDistanceKm > 0
