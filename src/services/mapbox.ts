@@ -76,6 +76,119 @@ export interface MapboxParsedAddress {
   confidence?: string;
   /** Indica se pertence comprovadamente a Primavera do Leste - MT */
   isValidPrimavera: boolean;
+  /** Categoria identificada do local: condomínio, comércio/supermercado, avenida, rua, etc. */
+  placeCategory?: string;
+  /** Rótulo amigável da categoria (ex: "Condomínio", "Supermercado / Comércio", "Avenida", "Rua") */
+  placeCategoryLabel?: string;
+}
+
+export type LocationCategoryType =
+  | "condominium"
+  | "commercial"
+  | "avenue"
+  | "street"
+  | "neighborhood"
+  | "other";
+
+export interface LocationCategoryInfo {
+  type: LocationCategoryType;
+  label: string;
+  badge: string;
+  iconName: "building" | "store" | "navigation" | "map-pin" | "home";
+}
+
+/**
+ * Identifica com precisão se o endereço é Condomínio, Supermercado/Comércio, Avenida, Rua, etc.
+ */
+export function detectLocationCategory(
+  name: string,
+  fullAddress?: string,
+  featureType?: string,
+  extra?: { osmClass?: string; osmType?: string; poiCategory?: string }
+): LocationCategoryInfo {
+  const text = `${name || ""} ${fullAddress || ""}`.toLowerCase();
+
+  // 1. Condomínio e Residenciais Fechados
+  if (
+    /\b(condom[íi]nio|residencial|edif[íi]cio|ed\.?|cond\.?|res\.?|village|ville|portal|parque dos buritis|cidade jardim|ch[áa]caras|vila|residence|apartamento|apto|bloco|torre)\b/i.test(
+      text
+    ) ||
+    extra?.osmType === "residential" ||
+    featureType === "residential"
+  ) {
+    return {
+      type: "condominium",
+      label: "Condomínio / Residencial",
+      badge: "Condomínio",
+      iconName: "building",
+    };
+  }
+
+  // 2. Supermercados, Mercados, Comércios, Farmácias, Centros Comerciais
+  if (
+    /\b(supermercado|mercado|atacad[ãa]o|hipermercado|shopping|loja|farm[áa]cia|drogaria|panificadora|padaria|a[çc]ougue|posto|hospital|cl[íi]nica|centro m[ée]dico|restaurante|lanchonete|pizzaria|barbearia|oficina|distribuidora|marmoraria|concession[áa]ria|com[ée]rcio|agropecu[áa]ria|auto pe[çc]as|materiais de constru[çc][ãa]o|hotel|pousada)\b/i.test(
+      text
+    ) ||
+    featureType === "poi" ||
+    extra?.osmClass === "shop" ||
+    extra?.osmClass === "amenity" ||
+    extra?.poiCategory?.includes("grocery") ||
+    extra?.poiCategory?.includes("supermarket")
+  ) {
+    return {
+      type: "commercial",
+      label: "Supermercado / Comércio",
+      badge: "Supermercado / Comércio",
+      iconName: "store",
+    };
+  }
+
+  // 3. Avenidas e Rodovias
+  if (
+    /\b(avenida|av\.?|av\b|rodovia|rod\.?|rod\b|br-\d+|mt-\d+)\b/i.test(name) ||
+    /\b(avenida|av\.?|av\b)\b/i.test(text)
+  ) {
+    return {
+      type: "avenue",
+      label: "Avenida / Rodovia",
+      badge: "Avenida",
+      iconName: "navigation",
+    };
+  }
+
+  // 4. Ruas, Travessas, Alamedas
+  if (
+    /\b(rua|r\.?|r\b|travessa|tv\.?|alameda|al\.?|beco|estrada)\b/i.test(name) ||
+    /\b(rua|r\.?|travessa|alameda)\b/i.test(text)
+  ) {
+    return {
+      type: "street",
+      label: "Rua",
+      badge: "Rua",
+      iconName: "map-pin",
+    };
+  }
+
+  // 5. Bairros e Loteamentos
+  if (
+    featureType === "neighborhood" ||
+    featureType === "locality" ||
+    /\b(bairro|jardim|jd\.?|parque|pq\.?|setor|centro)\b/i.test(name)
+  ) {
+    return {
+      type: "neighborhood",
+      label: "Bairro / Setor",
+      badge: "Bairro",
+      iconName: "home",
+    };
+  }
+
+  return {
+    type: "other",
+    label: "Endereço",
+    badge: "Endereço",
+    iconName: "map-pin",
+  };
 }
 
 /** Interface da resposta de rota oficial da Mapbox Directions v5 */
@@ -364,6 +477,12 @@ export function parseMapboxFeature(
       : feature.properties.full_address || feature.properties.name || "";
 
   const validation = validatePrimaveraFeature(feature);
+  const categoryInfo = detectLocationCategory(
+    feature.properties.name || street,
+    fullAddress,
+    feature.properties.feature_type,
+    { poiCategory: (feature.properties as any).poi_category }
+  );
 
   return {
     fullAddress,
@@ -384,6 +503,8 @@ export function parseMapboxFeature(
     featureType: feature.properties.feature_type || "address",
     confidence: feature.properties.match_code?.confidence,
     isValidPrimavera: validation.valid,
+    placeCategory: categoryInfo.type,
+    placeCategoryLabel: categoryInfo.badge,
   };
 }
 
@@ -435,6 +556,10 @@ async function fetchNominatimSuggestions(
             const road = addr.road || addr.pedestrian || addr.suburb || (item.display_name ? item.display_name.split(",")[0] : query);
             const suburb = addr.suburb || addr.neighbourhood || addr.city_district || "";
             const hNum = addr.house_number || detectedNumber || "";
+            const cat = detectLocationCategory(road || item.display_name, item.display_name, item.type, {
+              osmClass: item.class,
+              osmType: item.type,
+            });
             results.push({
               fullAddress: item.display_name || `${road}${hNum ? ", " + hNum : ""}, Primavera do Leste - MT`,
               street: road,
@@ -450,6 +575,8 @@ async function fetchNominatimSuggestions(
               mapboxId: `osm-${item.place_id || item.osm_id || Math.random().toString(36).substring(7)}`,
               featureType: "address",
               isValidPrimavera: true,
+              placeCategory: cat.type,
+              placeCategoryLabel: cat.badge,
             });
           }
         }

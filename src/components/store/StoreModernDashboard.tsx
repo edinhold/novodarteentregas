@@ -24,8 +24,13 @@ import {
   ArrowLeft,
   DollarSign,
   Route,
+  Building2,
+  ShoppingBag,
+  Car,
+  Home,
+  Store as StoreIcon,
 } from "lucide-react";
-import { searchAddressSuggestions, geocodeAddress, calculateRoute } from "@/services/mapbox";
+import { searchAddressSuggestions, geocodeAddress, calculateRoute, detectLocationCategory } from "@/services/mapbox";
 import { DEFAULT_CENTER, resolveStoreCoordinates } from "@/config/maps";
 import { isValidCoordinate } from "@/utils/geolocation";
 import { notifyAvailableDrivers } from "@/lib/push";
@@ -48,7 +53,155 @@ export interface AddressSuggestionItem {
   neighborhood?: string;
   lat: number;
   lng: number;
+  placeCategory?: string;
+  placeCategoryLabel?: string;
 }
+
+interface ActiveDriverInfoRowProps {
+  request: any;
+  cachedDriver?: any;
+  onOpenCancelModal: (requestId: string, driverName?: string | null, isAccepted?: boolean, driverDetails?: any | null) => void;
+  isDark?: boolean;
+}
+
+const ActiveDriverInfoRow: React.FC<ActiveDriverInfoRowProps> = ({
+  request,
+  cachedDriver,
+  onOpenCancelModal,
+  isDark = false,
+}) => {
+  const requestId = request?.id;
+  const driverId = request?.driver_id;
+
+  // Busca dados oficiais via RPC get_delivery_driver_info se faltar foto, placa ou telefone
+  const { data: rpcDriver } = useQuery({
+    queryKey: ["active-card-driver", requestId, driverId],
+    queryFn: async () => {
+      if (!requestId) return null;
+      try {
+        const { data, error } = await supabase.rpc("get_delivery_driver_info", { p_request_id: requestId });
+        if (!error && data) {
+          const rows = data as any[];
+          return Array.isArray(rows) ? rows[0] : rows;
+        }
+      } catch (e) {
+        console.warn("[ActiveDriverInfoRow] RPC error:", e);
+      }
+      return null;
+    },
+    enabled: Boolean(requestId && (!cachedDriver?.photo_url || !cachedDriver?.vehicle_plate || !cachedDriver?.phone)),
+    staleTime: 1000 * 60,
+  });
+
+  const driver = rpcDriver || cachedDriver;
+  const driverName = driver?.full_name || "Motorista Parceiro";
+  const driverPhoto = driver?.photo_url || null;
+  const vehiclePlate = driver?.vehicle_plate || null;
+  const vehicleType = driver?.vehicle_type || "Moto";
+  const driverPhone = driver?.phone || null;
+  const driverCode = driver?.driver_code || null;
+  const driverUserId = driver?.user_id || driverId;
+
+  return (
+    <div
+      onClick={(e) => e.stopPropagation()}
+      className={`mt-2.5 p-3 rounded-xl border transition-all ${
+        isDark
+          ? "bg-zinc-900/90 border-zinc-700/80 text-white"
+          : "bg-orange-50/70 border-orange-200/80 text-zinc-900"
+      }`}
+    >
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        {/* Foto, Nome, Placa, Tipo de Veículo e Telefone */}
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="relative shrink-0">
+            <DriverPhoto
+              photoUrl={driverPhoto}
+              driverId={driverUserId}
+              alt={driverName}
+              className="w-12 h-12 rounded-full border-2 border-emerald-500 shadow-sm object-cover"
+            />
+            <span
+              className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-emerald-500 border-2 border-white dark:border-zinc-900 flex items-center justify-center shadow-xs"
+              title="Motorista Confirmado"
+            >
+              <CheckCircle2 className="w-2.5 h-2.5 text-white" />
+            </span>
+          </div>
+
+          <div className="min-w-0 space-y-1">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="font-extrabold text-sm text-foreground truncate">{driverName}</span>
+              <span className="text-[10px] font-bold py-0.5 px-1.5 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                {vehicleType}
+              </span>
+              {driverCode && (
+                <span className="text-[10px] font-mono text-muted-foreground font-semibold">
+                  ({driverCode})
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap text-xs">
+              <span className="font-mono font-bold text-xs bg-amber-500/15 text-amber-800 dark:text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 flex items-center gap-1 shadow-2xs">
+                <Car className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                <span>Placa: {vehiclePlate || "Não informada"}</span>
+              </span>
+
+              {driverPhone && (
+                <span className="text-muted-foreground font-semibold flex items-center gap-1">
+                  <Phone className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span>{formatPhoneNumber(driverPhone)}</span>
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Botões de Ação Direta: WhatsApp, Ligar e Cancelar */}
+        <div className="flex items-center gap-2 shrink-0 pt-1 sm:pt-0">
+          {driverPhone && (
+            <>
+              <a
+                href={`https://wa.me/${normalizeWhatsAppNumber(driverPhone)}?text=${encodeURIComponent(
+                  `Olá ${driverName}, sou da loja referente à entrega #${String(requestId).slice(0, 8)}.`
+                )}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold bg-[#25D366] hover:bg-[#20bd5a] text-white rounded-xl shadow-xs transition-colors"
+                title="Conversar no WhatsApp"
+              >
+                <MessageCircle className="w-3.5 h-3.5 fill-white" />
+                <span>WhatsApp</span>
+              </a>
+
+              <a
+                href={`tel:${driverPhone.replace(/\D/g, "")}`}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold bg-white dark:bg-zinc-800 hover:bg-muted border border-border rounded-xl transition-colors"
+                title="Ligar para o motorista"
+              >
+                <Phone className="w-3.5 h-3.5 text-emerald-600" />
+                <span className="hidden xs:inline">Ligar</span>
+              </a>
+            </>
+          )}
+
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => onOpenCancelModal(requestId, driverName, true, driver)}
+            className="text-red-600 border-red-300/70 hover:bg-red-500/10 hover:text-red-700 text-xs font-bold rounded-xl h-8 px-2.5"
+            title="Cancelar esta corrida"
+          >
+            <XCircle className="w-3.5 h-3.5 mr-1" />
+            <span>Cancelar</span>
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 interface StoreModernDashboardProps {
   user: any;
@@ -98,6 +251,68 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
   const [loadingRoute, setLoadingRoute] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const suggestionsRef = useRef<HTMLDivElement>(null);
+
+  // Categoria de local identificada com precisão (Condomínio, Supermercado/Comércio, Avenida, Rua, etc.)
+  const detectedCategory = useMemo(() => {
+    if (!addressInput || addressInput.trim().length < 2) return null;
+    return detectLocationCategory(addressInput.trim());
+  }, [addressInput]);
+
+  // Query para resolver dados do motorista aceito (nome, foto, telefone, placa)
+  const { data: driversList = [] } = useQuery({
+    queryKey: ["all-drivers-list-for-history"],
+    queryFn: async () => {
+      try {
+        const { data: driversData } = await supabase
+          .from("drivers")
+          .select("id, user_id, full_name, vehicle_plate, vehicle_type, phone, driver_code, photo_url");
+
+        const { data: profilesData } = await supabase
+          .from("profiles")
+          .select("id, full_name, phone, avatar_url");
+
+        const profilesMap = new Map((profilesData || []).map((p: any) => [p.id, p]));
+        const mergedDrivers = (driversData || []).map((d: any) => {
+          const prof = profilesMap.get(d.user_id) || profilesMap.get(d.id);
+          return {
+            ...d,
+            full_name: d.full_name || prof?.full_name || "Motorista Parceiro",
+            phone: d.phone || prof?.phone || "",
+            photo_url: d.photo_url || prof?.avatar_url || null,
+            driver_code: d.driver_code || `MOT-${String(d.user_id || d.id || "").slice(0, 5).toUpperCase()}`,
+            vehicle_plate: d.vehicle_plate || "Não informada",
+            vehicle_type: d.vehicle_type || "Moto",
+          };
+        });
+
+        (profilesData || []).forEach((p: any) => {
+          if (!mergedDrivers.some((d: any) => d.user_id === p.id || d.id === p.id)) {
+            mergedDrivers.push({
+              id: p.id,
+              user_id: p.id,
+              full_name: p.full_name || "Motorista Parceiro",
+              phone: p.phone || "",
+              photo_url: p.avatar_url || null,
+              driver_code: `MOT-${String(p?.id || "").slice(0, 5).toUpperCase()}`,
+              vehicle_plate: "Não informada",
+              vehicle_type: "Moto",
+            });
+          }
+        });
+
+        return mergedDrivers;
+      } catch (err) {
+        console.warn("[StoreModernDashboard] Error fetching drivers list:", err);
+        return [];
+      }
+    },
+    staleTime: 1000 * 60 * 2,
+  });
+
+  const getDriverInfo = (driverId: string | null | undefined) => {
+    if (!driverId) return null;
+    return driversList.find((d: any) => d.id === driverId || d.user_id === driverId) || null;
+  };
 
   // Estado das Abas de Filtragem de Entregas Ativas
   const [statusFilter, setStatusFilter] = useState<"pending" | "accepted" | "picked_up" | "cancelled" | "all">("pending");
@@ -168,6 +383,10 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
               const streetName = item.street || item.fullAddress.split(",")[0] || query;
               const neighborhood = item.neighborhood || "";
               const num = item.number || "";
+              const cat = item.placeCategory && item.placeCategoryLabel
+                ? { type: item.placeCategory, badge: item.placeCategoryLabel }
+                : detectLocationCategory(streetName, item.fullAddress);
+
               formatted.push({
                 id: item.mapboxId || `${item.coordinates.latitude},${item.coordinates.longitude}`,
                 title: num ? `${streetName}, ${num}` : streetName,
@@ -178,6 +397,8 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
                 neighborhood: neighborhood,
                 lat: item.coordinates.latitude,
                 lng: item.coordinates.longitude,
+                placeCategory: cat.type,
+                placeCategoryLabel: cat.badge,
               });
             }
           }
@@ -204,6 +425,10 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
                   if (!isNaN(latNum) && !isNaN(lngNum)) {
                     const alreadyExists = formatted.some(f => Math.abs(f.lat - latNum) < 0.0008 && Math.abs(f.lng - lngNum) < 0.0008);
                     if (!alreadyExists) {
+                      const cat = detectLocationCategory(road, n.display_name, n.type, {
+                        osmClass: n.class,
+                        osmType: n.type,
+                      });
                       formatted.push({
                         id: `nom-${n.place_id || n.osm_id}`,
                         title: houseNum ? `${road}, ${houseNum}` : road,
@@ -214,6 +439,8 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
                         neighborhood: suburb,
                         lat: latNum,
                         lng: lngNum,
+                        placeCategory: cat.type,
+                        placeCategoryLabel: cat.badge,
                       });
                     }
                   }
@@ -419,6 +646,19 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
     }
     setDeliveryCoordinates({ lat: sug.lat, lng: sug.lng });
     setShowSuggestions(false);
+
+    // Ajusta o tipo de destino automaticamente de acordo com a categoria detectada
+    if (sug.placeCategory === "condominium") {
+      setDestinationType("Apartamento / Condomínio");
+    } else if (sug.placeCategory === "commercial") {
+      setDestinationType("Comércio / Supermercado");
+    } else if (sug.placeCategory === "avenue") {
+      setDestinationType("Avenida / Rodovia");
+    } else if (sug.placeCategory === "neighborhood") {
+      setDestinationType("Bairro / Residencial");
+    } else if (sug.placeCategory === "street") {
+      setDestinationType("Casa / Residência");
+    }
   };
 
   // Envio do formulário (Criação da corrida / Chamada do entregador)
@@ -495,14 +735,26 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
     // Remove sufixos duplicados de cidade se já estiverem presentes
     cleanAddress = cleanAddress.replace(/,?\s*-?\s*Primavera do Leste(\s*-?\s*MT)?(\s*-?\s*Brasil)?/gi, "").trim();
 
-    const fullAddress = streetNumber.trim() && !cleanAddress.includes(streetNumber.trim())
-      ? `${cleanAddress}, ${streetNumber.trim()} - Primavera do Leste`
-      : `${cleanAddress} - Primavera do Leste`;
+    let prefixTag = "";
+    if (detectedCategory?.type === "condominium" && !cleanAddress.toLowerCase().includes("condom") && !cleanAddress.toLowerCase().includes("residencial")) {
+      prefixTag = "[Condomínio] ";
+    } else if (detectedCategory?.type === "commercial" && !cleanAddress.toLowerCase().includes("mercado") && !cleanAddress.toLowerCase().includes("loja") && !cleanAddress.toLowerCase().includes("comércio")) {
+      prefixTag = "[Comércio/Supermercado] ";
+    }
+
+    const fullAddress = `${prefixTag}${
+      streetNumber.trim() && !cleanAddress.includes(streetNumber.trim())
+        ? `${cleanAddress}, ${streetNumber.trim()} - Primavera do Leste`
+        : `${cleanAddress} - Primavera do Leste`
+    }`;
 
     // Compila observações completas
     const notesParts: string[] = [];
     if (recipientName.trim()) notesParts.push(`Destinatário: ${recipientName.trim()}`);
     if (destinationType) notesParts.push(`Tipo: ${destinationType}`);
+    if (detectedCategory?.badge && !destinationType.toLowerCase().includes(detectedCategory.badge.toLowerCase())) {
+      notesParts.push(`Local: ${detectedCategory.label}`);
+    }
     if (observation.trim()) notesParts.push(`Obs: ${observation.trim()}`);
     if (additionalNotes.trim()) notesParts.push(additionalNotes.trim());
     const compiledNotes = notesParts.join(" • ");
@@ -826,6 +1078,33 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
                   </div>
                 </div>
 
+                {/* Indicador de Precisão da Categoria de Local */}
+                {detectedCategory && (
+                  <div className="flex items-center gap-1.5 pt-1 text-[11px] font-medium animate-in fade-in duration-200">
+                    <span className="text-muted-foreground">Classificação do local:</span>
+                    <span
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-bold text-[10px] border ${
+                        detectedCategory.type === "condominium"
+                          ? "bg-purple-500/15 text-purple-700 dark:text-purple-300 border-purple-500/30"
+                          : detectedCategory.type === "commercial"
+                          ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30"
+                          : detectedCategory.type === "avenue"
+                          ? "bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/30"
+                          : detectedCategory.type === "neighborhood"
+                          ? "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30"
+                          : "bg-zinc-500/10 text-zinc-700 dark:text-zinc-300 border-zinc-500/20"
+                      }`}
+                    >
+                      {detectedCategory.iconName === "building" && <Building2 className="w-3 h-3 text-purple-600 dark:text-purple-400" />}
+                      {detectedCategory.iconName === "store" && <StoreIcon className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />}
+                      {detectedCategory.iconName === "navigation" && <Route className="w-3 h-3 text-sky-600 dark:text-sky-400" />}
+                      {detectedCategory.iconName === "home" && <Home className="w-3 h-3 text-amber-600 dark:text-amber-400" />}
+                      {detectedCategory.iconName === "map-pin" && <MapPin className="w-3 h-3 text-[#EA580C]" />}
+                      <span>{detectedCategory.label}</span>
+                    </span>
+                  </div>
+                )}
+
                 {/* Lista Dropdown de Sugestões de Endereço */}
                 {showSuggestions && addressSuggestions.length > 0 && (
                   <div
@@ -840,31 +1119,75 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
                       <span className="text-[#EA580C]">{addressSuggestions.length} encontradas</span>
                     </div>
 
-                    {addressSuggestions.map((sug) => (
-                      <button
-                        key={sug.id}
-                        type="button"
-                        onClick={() => handleSelectSuggestion(sug)}
-                        className={`w-full px-3.5 py-2.5 text-left transition flex items-center gap-3 cursor-pointer group ${
-                          isDark
-                            ? "hover:bg-zinc-800/80 text-zinc-200"
-                            : "hover:bg-orange-50/80 text-zinc-900"
-                        }`}
-                      >
-                        <div className="w-8 h-8 rounded-xl bg-[#EA580C]/10 text-[#EA580C] group-hover:bg-[#EA580C] group-hover:text-white flex items-center justify-center shrink-0 transition-colors">
-                          <MapPin className="w-4 h-4" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs sm:text-sm font-bold text-foreground truncate group-hover:text-[#EA580C] transition-colors">
-                            {sug.title}
-                          </p>
-                          <p className="text-[11px] text-muted-foreground truncate">
-                            {sug.subtitle}
-                          </p>
-                        </div>
-                        <ChevronRight className="w-4 h-4 text-muted-foreground/60 group-hover:text-[#EA580C] shrink-0" />
-                      </button>
-                    ))}
+                    {addressSuggestions.map((sug) => {
+                      const cat = sug.placeCategory || "street";
+                      return (
+                        <button
+                          key={sug.id}
+                          type="button"
+                          onClick={() => handleSelectSuggestion(sug)}
+                          className={`w-full px-3.5 py-2.5 text-left transition flex items-center gap-3 cursor-pointer group ${
+                            isDark
+                              ? "hover:bg-zinc-800/80 text-zinc-200"
+                              : "hover:bg-orange-50/80 text-zinc-900"
+                          }`}
+                        >
+                          <div
+                            className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
+                              cat === "condominium"
+                                ? "bg-purple-500/15 text-purple-600 dark:text-purple-400 group-hover:bg-purple-600 group-hover:text-white"
+                                : cat === "commercial"
+                                ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 group-hover:bg-emerald-600 group-hover:text-white"
+                                : cat === "avenue"
+                                ? "bg-sky-500/15 text-sky-600 dark:text-sky-400 group-hover:bg-sky-600 group-hover:text-white"
+                                : cat === "neighborhood"
+                                ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 group-hover:bg-amber-600 group-hover:text-white"
+                                : "bg-[#EA580C]/10 text-[#EA580C] group-hover:bg-[#EA580C] group-hover:text-white"
+                            }`}
+                          >
+                            {cat === "condominium" ? (
+                              <Building2 className="w-4 h-4" />
+                            ) : cat === "commercial" ? (
+                              <StoreIcon className="w-4 h-4" />
+                            ) : cat === "avenue" ? (
+                              <Route className="w-4 h-4" />
+                            ) : cat === "neighborhood" ? (
+                              <Home className="w-4 h-4" />
+                            ) : (
+                              <MapPin className="w-4 h-4" />
+                            )}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <p className="text-xs sm:text-sm font-bold text-foreground truncate group-hover:text-[#EA580C] transition-colors">
+                                {sug.title}
+                              </p>
+                              {sug.placeCategoryLabel && (
+                                <span
+                                  className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 border ${
+                                    cat === "condominium"
+                                      ? "bg-purple-500/15 text-purple-700 dark:text-purple-300 border-purple-500/30"
+                                      : cat === "commercial"
+                                      ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30"
+                                      : cat === "avenue"
+                                      ? "bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/30"
+                                      : cat === "neighborhood"
+                                      ? "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30"
+                                      : "bg-zinc-500/10 text-zinc-700 dark:text-zinc-300 border-zinc-500/20"
+                                  }`}
+                                >
+                                  {sug.placeCategoryLabel}
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-muted-foreground truncate">
+                              {sug.subtitle}
+                            </p>
+                          </div>
+                          <ChevronRight className="w-4 h-4 text-muted-foreground/60 group-hover:text-[#EA580C] shrink-0" />
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -923,9 +1246,11 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
                 >
                   <option value="Casa / Residência">Casa / Residência</option>
                   <option value="Apartamento / Condomínio">Apartamento / Condomínio</option>
-                  <option value="Comércio / Loja">Comércio / Loja</option>
+                  <option value="Comércio / Supermercado">Comércio / Supermercado</option>
+                  <option value="Avenida / Rodovia">Avenida / Rodovia</option>
                   <option value="Escritório / Empresa">Escritório / Empresa</option>
                   <option value="Hospital / Clínica">Hospital / Clínica</option>
+                  <option value="Bairro / Residencial">Bairro / Residencial</option>
                   <option value="Outro ponto de referência">Outro ponto de referência</option>
                 </select>
               </div>
@@ -1076,32 +1401,50 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
 
             {/* Card de Status de Busca (Destaque em Âmbar / Laranja Suave) */}
             <div
-              className={`rounded-2xl p-4 border flex items-center gap-3.5 transition-all shadow-xs ${
+              className={`rounded-2xl p-4 border flex items-center justify-between gap-3.5 transition-all shadow-xs ${
                 isDark
                   ? "bg-amber-950/25 border-amber-800/40 text-amber-200"
                   : "bg-[#FEF3C7] border-[#FCD34D] text-amber-950"
               }`}
             >
-              <div className="w-11 h-11 rounded-2xl bg-[#EA580C]/20 border border-[#EA580C]/30 flex items-center justify-center shrink-0 text-[#EA580C]">
-                <Bike className="w-6 h-6 animate-pulse" />
+              <div className="flex items-center gap-3.5 min-w-0">
+                <div className="w-11 h-11 rounded-2xl bg-[#EA580C]/20 border border-[#EA580C]/30 flex items-center justify-center shrink-0 text-[#EA580C]">
+                  <Bike className="w-6 h-6 animate-pulse" />
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <h3 className="font-bold text-sm sm:text-base leading-snug truncate">
+                    {countPending > 0
+                      ? "Procurando motorista parceiro..."
+                      : countAccepted > 0 || countTransit > 0
+                      ? "Motorista parceiro a caminho!"
+                      : "Pronto para novos chamados"}
+                  </h3>
+                  <p className={`text-xs leading-tight mt-0.5 ${isDark ? "text-amber-300/80" : "text-amber-900/80"}`}>
+                    {countPending > 0
+                      ? `Notificando motoristas parceiros em Primavera do Leste para ${countPending} pedido(s)...`
+                      : countAccepted > 0 || countTransit > 0
+                      ? "Acompanhe a rota em tempo real no mapa abaixo."
+                      : "Preencha os dados no formulário ao lado para acionar um entregador."}
+                  </p>
+                </div>
               </div>
 
-              <div className="min-w-0 flex-1">
-                <h3 className="font-bold text-sm sm:text-base leading-snug truncate">
-                  {countPending > 0
-                    ? "Procurando motorista parceiro..."
-                    : countAccepted > 0 || countTransit > 0
-                    ? "Motorista parceiro a caminho!"
-                    : "Pronto para novos chamados"}
-                </h3>
-                <p className={`text-xs leading-tight mt-0.5 ${isDark ? "text-amber-300/80" : "text-amber-900/80"}`}>
-                  {countPending > 0
-                    ? `Notificando motoristas parceiros em Primavera do Leste para ${countPending} pedido(s)...`
-                    : countAccepted > 0 || countTransit > 0
-                    ? "Acompanhe a rota em tempo real no mapa abaixo."
-                    : "Preencha os dados no formulário ao lado para acionar um entregador."}
-                </p>
-              </div>
+              {countPending > 0 && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const pendingReq = requests.find((r) => r?.status === "pending");
+                    if (pendingReq?.id) onOpenCancelModal(pendingReq.id, null, false, null);
+                  }}
+                  className="shrink-0 text-red-600 border-red-300 bg-white/90 dark:bg-zinc-900/90 hover:bg-red-50 dark:hover:bg-red-950/50 hover:text-red-700 text-xs font-bold rounded-xl h-9 px-3 shadow-2xs"
+                >
+                  <XCircle className="w-4 h-4 mr-1.5 text-red-600" />
+                  <span>Cancelar Chamada</span>
+                </Button>
+              )}
             </div>
 
             {/* Abas Horizontais de Filtragem de Status */}
@@ -1210,81 +1553,127 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
                   const isAccepted = req.status === "accepted";
                   const isTransit = req.status === "picked_up";
                   const isCancelled = req.status === "cancelled";
+                  const deliveryVal = Number(req.credit_cost ?? req.driver_fee ?? 0);
 
                   return (
                     <div
                       key={req.id}
                       onClick={() => setSelectedOrderDetails(req)}
-                      className={`rounded-2xl p-4 border transition-all duration-200 cursor-pointer shadow-xs hover:shadow-md flex items-center justify-between gap-4 ${
+                      className={`rounded-2xl p-4 border transition-all duration-200 cursor-pointer shadow-xs hover:shadow-md space-y-3 ${
                         isDark
                           ? "bg-[#18181B] border-zinc-800 hover:border-zinc-700 text-white"
                           : "bg-white border-zinc-200 hover:border-orange-200 text-zinc-900"
                       }`}
                     >
-                      <div className="min-w-0 flex-1 space-y-1">
-                        <div className="flex items-center gap-2">
-                          <h4 className="font-extrabold text-sm sm:text-base leading-tight truncate">
-                            {restaurant?.name || "Pizzaria Piacenza"}
-                          </h4>
-                          <span className={`text-[10px] font-mono font-medium ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>
-                            #{req?.id ? String(req.id).slice(0, 6) : "------"}
-                          </span>
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h4 className="font-extrabold text-sm sm:text-base leading-tight truncate">
+                              {restaurant?.name || "Pizzaria Piacenza"}
+                            </h4>
+                            <span className={`text-[10px] font-mono font-medium ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>
+                              #{req?.id ? String(req.id).slice(0, 6) : "------"}
+                            </span>
+                            {deliveryVal > 0 && (
+                              <span className="text-xs font-black text-[#EA580C] bg-orange-500/10 px-2 py-0.5 rounded-md border border-orange-500/20">
+                                R$ {deliveryVal.toFixed(2).replace(".", ",")}
+                              </span>
+                            )}
+                          </div>
+
+                          <p className={`text-xs truncate ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
+                            Entrega: <span className="font-medium text-foreground">{req.delivery_address || "Endereço não informado"}</span>
+                          </p>
+
+                          {/* Etapas / Marcos do Pedido Alinhados */}
+                          {isCancelled ? (
+                            <div className="flex items-center gap-1.5 pt-1 text-xs text-red-600 dark:text-red-400 font-bold">
+                              <XCircle className="w-3.5 h-3.5 shrink-0" />
+                              <span>Corrida Cancelada • Valor não cobrado da loja</span>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-3 pt-1 text-xs">
+                              <span className={`flex items-center gap-1 font-semibold ${isAccepted || isTransit ? "text-sky-500" : isDark ? "text-zinc-500" : "text-zinc-400"}`}>
+                                <span>Em Coleta</span>
+                              </span>
+
+                              <span className="text-zinc-400">•</span>
+
+                              <span className={`flex items-center gap-1.5 font-semibold ${isTransit ? "text-emerald-500" : isDark ? "text-zinc-500" : "text-zinc-400"}`}>
+                                <span className={`w-2 h-2 rounded-full ${isTransit ? "bg-emerald-500 animate-pulse" : "bg-zinc-400"}`}></span>
+                                <span>Em Rota</span>
+                              </span>
+                            </div>
+                          )}
                         </div>
 
-                        <p className={`text-xs truncate ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
-                          Entrega: <span className="font-medium text-foreground">{req.delivery_address || "Endereço não informado"}</span>
-                        </p>
-
-                        {/* Etapas / Marcos do Pedido Alinhados */}
-                        {isCancelled ? (
-                          <div className="flex items-center gap-1.5 pt-1 text-xs text-red-600 dark:text-red-400 font-bold">
-                            <XCircle className="w-3.5 h-3.5 shrink-0" />
-                            <span>Corrida Cancelada • Valor não cobrado da loja</span>
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-3 pt-1 text-xs">
-                            <span className={`flex items-center gap-1 font-semibold ${isAccepted || isTransit ? "text-sky-500" : isDark ? "text-zinc-500" : "text-zinc-400"}`}>
-                              <span>Em Coleta</span>
+                        {/* Lado Direito: Badge de Status e Seta */}
+                        <div className="flex items-center gap-2.5 shrink-0">
+                          {isPending && (
+                            <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300/40">
+                              Aguardando
                             </span>
+                          )}
 
-                            <span className="text-zinc-400">•</span>
-
-                            <span className={`flex items-center gap-1.5 font-semibold ${isTransit ? "text-emerald-500" : isDark ? "text-zinc-500" : "text-zinc-400"}`}>
-                              <span className={`w-2 h-2 rounded-full ${isTransit ? "bg-emerald-500 animate-pulse" : "bg-zinc-400"}`}></span>
-                              <span>Em Rota</span>
+                          {isAccepted && (
+                            <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-sky-100 dark:bg-sky-950/60 text-sky-800 dark:text-sky-300 border border-sky-300/40">
+                              Em Coleta
                             </span>
-                          </div>
-                        )}
+                          )}
+
+                          {isTransit && (
+                            <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300/40">
+                              Em Rota
+                            </span>
+                          )}
+
+                          {isCancelled && (
+                            <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-red-100 dark:bg-red-950/60 text-red-700 dark:text-red-300 border border-red-300/40">
+                              Cancelada
+                            </span>
+                          )}
+
+                          <ChevronRight className="w-4 h-4 text-zinc-400 group-hover:text-foreground transition-transform" />
+                        </div>
                       </div>
 
-                      {/* Lado Direito: Badge "Disponível" / Status e Seta de Ação */}
-                      <div className="flex items-center gap-3 shrink-0">
-                        {isPending && (
-                          <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300/40">
-                            Disponível
-                          </span>
-                        )}
+                      {/* SE PENDENTE: Linha com botão destacado e visível "Cancelar Chamada" */}
+                      {isPending && (
+                        <div
+                          onClick={(e) => e.stopPropagation()}
+                          className={`p-2.5 rounded-xl border flex items-center justify-between gap-3 flex-wrap ${
+                            isDark
+                              ? "bg-amber-950/20 border-amber-900/40 text-amber-200"
+                              : "bg-amber-50/80 border-amber-200/80 text-amber-900"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 text-xs font-medium">
+                            <Loader2 className="w-4 h-4 animate-spin text-[#EA580C] shrink-0" />
+                            <span>Aguardando motorista aceitar a chamada...</span>
+                          </div>
 
-                        {isAccepted && (
-                          <span className="px-3 py-1 rounded-full text-xs font-bold bg-sky-100 dark:bg-sky-950/60 text-sky-800 dark:text-sky-300 border border-sky-300/40">
-                            Em Coleta
-                          </span>
-                        )}
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => onOpenCancelModal(req.id, null, false, null)}
+                            className="text-red-600 border-red-300 hover:bg-red-500/10 dark:hover:bg-red-950/40 hover:text-red-700 text-xs font-bold rounded-xl h-8 px-3 shrink-0 shadow-2xs"
+                          >
+                            <XCircle className="w-3.5 h-3.5 mr-1.5 text-red-600" />
+                            <span>Cancelar Chamada</span>
+                          </Button>
+                        </div>
+                      )}
 
-                        {isTransit && (
-                          <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300/40">
-                            Em Rota
-                          </span>
-                        )}
-
-                        {isCancelled && (
-                          <span className="px-3 py-1 rounded-full text-xs font-bold bg-red-100 dark:bg-red-950/60 text-red-700 dark:text-red-300 border border-red-300/40">
-                            Corrida Cancelada
-                          </span>
-                        )}
-
-                        <ChevronRight className="w-5 h-5 text-zinc-400 group-hover:text-foreground transition-transform group-hover:translate-x-0.5" />
-                      </div>
+                      {/* SE ACEITO OU EM ROTA: Dados completos do motorista (Foto, Nome, Placa, Telefone, WhatsApp, Ligar, Cancelar) */}
+                      {(isAccepted || isTransit) && (
+                        <ActiveDriverInfoRow
+                          request={req}
+                          cachedDriver={getDriverInfo(req.driver_id)}
+                          onOpenCancelModal={onOpenCancelModal}
+                          isDark={isDark}
+                        />
+                      )}
                     </div>
                   );
                 })
