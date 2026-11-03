@@ -65,3 +65,4 @@ describe("detectLocationCategory Precision Tests", () => {
     expect(res2.type).toBe("neighborhood");
   });
 });
+
