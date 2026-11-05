@@ -242,15 +242,22 @@ export const DriverDarkActionCard: React.FC<DriverDarkActionCardProps> = ({
               {/* Informações do Pedido */}
               <div className="space-y-1.5 text-left select-none">
                 {/* Linha de Coleta */}
-                <div className="text-[15px] sm:text-base leading-snug">
-                  <span className={isDark ? "text-zinc-400" : "text-zinc-500"}>Coleta: </span>
-                  <span
-                    className={`font-bold tracking-wide ${
-                      isDark ? "text-white" : "text-zinc-900"
-                    }`}
-                  >
-                    {request.pickupName || "Estabelecimento"}
-                  </span>
+                <div className="text-[14px] sm:text-base leading-snug">
+                  <div>
+                    <span className={isDark ? "text-zinc-400" : "text-zinc-500"}>Coleta: </span>
+                    <span
+                      className={`font-bold tracking-wide ${
+                        isDark ? "text-white" : "text-zinc-900"
+                      }`}
+                    >
+                      {request.pickupName || "Estabelecimento"}
+                    </span>
+                  </div>
+                  {request.pickupAddress && request.pickupAddress !== request.pickupName && (
+                    <p className={`text-xs mt-0.5 truncate ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
+                      📍 {request.pickupAddress}
+                    </p>
+                  )}
                 </div>
 
                 {/* Linha de Entrega */}

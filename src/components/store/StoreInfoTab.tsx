@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { MAP_LAYERS, GOOGLE_MAPS_API_KEY } from "@/config/maps";
+import { MAP_LAYERS, GOOGLE_MAPS_API_KEY, resolveStoreCoordinates, isWithinPrimaveraBounds } from "@/config/maps";
 import { getBestLocation, isValidCoordinate } from "@/utils/geolocation";
 import MapErrorBoundary from "@/components/MapErrorBoundary";
 
@@ -91,6 +91,15 @@ const StoreInfoTab = ({ restaurant, userId }: StoreInfoTabProps) => {
 
   useEffect(() => {
     if (restaurant) {
+      const resolved = resolveStoreCoordinates(restaurant);
+      const hasValidDbCoords =
+        restaurant.latitude &&
+        restaurant.longitude &&
+        isWithinPrimaveraBounds(Number(restaurant.latitude), Number(restaurant.longitude));
+
+      const latToUse = hasValidDbCoords ? String(restaurant.latitude) : String(resolved.lat);
+      const lngToUse = hasValidDbCoords ? String(restaurant.longitude) : String(resolved.lng);
+
       setForm({
         name: restaurant.name || "",
         address: restaurant.address || "",
@@ -98,8 +107,8 @@ const StoreInfoTab = ({ restaurant, userId }: StoreInfoTabProps) => {
         delivery_fee: String(restaurant.delivery_fee || 0),
         min_order: String(restaurant.min_order || 0),
         is_open: restaurant.is_open ?? true,
-        latitude: restaurant.latitude ? String(restaurant.latitude) : "",
-        longitude: restaurant.longitude ? String(restaurant.longitude) : "",
+        latitude: latToUse,
+        longitude: lngToUse,
       });
     }
   }, [restaurant]);
@@ -230,8 +239,8 @@ const StoreInfoTab = ({ restaurant, userId }: StoreInfoTabProps) => {
       const loc = await getBestLocation({ highAccuracyTimeoutMs: 6000, coarseTimeoutMs: 7000 });
       const lat = loc.latitude;
       const lng = loc.longitude;
-      if (!isValidCoordinate(lat, lng)) {
-        toast.error("Não foi possível obter sua localização. Verifique se o GPS está ativado e tente novamente.");
+      if (!isValidCoordinate(lat, lng) || !isWithinPrimaveraBounds(lat, lng)) {
+        toast.error("Sua localização GPS detectada está fora de Primavera do Leste (ex: rota de operadora em outra cidade). Por favor, informe o endereço da loja.");
         return;
       }
       updateMarkerPosition(lat, lng);
@@ -256,8 +265,14 @@ const StoreInfoTab = ({ restaurant, userId }: StoreInfoTabProps) => {
     }
     setSaving(true);
     try {
-      const lat = parseFloat(form.latitude);
-      const lng = parseFloat(form.longitude);
+      let lat = parseFloat(form.latitude);
+      let lng = parseFloat(form.longitude);
+
+      if ((isNaN(lat) || isNaN(lng) || !isWithinPrimaveraBounds(lat, lng)) && form.address?.trim()) {
+        const resolved = resolveStoreCoordinates({ name: form.name, address: form.address });
+        lat = resolved.lat;
+        lng = resolved.lng;
+      }
 
       const payload: any = {
         name: form.name,

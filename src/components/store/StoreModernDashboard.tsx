@@ -31,7 +31,7 @@ import {
   Store as StoreIcon,
 } from "lucide-react";
 import { searchAddressSuggestions, geocodeAddress, calculateRoute, detectLocationCategory } from "@/services/mapbox";
-import { DEFAULT_CENTER, resolveStoreCoordinates } from "@/config/maps";
+import { DEFAULT_CENTER, resolveStoreCoordinates, formatStorePickupAddress, isWithinPrimaveraBounds } from "@/config/maps";
 import { isValidCoordinate } from "@/utils/geolocation";
 import { notifyAvailableDrivers } from "@/lib/push";
 import { useDriverLocations } from "@/hooks/useDriverLocations";
@@ -469,11 +469,35 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
     return resolveStoreCoordinates(restaurant);
   });
 
-  // Tenta geocodificar o endereço da loja caso latitude/longitude estejam nulos no banco
+  // Tenta resolver e geocodificar o endereço da loja com autocura no banco de dados
   useEffect(() => {
     const coords = resolveStoreCoordinates(restaurant);
+    setStoreCoords(coords);
+
+    // Se o restaurante no banco não possuir coordenadas válidas dentro de Primavera do Leste,
+    // atualizamos imediatamente para curar o registro da loja no banco.
+    if (
+      restaurant?.id &&
+      (!restaurant.latitude ||
+        !restaurant.longitude ||
+        !isWithinPrimaveraBounds(Number(restaurant.latitude), Number(restaurant.longitude))) &&
+      (coords.lat !== DEFAULT_CENTER.lat || coords.lng !== DEFAULT_CENTER.lng)
+    ) {
+      void supabase
+        .from("restaurants")
+        .update({
+          latitude: coords.lat,
+          longitude: coords.lng,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", restaurant.id)
+        .then(() => {
+          queryClient.invalidateQueries({ queryKey: ["my-restaurant"] });
+        });
+      return;
+    }
+
     if (coords.lat !== DEFAULT_CENTER.lat || coords.lng !== DEFAULT_CENTER.lng) {
-      setStoreCoords(coords);
       return;
     }
 
@@ -759,7 +783,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
     if (additionalNotes.trim()) notesParts.push(additionalNotes.trim());
     const compiledNotes = notesParts.join(" • ");
 
-    const pickupAddress = restaurant?.address || "Primavera do Leste";
+    const pickupAddress = formatStorePickupAddress(restaurant, restaurant?.address);
 
     // Passa a quilometragem viária real calculada para o backend
     const distanceToSend = finalDistance > 0 ? finalDistance : (fareDetails.rawKm > 0 ? fareDetails.rawKm : 2.5);
@@ -792,8 +816,20 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
 
       if (error) throw error;
 
-      // Dispara push de notificação a todos os motoristas cadastrados
+      // Grava imediatamente as coordenadas precisas de coleta e entrega na entrega criada
       if (requestId) {
+        void supabase
+          .from("delivery_requests")
+          .update({
+            pickup_address: pickupAddress,
+            pickup_lat: storeCoords.lat,
+            pickup_lng: storeCoords.lng,
+            delivery_lat: deliveryCoordinates?.lat || null,
+            delivery_lng: deliveryCoordinates?.lng || null,
+          })
+          .eq("id", requestId);
+
+        // Dispara push de notificação a todos os motoristas cadastrados
         void notifyAvailableDrivers(String(requestId));
       }
 

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Phone, MessageSquare, X, Navigation, MapPin, ExternalLink } from "lucide-react";
 import ChatWidget from "@/components/ChatWidget";
 import { geocodeAddress } from "@/services/mapbox";
+import { resolveStoreCoordinates, isWithinPrimaveraBounds, formatStorePickupAddress } from "@/config/maps";
 
 interface DriverMainDarkViewProps {
   companyName?: string;
@@ -81,7 +82,7 @@ export const DriverMainDarkView: React.FC<DriverMainDarkViewProps> = ({
     ? {
         id: activeRequest.id,
         pickupName: activeRequest.restaurants?.name || "Loja",
-        pickupAddress: activeRequest.pickup_address,
+        pickupAddress: formatStorePickupAddress(activeRequest.restaurants, activeRequest.pickup_address),
         deliveryAddress: activeRequest.delivery_address,
         phone: activeRequest.restaurants?.phone || null,
         status: activeRequest.status,
@@ -92,7 +93,7 @@ export const DriverMainDarkView: React.FC<DriverMainDarkViewProps> = ({
     ? {
         id: currentPending.id,
         pickupName: currentPending.restaurants?.name || "Loja",
-        pickupAddress: currentPending.pickup_address,
+        pickupAddress: formatStorePickupAddress(currentPending.restaurants, currentPending.pickup_address),
         deliveryAddress: currentPending.delivery_address,
         phone: currentPending.restaurants?.phone || null,
         status: currentPending.status || "pending",
@@ -101,22 +102,25 @@ export const DriverMainDarkView: React.FC<DriverMainDarkViewProps> = ({
       }
     : null;
 
-  // Coordenadas base para o mapa (suporta delivery_lat/lng e pickup_lat/lng ou latitude/longitude do restaurante)
-  const basePickupLocation =
-    (activeRequest?.pickup_lat && activeRequest?.pickup_lng)
-      ? { lat: Number(activeRequest.pickup_lat), lng: Number(activeRequest.pickup_lng), name: activeRequest.restaurants?.name }
-      : (activeRequest?.restaurants?.latitude && activeRequest?.restaurants?.longitude)
-      ? { lat: Number(activeRequest.restaurants.latitude), lng: Number(activeRequest.restaurants.longitude), name: activeRequest.restaurants.name }
-      : (currentPending?.pickup_lat && currentPending?.pickup_lng)
-      ? { lat: Number(currentPending.pickup_lat), lng: Number(currentPending.pickup_lng), name: currentPending.restaurants?.name }
-      : (currentPending?.restaurants?.latitude && currentPending?.restaurants?.longitude)
-      ? { lat: Number(currentPending.restaurants.latitude), lng: Number(currentPending.restaurants.longitude), name: currentPending.restaurants.name }
-      : null;
+  // Coordenadas base para o mapa:
+  // Resolvemos a coleta usando resolução sênior com dicionário e bounds de Primavera do Leste
+  const activeOrPendingRest = activeRequest?.restaurants || currentPending?.restaurants;
+  const activeOrPendingPickupLat = activeRequest?.pickup_lat ?? currentPending?.pickup_lat;
+  const activeOrPendingPickupLng = activeRequest?.pickup_lng ?? currentPending?.pickup_lng;
+  const resolvedStore = resolveStoreCoordinates(activeOrPendingRest, activeOrPendingPickupLat, activeOrPendingPickupLng);
+
+  const basePickupLocation = resolvedStore
+    ? {
+        lat: resolvedStore.lat,
+        lng: resolvedStore.lng,
+        name: activeOrPendingRest?.name || activeRequest?.pickup_name || currentPending?.pickup_name || "Coleta",
+      }
+    : null;
 
   const baseDeliveryLocation =
-    (activeRequest?.delivery_lat && activeRequest?.delivery_lng)
+    (activeRequest?.delivery_lat && activeRequest?.delivery_lng && isWithinPrimaveraBounds(Number(activeRequest.delivery_lat), Number(activeRequest.delivery_lng)))
       ? { lat: Number(activeRequest.delivery_lat), lng: Number(activeRequest.delivery_lng), address: activeRequest.delivery_address }
-      : (currentPending?.delivery_lat && currentPending?.delivery_lng)
+      : (currentPending?.delivery_lat && currentPending?.delivery_lng && isWithinPrimaveraBounds(Number(currentPending.delivery_lat), Number(currentPending.delivery_lng)))
       ? { lat: Number(currentPending.delivery_lat), lng: Number(currentPending.delivery_lng), address: currentPending.delivery_address }
       : null;
 
@@ -125,7 +129,11 @@ export const DriverMainDarkView: React.FC<DriverMainDarkViewProps> = ({
     let isCancelled = false;
 
     if (!baseDeliveryLocation && currentDelivery?.deliveryAddress) {
-      geocodeAddress(currentDelivery.deliveryAddress)
+      const fullDelivery = currentDelivery.deliveryAddress.includes("Primavera do Leste")
+        ? currentDelivery.deliveryAddress
+        : `${currentDelivery.deliveryAddress}, Primavera do Leste - MT`;
+
+      geocodeAddress(fullDelivery)
         .then((res) => {
           if (!isCancelled && res?.coordinates) {
             setGeocodedDelivery({
@@ -143,7 +151,11 @@ export const DriverMainDarkView: React.FC<DriverMainDarkViewProps> = ({
     }
 
     if (!basePickupLocation && currentDelivery?.pickupAddress) {
-      geocodeAddress(currentDelivery.pickupAddress)
+      const fullPickup = currentDelivery.pickupAddress.includes("Primavera do Leste")
+        ? currentDelivery.pickupAddress
+        : `${currentDelivery.pickupAddress}, Primavera do Leste - MT`;
+
+      geocodeAddress(fullPickup)
         .then((res) => {
           if (!isCancelled && res?.coordinates) {
             setGeocodedPickup({
@@ -168,14 +180,15 @@ export const DriverMainDarkView: React.FC<DriverMainDarkViewProps> = ({
   const pickupLocation = basePickupLocation || geocodedPickup;
   const deliveryLocation = baseDeliveryLocation || geocodedDelivery;
 
-  const pendingLocations = pendingRequests
-    .filter((r) => r.restaurants?.latitude && r.restaurants?.longitude)
-    .map((r) => ({
+  const pendingLocations = pendingRequests.map((r) => {
+    const coords = resolveStoreCoordinates(r.restaurants, r.pickup_lat, r.pickup_lng);
+    return {
       id: r.id,
-      lat: Number(r.restaurants.latitude),
-      lng: Number(r.restaurants.longitude),
-      name: r.restaurants.name,
-    }));
+      lat: coords.lat,
+      lng: coords.lng,
+      name: r.restaurants?.name || "Chamado",
+    };
+  });
 
   // Redirecionamento GPS Externo (Google Maps / Waze)
   const handleOpenNavigation = (app: "google" | "waze") => {
@@ -185,9 +198,13 @@ export const DriverMainDarkView: React.FC<DriverMainDarkViewProps> = ({
     // Se acabou de aceitar (status === "accepted" ou "pending"), o destino atual é a Coleta na loja.
     const isHeadingToDelivery = currentDelivery.status === "picked_up";
     const targetLoc = isHeadingToDelivery ? deliveryLocation : pickupLocation;
-    const targetAddress = isHeadingToDelivery
+    const rawTargetAddress = isHeadingToDelivery
       ? currentDelivery.deliveryAddress
       : currentDelivery.pickupAddress || currentDelivery.pickupName;
+
+    const targetAddress = rawTargetAddress && !rawTargetAddress.includes("Primavera do Leste")
+      ? `${rawTargetAddress}, Primavera do Leste - MT, Brasil`
+      : rawTargetAddress || "Primavera do Leste - MT, Brasil";
 
     const lat = targetLoc?.lat;
     const lng = targetLoc?.lng;
@@ -196,7 +213,7 @@ export const DriverMainDarkView: React.FC<DriverMainDarkViewProps> = ({
       if (lat && lng) {
         window.open(`https://waze.com/ul?ll=${lat},${lng}&navigate=yes`, "_blank");
       } else {
-        window.open(`https://waze.com/ul?q=${encodeURIComponent(targetAddress || "Primavera do Leste")}&navigate=yes`, "_blank");
+        window.open(`https://waze.com/ul?q=${encodeURIComponent(targetAddress)}&navigate=yes`, "_blank");
       }
     } else {
       // Google Maps: aciona diretamente o aplicativo de navegação ou web com rota
@@ -204,7 +221,7 @@ export const DriverMainDarkView: React.FC<DriverMainDarkViewProps> = ({
       if (lat && lng) {
         window.open(`https://www.google.com/maps/dir/?api=1${originParam}&destination=${lat},${lng}&travelmode=driving`, "_blank");
       } else {
-        window.open(`https://www.google.com/maps/dir/?api=1${originParam}&destination=${encodeURIComponent(targetAddress || "Primavera do Leste")}&travelmode=driving`, "_blank");
+        window.open(`https://www.google.com/maps/dir/?api=1${originParam}&destination=${encodeURIComponent(targetAddress)}&travelmode=driving`, "_blank");
       }
     }
   };

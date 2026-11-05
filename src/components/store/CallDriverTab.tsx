@@ -831,8 +831,8 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
       const loc = await getBestLocation({ highAccuracyTimeoutMs: 6000, coarseTimeoutMs: 7000 });
       const lat = loc.latitude;
       const lng = loc.longitude;
-      if (!isValidCoordinate(lat, lng)) {
-        finishError("Não foi possível obter sua localização. Verifique se o GPS está ativado e tente novamente.");
+      if (!isValidCoordinate(lat, lng) || !isWithinPrimaveraBounds(lat, lng)) {
+        finishError("Sua localização GPS detectada está fora de Primavera do Leste (ex: torre de telefonia/operadora em outra cidade). Por favor, informe o endereço manualmente.");
         return;
       }
 
@@ -865,8 +865,8 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
         setCallForm((f) => ({ ...f, pickup: finalAddress }));
       }
 
-      // Salva coordenadas da loja no banco se a loja existir
-      if (restaurant?.id) {
+      // Salva coordenadas da loja no banco se a loja existir e estiver estritamente dentro de Primavera do Leste
+      if (restaurant?.id && isWithinPrimaveraBounds(lat, lng)) {
         const payload: any = { latitude: lat, longitude: lng };
         if (!restaurant.address && geocoded) payload.address = finalAddress;
         const { error } = await supabase.from("restaurants").update(payload).eq("id", restaurant.id);

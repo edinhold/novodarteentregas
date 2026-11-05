@@ -8,6 +8,8 @@ import { toast } from "sonner";
 import { ArrowLeft, Store, Mail, Lock, Phone, User, MapPin, ImageIcon, Upload } from "lucide-react";
 import { motion } from "framer-motion";
 import logoDuarte from "@/assets/logo-duarte.jpeg";
+import { resolveStoreCoordinates, DEFAULT_CENTER, isWithinPrimaveraBounds, formatStorePickupAddress } from "@/config/maps";
+import { geocodeAddress } from "@/services/mapbox";
 
 const RegisterStoreOwner = () => {
   const navigate = useNavigate();
@@ -104,6 +106,28 @@ const RegisterStoreOwner = () => {
         if (logoFile) logoUrl = await uploadFile(logoFile, data.user.id, "logo");
         if (imageFile) imageUrl = await uploadFile(imageFile, data.user.id, "image");
 
+        // Resolver coordenadas exatas do estabelecimento para que nunca fique nulo
+        let restLat = DEFAULT_CENTER.lat;
+        let restLng = DEFAULT_CENTER.lng;
+
+        if (form.restaurantAddress?.trim()) {
+          const resolved = resolveStoreCoordinates({ name: form.restaurantName, address: form.restaurantAddress });
+          if (resolved.lat !== DEFAULT_CENTER.lat || resolved.lng !== DEFAULT_CENTER.lng) {
+            restLat = resolved.lat;
+            restLng = resolved.lng;
+          } else {
+            try {
+              const geocoded = await geocodeAddress(`${form.restaurantAddress.trim()}, Primavera do Leste - MT`);
+              if (geocoded?.coordinates && isWithinPrimaveraBounds(geocoded.coordinates.latitude, geocoded.coordinates.longitude)) {
+                restLat = geocoded.coordinates.latitude;
+                restLng = geocoded.coordinates.longitude;
+              }
+            } catch (geoErr) {
+              console.warn("[RegisterStoreOwner] Geocoding falhou:", geoErr);
+            }
+          }
+        }
+
         // Create restaurant
         const { error: restError } = await supabase.from("restaurants").insert({
           name: form.restaurantName,
@@ -115,6 +139,8 @@ const RegisterStoreOwner = () => {
           owner_id: data.user.id,
           logo: logoUrl,
           image: imageUrl,
+          latitude: restLat,
+          longitude: restLng,
         });
         if (restError) throw restError;
 

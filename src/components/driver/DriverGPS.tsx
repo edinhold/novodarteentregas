@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Navigation, MapPin, Locate, ExternalLink, Loader2, Signal, SignalZero, Shield, Pause, Crosshair, Layers, RotateCcw } from "lucide-react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { DEFAULT_CENTER, MAP_LAYERS, GOOGLE_MAPS_API_KEY } from "@/config/maps";
+import { DEFAULT_CENTER, MAP_LAYERS, GOOGLE_MAPS_API_KEY, resolveStoreCoordinates, isWithinPrimaveraBounds, formatStorePickupAddress } from "@/config/maps";
 import { useAuth } from "@/contexts/AuthContext";
 import { useGPSTracking } from "@/hooks/useGPSTracking";
 import { resumeAudioContext } from "@/lib/notificationSound";
@@ -97,26 +97,58 @@ const DriverGPS = ({ activeRequest, pendingRequests = [], onAcceptRequest, track
   const destMarkerRef = useRef<L.Marker | null>(null);
   const routeLineRef = useRef<L.Polyline | null>(null);
 
-  const openNavigation = (address: string, app: "google" | "waze") => {
+  const openNavigation = (address: string, app: "google" | "waze", coords?: { lat: number; lng: number } | null) => {
+    const formattedAddress = address && !address.includes("Primavera do Leste")
+      ? `${address}, Primavera do Leste - MT, Brasil`
+      : address || "Primavera do Leste - MT, Brasil";
+
     if (app === "waze") {
-      window.open(`https://waze.com/ul?q=${encodeURIComponent(address)}&navigate=yes`, "_blank");
+      if (coords && coords.lat && coords.lng) {
+        window.open(`https://waze.com/ul?ll=${coords.lat},${coords.lng}&navigate=yes`, "_blank");
+      } else {
+        window.open(`https://waze.com/ul?q=${encodeURIComponent(formattedAddress)}&navigate=yes`, "_blank");
+      }
     } else {
-      const prefix = driverPosition ? `${driverPosition.lat},${driverPosition.lng}/` : "";
-      window.open(`https://www.google.com/maps/dir/${prefix}${encodeURIComponent(address)}`, "_blank");
+      const originParam = driverPosition ? `&origin=${driverPosition.lat},${driverPosition.lng}` : "";
+      if (coords && coords.lat && coords.lng) {
+        window.open(`https://www.google.com/maps/dir/?api=1${originParam}&destination=${coords.lat},${coords.lng}&travelmode=driving`, "_blank");
+      } else {
+        const prefix = driverPosition ? `${driverPosition.lat},${driverPosition.lng}/` : "";
+        window.open(`https://www.google.com/maps/dir/${prefix}${encodeURIComponent(formattedAddress)}`, "_blank");
+      }
     }
   };
 
+  const isPickupPhase = activeRequest?.status === "accepted";
+  const resolvedPickupCoords = activeRequest
+    ? resolveStoreCoordinates(activeRequest.restaurants, activeRequest.pickup_lat, activeRequest.pickup_lng)
+    : null;
+
+  const activeDestCoords = isPickupPhase
+    ? resolvedPickupCoords
+    : (activeRequest?.delivery_lat && activeRequest?.delivery_lng && isWithinPrimaveraBounds(Number(activeRequest.delivery_lat), Number(activeRequest.delivery_lng)))
+      ? { lat: Number(activeRequest.delivery_lat), lng: Number(activeRequest.delivery_lng) }
+      : null;
+
   const currentDestination = activeRequest
-    ? activeRequest.status === "accepted" ? activeRequest.pickup_address : activeRequest.delivery_address
+    ? isPickupPhase
+      ? formatStorePickupAddress(activeRequest.restaurants, activeRequest.pickup_address)
+      : (activeRequest.delivery_address || "Endereço de entrega")
     : null;
 
   const currentDestinationLabel = activeRequest
-    ? activeRequest.status === "accepted" ? "📦 Coleta" : "🏠 Entrega"
+    ? isPickupPhase ? "📦 Coleta (Loja)" : "🏠 Entrega (Cliente)"
     : null;
 
-  const requestMarkers = pendingRequests
-    .filter((r: any) => r.restaurants?.latitude && r.restaurants?.longitude)
-    .map((r: any) => ({ id: r.id, lat: r.restaurants.latitude, lng: r.restaurants.longitude, name: r.restaurants.name }));
+  const requestMarkers = pendingRequests.map((r: any) => {
+    const coords = resolveStoreCoordinates(r.restaurants, r.pickup_lat, r.pickup_lng);
+    return {
+      id: r.id,
+      lat: coords.lat,
+      lng: coords.lng,
+      name: r.restaurants?.name || "Chamado de Entrega",
+    };
+  });
 
   const showMap = true; // Always show map frame
   const qc = qualityConfig[gpsQuality];
@@ -193,15 +225,18 @@ const DriverGPS = ({ activeRequest, pendingRequests = [], onAcceptRequest, track
       routeLineRef.current = null;
     }
 
-    // If there's a restaurant location on the active request, show it
-    if (activeRequest?.restaurants?.latitude && activeRequest?.restaurants?.longitude) {
-      const destLat = activeRequest.restaurants.latitude;
-      const destLng = activeRequest.restaurants.longitude;
-      const label = activeRequest.status === "accepted" ? "📦 Coleta" : "🏠 Entrega";
+    // Destination marker for active request (resolves store exact coords for pickup, and delivery coords for dropoff)
+    if (activeDestCoords && activeDestCoords.lat && activeDestCoords.lng) {
+      const destLat = activeDestCoords.lat;
+      const destLng = activeDestCoords.lng;
+      const label = isPickupPhase ? "📦 Coleta (Loja)" : "🏠 Entrega (Cliente)";
+      const nameOrAddress = isPickupPhase
+        ? (activeRequest?.restaurants?.name || activeRequest?.pickup_address || "Loja")
+        : (activeRequest?.delivery_address || "Cliente");
 
       destMarkerRef.current = L.marker([destLat, destLng], { icon: destIcon })
         .addTo(map)
-        .bindPopup(`<b>${label}</b><br/>${activeRequest.restaurants.name || ""}`);
+        .bindPopup(`<b>${label}</b><br/>${nameOrAddress}`);
 
       if (driverPosition) {
         routeLineRef.current = L.polyline(
@@ -222,7 +257,7 @@ const DriverGPS = ({ activeRequest, pendingRequests = [], onAcceptRequest, track
         .bindPopup(m.name)
         .on("click", () => onAcceptRequest?.(m.id));
     });
-  }, [driverPosition, accuracy, requestMarkers.length, showMap, autoFollow, activeRequest?.id, activeRequest?.status, mapType]);
+  }, [driverPosition, accuracy, requestMarkers.length, showMap, autoFollow, activeRequest?.id, activeRequest?.status, mapType, activeDestCoords?.lat, activeDestCoords?.lng]);
 
   // Cleanup
   useEffect(() => {
@@ -370,7 +405,7 @@ const DriverGPS = ({ activeRequest, pendingRequests = [], onAcceptRequest, track
               </div>
               <div className="grid grid-cols-2 gap-2 mt-3">
                 <Button 
-                  onClick={() => openNavigation(currentDestination, "google")} 
+                  onClick={() => openNavigation(currentDestination, "google", activeDestCoords)} 
                   variant="secondary" 
                   size="sm" 
                   className="bg-white text-primary hover:bg-white/90 h-8 text-xs font-bold"
@@ -378,7 +413,7 @@ const DriverGPS = ({ activeRequest, pendingRequests = [], onAcceptRequest, track
                   <ExternalLink className="w-3 h-3 mr-1" /> Google Maps
                 </Button>
                 <Button 
-                  onClick={() => openNavigation(currentDestination, "waze")} 
+                  onClick={() => openNavigation(currentDestination, "waze", activeDestCoords)} 
                   variant="secondary" 
                   size="sm" 
                   className="bg-white text-primary hover:bg-white/90 h-8 text-xs font-bold"

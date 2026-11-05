@@ -9,6 +9,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { Category, Restaurant } from "@/types";
+import { resolveStoreCoordinates, isWithinPrimaveraBounds, DEFAULT_CENTER } from "@/config/maps";
+import { geocodeAddress } from "@/services/mapbox";
+import { MapPin } from "lucide-react";
 
 interface RestaurantFormProps {
   open: boolean;
@@ -72,11 +75,67 @@ const RestaurantForm = ({ open, onOpenChange, restaurant, categories }: Restaura
     setForm((f) => ({ ...f, category_id: categoryId, category_name: cat?.name || "" }));
   };
 
+  const [isGeocoding, setIsGeocoding] = useState(false);
+
+  const handleGeocodeAddress = async () => {
+    if (!form.address?.trim()) {
+      toast.error("Preencha o endereço do estabelecimento primeiro");
+      return;
+    }
+    setIsGeocoding(true);
+    try {
+      const resolved = resolveStoreCoordinates({ name: form.name, address: form.address });
+      if (resolved.lat !== DEFAULT_CENTER.lat || resolved.lng !== DEFAULT_CENTER.lng) {
+        setForm((f) => ({ ...f, latitude: String(resolved.lat), longitude: String(resolved.lng) }));
+        toast.success("Coordenadas identificadas e validadas em Primavera do Leste!");
+        return;
+      }
+
+      const res = await geocodeAddress(`${form.address.trim()}, Primavera do Leste - MT`);
+      if (res?.coordinates && isWithinPrimaveraBounds(res.coordinates.latitude, res.coordinates.longitude)) {
+        setForm((f) => ({
+          ...f,
+          latitude: String(res.coordinates.latitude),
+          longitude: String(res.coordinates.longitude),
+        }));
+        toast.success("Coordenadas localizadas com precisão!");
+      } else {
+        toast.error("Não foi possível encontrar as coordenadas exatas dentro de Primavera do Leste.");
+      }
+    } catch {
+      toast.error("Erro ao buscar coordenadas do endereço.");
+    } finally {
+      setIsGeocoding(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name.trim()) { toast.error("Nome é obrigatório"); return; }
     setLoading(true);
     try {
+      let finalLat = form.latitude ? parseFloat(form.latitude) : null;
+      let finalLng = form.longitude ? parseFloat(form.longitude) : null;
+
+      // Se latitude ou longitude estiverem nulos ou fora do perímetro de Primavera do Leste, resolve automaticamente
+      if ((!finalLat || !finalLng || !isWithinPrimaveraBounds(finalLat, finalLng)) && form.address?.trim()) {
+        const resolved = resolveStoreCoordinates({ name: form.name, address: form.address });
+        if (resolved.lat !== DEFAULT_CENTER.lat || resolved.lng !== DEFAULT_CENTER.lng) {
+          finalLat = resolved.lat;
+          finalLng = resolved.lng;
+        } else {
+          try {
+            const geocoded = await geocodeAddress(`${form.address.trim()}, Primavera do Leste - MT`);
+            if (geocoded?.coordinates && isWithinPrimaveraBounds(geocoded.coordinates.latitude, geocoded.coordinates.longitude)) {
+              finalLat = geocoded.coordinates.latitude;
+              finalLng = geocoded.coordinates.longitude;
+            }
+          } catch (e) {
+            console.warn("[RestaurantForm] Auto-geocode falhou:", e);
+          }
+        }
+      }
+
       const payload = {
         name: form.name,
         category_id: form.category_id || null,
@@ -91,18 +150,18 @@ const RestaurantForm = ({ open, onOpenChange, restaurant, categories }: Restaura
         rating: parseFloat(form.rating) || 0,
         is_open: form.is_open,
         is_featured: form.is_featured,
-        latitude: form.latitude ? parseFloat(form.latitude) : null,
-        longitude: form.longitude ? parseFloat(form.longitude) : null,
+        latitude: finalLat,
+        longitude: finalLng,
       };
 
       if (restaurant) {
         const { error } = await supabase.from("restaurants").update(payload).eq("id", restaurant.id);
         if (error) throw error;
-        toast.success("Restaurante atualizado!");
+        toast.success("Restaurante atualizado com coordenadas precisas!");
       } else {
         const { error } = await supabase.from("restaurants").insert(payload);
         if (error) throw error;
-        toast.success("Restaurante criado!");
+        toast.success("Restaurante criado com sucesso!");
       }
       queryClient.invalidateQueries({ queryKey: ["admin-restaurants"] });
       queryClient.invalidateQueries({ queryKey: ["admin-store-owners"] });
@@ -164,8 +223,21 @@ const RestaurantForm = ({ open, onOpenChange, restaurant, categories }: Restaura
             <Input value={form.image} onChange={(e) => setForm((f) => ({ ...f, image: e.target.value }))} placeholder="https://..." />
           </div>
           <div className="space-y-2">
-            <Label>Endereço</Label>
-            <Input value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} />
+            <div className="flex items-center justify-between">
+              <Label>Endereço</Label>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-6 text-xs text-primary px-2 hover:bg-primary/10"
+                onClick={handleGeocodeAddress}
+                disabled={isGeocoding}
+              >
+                <MapPin className="w-3 h-3 mr-1" />
+                {isGeocoding ? "Buscando..." : "Buscar Coordenadas"}
+              </Button>
+            </div>
+            <Input value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} placeholder="Rua, número, bairro, Primavera do Leste" />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
