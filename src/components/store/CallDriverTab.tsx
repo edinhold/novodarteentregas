@@ -1293,8 +1293,16 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
 
       if (error) throw error;
 
-      // Backend dispara o push para todos os motoristas online (nunca bloqueia o pedido)
-      if (requestId) void notifyAvailableDrivers(String(requestId));
+      // Garante persistência explícita das notas e dispara notificação aos motoristas
+      if (requestId) {
+        if (callForm.notes?.trim()) {
+          void supabase
+            .from("delivery_requests")
+            .update({ notes: callForm.notes.trim() })
+            .eq("id", requestId);
+        }
+        void notifyAvailableDrivers(String(requestId));
+      }
 
       // Play a confirmation sound for the store owner
       try {

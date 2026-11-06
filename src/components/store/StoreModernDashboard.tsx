@@ -29,6 +29,7 @@ import {
   Car,
   Home,
   Store as StoreIcon,
+  FileText,
 } from "lucide-react";
 import { searchAddressSuggestions, geocodeAddress, calculateRoute, detectLocationCategory } from "@/services/mapbox";
 import { DEFAULT_CENTER, resolveStoreCoordinates, formatStorePickupAddress, isWithinPrimaveraBounds } from "@/config/maps";
@@ -780,7 +781,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
       notesParts.push(`Local: ${detectedCategory.label}`);
     }
     if (observation.trim()) notesParts.push(`Obs: ${observation.trim()}`);
-    if (additionalNotes.trim()) notesParts.push(additionalNotes.trim());
+    if (additionalNotes.trim()) notesParts.push(`Obs adicional: ${additionalNotes.trim()}`);
     const compiledNotes = notesParts.join(" • ");
 
     const pickupAddress = formatStorePickupAddress(restaurant, restaurant?.address);
@@ -816,7 +817,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
 
       if (error) throw error;
 
-      // Grava imediatamente as coordenadas precisas de coleta e entrega na entrega criada
+      // Grava imediatamente as coordenadas precisas de coleta e entrega e as observações completas na entrega criada
       if (requestId) {
         void supabase
           .from("delivery_requests")
@@ -826,6 +827,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
             pickup_lng: storeCoords.lng,
             delivery_lat: deliveryCoordinates?.lat || null,
             delivery_lng: deliveryCoordinates?.lng || null,
+            notes: compiledNotes || null,
           })
           .eq("id", requestId);
 
@@ -1620,6 +1622,13 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
                           <p className={`text-xs truncate ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
                             Entrega: <span className="font-medium text-foreground">{req.delivery_address || "Endereço não informado"}</span>
                           </p>
+
+                          {req.notes && (
+                            <p className={`text-xs flex items-center gap-1.5 pt-0.5 ${isDark ? "text-amber-300/90" : "text-amber-800"}`} title={req.notes}>
+                              <FileText className="w-3.5 h-3.5 shrink-0 text-amber-500" />
+                              <span className="truncate font-medium">{req.notes}</span>
+                            </p>
+                          )}
 
                           {/* Etapas / Marcos do Pedido Alinhados */}
                           {isCancelled ? (

@@ -16,6 +16,7 @@ import {
   CheckCircle2,
   Loader2,
   DollarSign,
+  FileText,
 } from "lucide-react";
 
 export interface AssignedDriverData {
@@ -249,6 +250,15 @@ export const AssignedDriverCard = ({ activeRequest, onCancelRequest }: AssignedD
                 <span className="font-semibold text-muted-foreground">Destino:</span> {activeRequest.delivery_address}
               </p>
             )}
+            {activeRequest.notes && (
+              <div className="pt-1.5 mt-1 border-t border-amber-500/20 flex items-start gap-1.5 text-amber-900 dark:text-amber-200">
+                <FileText className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                <p className="leading-snug">
+                  <span className="font-bold text-[11px] uppercase tracking-wider block text-amber-700 dark:text-amber-400">Observações da Loja:</span>
+                  <span className="font-medium text-foreground">{activeRequest.notes}</span>
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Exibição Clara do Valor da Entrega */}
@@ -392,6 +402,23 @@ export const AssignedDriverCard = ({ activeRequest, onCancelRequest }: AssignedD
                   </div>
                 </div>
               </div>
+
+              {/* Observação / Instruções da Loja para a Entrega */}
+              {activeRequest.notes && (
+                <div className="bg-amber-500/10 dark:bg-amber-950/40 p-2.5 rounded-lg border border-amber-500/30 text-xs">
+                  <div className="flex items-start gap-2">
+                    <FileText className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                    <div className="min-w-0">
+                      <span className="font-bold text-amber-900 dark:text-amber-300 uppercase tracking-wider block text-[10px]">
+                        Observações da Loja:
+                      </span>
+                      <p className="font-medium text-amber-950 dark:text-amber-200 mt-0.5 break-words">
+                        {activeRequest.notes}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Exibição Clara do Valor da Entrega */}
               {deliveryValue > 0 && (

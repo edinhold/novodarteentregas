@@ -132,3 +132,4 @@ describe("Blindagem da Carteira dos Motoristas e Integridade de Saldos", () => {
     expect(existingEarnings[0].status).toBe("pending");
   });
 });
+

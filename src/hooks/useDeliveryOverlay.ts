@@ -16,6 +16,7 @@ export interface OverlayDelivery {
   driver_fee: number | null;
   credit_cost: number | null;
   distance_km?: number | null;
+  notes?: string | null;
   restaurant?: {
     name?: string | null;
     address?: string | null;
@@ -122,7 +123,7 @@ export function useDeliveryOverlay({ standby, timeoutMs = 30000, onAccepted }: O
       setState("loading");
       const { data, error } = await supabase
         .from("delivery_requests")
-        .select("id, pickup_address, delivery_address, driver_fee, credit_cost, status, driver_id, restaurants(name, address)")
+        .select("id, pickup_address, delivery_address, driver_fee, credit_cost, status, driver_id, notes, restaurants(name, address)")
         .eq("id", id)
         .maybeSingle();
 
@@ -148,6 +149,7 @@ export function useDeliveryOverlay({ standby, timeoutMs = 30000, onAccepted }: O
         delivery_address: (data as any).delivery_address,
         driver_fee: (data as any).driver_fee,
         credit_cost: (data as any).credit_cost,
+        notes: (data as any).notes,
         restaurant: (data as any).restaurants,
       };
       setDelivery(next);

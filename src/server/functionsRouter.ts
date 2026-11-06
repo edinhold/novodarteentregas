@@ -919,7 +919,7 @@ export async function handleEdgeFunction(
     // Step 1: Check if delivery request is still pending and unassigned
     const { data: order } = await supabase
       .from("delivery_requests")
-      .select("id, status, driver_id, pickup_address, delivery_address, driver_fee")
+      .select("id, status, driver_id, pickup_address, delivery_address, driver_fee, notes")
       .eq("id", pedidoId)
       .maybeSingle();
 
@@ -984,12 +984,13 @@ export async function handleEdgeFunction(
         en: "New delivery available!",
       },
       contents: {
-        pt: `Novo chamado de entrega disponível${feeText}. Toque para abrir e aceitar.`,
+        pt: `Novo chamado de entrega disponível${feeText}.${(order as any)?.notes ? ` Obs: ${(order as any).notes.slice(0, 80)}` : ""} Toque para abrir e aceitar.`,
         en: "A new delivery request is available. Tap to view and accept.",
       },
       data: {
         tipo: "nova_entrega",
         pedido_id: pedidoId,
+        observacao: (order as any)?.notes || null,
         rota: `/entregador?pedido=${pedidoId}`,
         evento_id: eventKey,
       },

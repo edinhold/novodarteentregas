@@ -646,3 +646,4 @@ WHERE e.status = 'requested'
 
 -- Recarregar cache de esquema do PostgREST
 NOTIFY pgrst, 'reload schema';
+

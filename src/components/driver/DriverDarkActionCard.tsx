@@ -11,6 +11,7 @@ import {
   ChevronUp,
   Bell,
   Radio,
+  FileText,
 } from "lucide-react";
 
 export interface DeliveryCardData {
@@ -271,6 +272,29 @@ export const DriverDarkActionCard: React.FC<DriverDarkActionCardProps> = ({
                     {request.deliveryAddress || "Endereço não informado"}
                   </span>
                 </div>
+
+                {/* Observação / Instruções da Loja para o Motorista */}
+                {request.notes && (
+                  <div
+                    className={`mt-2 p-2.5 sm:p-3 rounded-xl border flex items-start gap-2.5 text-xs sm:text-sm leading-relaxed transition-all ${
+                      isDark
+                        ? "bg-amber-500/15 border-amber-500/35 text-amber-200 shadow-inner"
+                        : "bg-amber-50/90 border-amber-300 text-amber-950 shadow-xs"
+                    }`}
+                  >
+                    <div className="w-5 h-5 rounded-md bg-amber-500/25 text-amber-500 flex items-center justify-center shrink-0 mt-0.5">
+                      <FileText className="w-3.5 h-3.5" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <span className="font-bold text-[11px] uppercase tracking-wider block text-amber-600 dark:text-amber-400 mb-0.5">
+                        Observação do Lojista:
+                      </span>
+                      <p className="font-semibold text-xs sm:text-[13px] break-words whitespace-pre-wrap text-foreground leading-snug">
+                        {request.notes}
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Botões de Redirecionamento GPS Externo (Google Maps / Waze) */}

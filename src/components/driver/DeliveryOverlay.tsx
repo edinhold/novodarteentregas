@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Check, X, MapPin, Store, DollarSign, AlertTriangle, Loader2 } from "lucide-react";
+import { Check, X, MapPin, Store, DollarSign, AlertTriangle, Loader2, FileText } from "lucide-react";
 import type { OverlayDelivery, OverlayState } from "@/hooks/useDeliveryOverlay";
 
 interface Props {
@@ -132,6 +132,18 @@ const DeliveryOverlay = ({ delivery, state, secondsLeft = 0, permissionWarning, 
                         <p className="text-sm break-words">{delivery.delivery_address}</p>
                       </div>
                     </div>
+
+                    {delivery.notes && (
+                      <div className="rounded-lg bg-amber-500/15 border border-amber-500/30 p-2.5 text-xs space-y-1">
+                        <div className="flex items-center gap-1.5 text-amber-700 dark:text-amber-400 font-bold text-[11px] uppercase tracking-wider">
+                          <FileText className="w-3.5 h-3.5 shrink-0" />
+                          <span>Observações do Lojista</span>
+                        </div>
+                        <p className="text-foreground font-semibold break-words whitespace-pre-wrap pl-5 text-xs">
+                          {delivery.notes}
+                        </p>
+                      </div>
+                    )}
 
                     <div className="flex items-center justify-between rounded-md bg-muted/60 px-3 py-2">
                       <div className="flex items-center gap-2">

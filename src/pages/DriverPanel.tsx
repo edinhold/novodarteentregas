@@ -1381,7 +1381,14 @@ const DriverPanel = () => {
                           )}
                           <p className="text-xs text-muted-foreground">📍 Coleta: {activeRequest.pickup_address}</p>
                           <p className="text-xs text-muted-foreground">🏠 Entrega: {activeRequest.delivery_address}</p>
-                          {activeRequest.notes && <p className="text-xs">📝 {activeRequest.notes}</p>}
+                          {activeRequest.notes && (
+                            <div className="text-xs text-amber-900 dark:text-amber-200 bg-amber-500/15 border border-amber-500/30 p-2.5 rounded-lg mt-1 space-y-0.5">
+                              <span className="font-bold uppercase text-[10px] tracking-wider text-amber-600 dark:text-amber-400 block">
+                                Observações da Loja:
+                              </span>
+                              <p className="font-semibold break-words whitespace-pre-wrap">{activeRequest.notes}</p>
+                            </div>
+                          )}
                         </div>
 
                         <div className="flex gap-2">
@@ -1442,6 +1449,14 @@ const DriverPanel = () => {
                                   <p className="font-bold text-sm truncate">{r.restaurants?.name || "Loja"}</p>
                                   <p className="text-xs text-muted-foreground line-clamp-1">📍 {r.pickup_address}</p>
                                   <p className="text-xs text-muted-foreground line-clamp-1">🏠 {r.delivery_address}</p>
+                                  {r.notes && (
+                                    <div className="text-xs text-amber-900 dark:text-amber-200 bg-amber-500/10 border border-amber-500/25 px-2.5 py-1.5 rounded-lg mt-1 font-medium">
+                                      <span className="font-bold text-[10px] uppercase text-amber-600 dark:text-amber-400 block">
+                                        Obs da Loja:
+                                      </span>
+                                      <p className="line-clamp-2 break-words">{r.notes}</p>
+                                    </div>
+                                  )}
                                   {r.driver_id === user?.id && (
                                     <p className="text-[10px] text-primary font-semibold mt-1">⭐ Direcionada a você (favorito)</p>
                                   )}
