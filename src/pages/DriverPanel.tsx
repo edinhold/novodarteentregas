@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { ArrowLeft, MapPin, Phone, MessageSquare, Send, Check, CheckCircle, Unlock, DollarSign, Key, Wallet, XCircle, Home, History, Settings, Map as MapIcon, Signal, SignalZero, Calendar, Radar, PanelLeft, AlertTriangle, Loader2, Bell, BellRing, BellOff } from "lucide-react";
+import { ArrowLeft, MapPin, Phone, MessageSquare, Send, Check, CheckCircle, Unlock, DollarSign, Key, Wallet, XCircle, Home, History, Settings, Map as MapIcon, Signal, SignalZero, Calendar, Radar, PanelLeft, AlertTriangle, Loader2, Bell, BellRing, BellOff, Clock, RefreshCw, ShieldCheck } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
@@ -366,19 +366,26 @@ const DriverPanel = () => {
     enabled: !!activeRequest,
   });
 
-  // Get earnings
+  // Get earnings (com suporte robusto ao id do motorista na tabela drivers e user_id)
   const { data: earnings = [] } = useQuery({
-    queryKey: ["my-earnings", effectiveDriverProfile?.id],
+    queryKey: ["my-earnings", effectiveDriverProfile?.id, user?.id],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("driver_earnings")
-        .select("*")
-        .eq("driver_id", effectiveDriverProfile!.id)
-        .order("created_at", { ascending: false });
+      const driverId = effectiveDriverProfile?.id;
+      const userId = user?.id;
+      if (!driverId && !userId) return [];
+
+      let query = supabase.from("driver_earnings").select("*");
+      if (driverId && userId && driverId !== userId) {
+        query = query.or(`driver_id.eq.${driverId},driver_id.eq.${userId}`);
+      } else {
+        query = query.eq("driver_id", (driverId || userId)!);
+      }
+
+      const { data, error } = await query.order("created_at", { ascending: false });
       if (error) throw error;
-      return data;
+      return data || [];
     },
-    enabled: !!effectiveDriverProfile?.id,
+    enabled: !!effectiveDriverProfile?.id || !!user?.id,
   });
 
   // Get withdrawal requests
@@ -423,22 +430,27 @@ const DriverPanel = () => {
 
   // Realtime subscription for driver earnings & wallet adjustments
   useEffect(() => {
-    if (!effectiveDriverProfile?.id) return;
+    const driverId = effectiveDriverProfile?.id;
+    const userId = user?.id;
+    if (!driverId && !userId) return;
 
-    const channel = createFreshChannel(`driver-wallet-realtime-${effectiveDriverProfile.id}`)
+    const channelName = `driver-wallet-realtime-${driverId || userId}`;
+    const channel = createFreshChannel(channelName)
       .on(
         "postgres_changes",
         {
           event: "*",
           schema: "public",
           table: "driver_earnings",
-          filter: `driver_id=eq.${effectiveDriverProfile.id}`,
         },
-        (payload) => {
-          queryClient.invalidateQueries({ queryKey: ["my-earnings", effectiveDriverProfile.id] });
-          queryClient.invalidateQueries({ queryKey: ["my-withdrawals", user?.id] });
-          if (payload.eventType === "INSERT") {
-            toast.info("🎉 Seu saldo de carteira foi atualizado pelo administrador!");
+        (payload: any) => {
+          const recDriverId = payload.new?.driver_id || payload.old?.driver_id;
+          if (!recDriverId || recDriverId === driverId || recDriverId === userId) {
+            queryClient.invalidateQueries({ queryKey: ["my-earnings"] });
+            queryClient.invalidateQueries({ queryKey: ["my-withdrawals"] });
+            if (payload.eventType === "INSERT") {
+              toast.info("🎉 Seu saldo de carteira foi atualizado!");
+            }
           }
         }
       )
@@ -774,21 +786,62 @@ const DriverPanel = () => {
   };
 
 
+  const [syncingWallet, setSyncingWallet] = useState(false);
+
+  const syncDriverWallet = async () => {
+    try {
+      setSyncingWallet(true);
+      const { data, error } = await (supabase as any).rpc("sync_driver_wallet_integrity");
+      if (error) throw error;
+
+      queryClient.invalidateQueries({ queryKey: ["my-earnings"] });
+      queryClient.invalidateQueries({ queryKey: ["my-withdrawals"] });
+
+      if (data?.restored_missing_earnings > 0 || data?.reverted_requested_earnings > 0) {
+        const parts = [];
+        if (data.restored_missing_earnings > 0) {
+          parts.push(`${data.restored_missing_earnings} corrida(s) restaurada(s)`);
+        }
+        if (data.reverted_requested_earnings > 0) {
+          parts.push(`saldo estornado para disponível`);
+        }
+        toast.success(`Carteira sincronizada: ${parts.join(", ")}!`);
+      } else {
+        toast.success("Carteira 100% verificada e sincronizada!");
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Erro ao sincronizar carteira");
+    } finally {
+      setSyncingWallet(false);
+    }
+  };
+
   const updateStatus = async (requestId: string, status: string) => {
     try {
       if (status === "delivered") {
-        // Use secure RPC that validates ownership and inserts earnings atomically
-        const { error } = await (supabase as any).rpc("complete_delivery", {
+        // 1. Tentar RPC segura que valida e gera o lançamento financeiro atomicamente
+        const { error: rpcErr } = await (supabase as any).rpc("complete_delivery", {
           p_request_id: requestId,
         });
-        if (error) {
+
+        if (rpcErr) {
+          console.warn("[DriverPanel] complete_delivery fallback acionado:", rpcErr);
           const { error: updateErr } = await supabase
             .from("delivery_requests")
             .update({ status: "delivered", updated_at: new Date().toISOString() })
             .eq("id", requestId);
           if (updateErr) throw updateErr;
+
+          // Invoca auto-reparo e sincronização de carteira como garantia extra
+          try {
+            await (supabase as any).rpc("sync_driver_wallet_integrity");
+          } catch (syncEx) {
+            console.warn("[DriverPanel] auto sync wallet warning:", syncEx);
+          }
         }
-        queryClient.invalidateQueries({ queryKey: ["my-earnings", effectiveDriverProfile?.id] });
+
+        queryClient.invalidateQueries({ queryKey: ["my-earnings"] });
+        queryClient.invalidateQueries({ queryKey: ["my-withdrawals"] });
       } else {
         const { error } = await supabase.from("delivery_requests").update({ status }).eq("id", requestId);
         if (error) throw error;
@@ -929,6 +982,9 @@ const DriverPanel = () => {
   const weekdayNames = ["Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado"];
   const pendingBalance = earnings
     .filter((e: any) => e.status === "pending")
+    .reduce((sum: number, e: any) => sum + Number(e.amount), 0);
+  const requestedBalance = earnings
+    .filter((e: any) => e.status === "requested")
     .reduce((sum: number, e: any) => sum + Number(e.amount), 0);
   const paymentDay = Number((deliveryConfig as any)?.payment_day ?? 3);
   const isPaymentDay = new Date().getDay() === paymentDay;
@@ -1463,17 +1519,52 @@ const DriverPanel = () => {
                     <Card className="bg-accent/5 border-accent/20">
                       <CardContent className="p-4 text-center">
                         <p className="text-2xl font-extrabold text-accent">R$ {pendingBalance.toFixed(2)}</p>
-                        <p className="text-xs text-muted-foreground">Saldo Atual</p>
+                        <p className="text-xs text-muted-foreground">Saldo Disponível</p>
                       </CardContent>
                     </Card>
                   </div>
 
+                  {/* Saque em análise pelo administrador */}
+                  {requestedBalance > 0 && (
+                    <Card className="bg-amber-500/10 border-amber-500/30">
+                      <CardContent className="p-3.5 flex items-center justify-between">
+                        <div className="flex items-center gap-2.5">
+                          <Clock className="w-4 h-4 text-amber-500 animate-pulse shrink-0" />
+                          <div>
+                            <p className="text-xs font-semibold text-amber-800 dark:text-amber-300">
+                              Saque em Processamento
+                            </p>
+                            <p className="text-[10px] text-muted-foreground">
+                              Aguardando conferência do PIX pelo administrador
+                            </p>
+                          </div>
+                        </div>
+                        <span className="text-base font-extrabold text-amber-600 dark:text-amber-400 font-mono">
+                          R$ {requestedBalance.toFixed(2)}
+                        </span>
+                      </CardContent>
+                    </Card>
+                  )}
+
                   {/* Earnings Report */}
                   <Card>
                     <CardHeader className="pb-2">
-                      <CardTitle className="text-base flex items-center gap-2">
-                        <Calendar className="w-4 h-4 text-primary" /> Relatório de Ganhos
-                      </CardTitle>
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="text-base flex items-center gap-2">
+                          <Calendar className="w-4 h-4 text-primary" /> Relatório de Ganhos
+                        </CardTitle>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={syncDriverWallet}
+                          disabled={syncingWallet}
+                          className="h-7 text-[11px] gap-1 px-2.5 text-muted-foreground hover:text-foreground"
+                          title="Sincronizar e verificar integridade da carteira"
+                        >
+                          <RefreshCw className={`w-3 h-3 ${syncingWallet ? "animate-spin" : ""}`} />
+                          {syncingWallet ? "Verificando..." : "Sincronizar Carteira"}
+                        </Button>
+                      </div>
                     </CardHeader>
                     <CardContent>
                       <div className="grid grid-cols-3 gap-2">

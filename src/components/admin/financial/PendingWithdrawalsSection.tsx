@@ -44,6 +44,8 @@ export const PendingWithdrawalsSection: React.FC<PendingWithdrawalsSectionProps>
   const handleAction = async (id: string, status: "approved" | "rejected") => {
     setProcessingId(id);
     try {
+      const targetReq = pendingList.find((w) => w.id === id);
+
       const { error } = await supabase
         .from("withdrawal_requests")
         .update({
@@ -54,10 +56,49 @@ export const PendingWithdrawalsSection: React.FC<PendingWithdrawalsSectionProps>
 
       if (error) throw error;
 
+      // Sincronização explícita de segurança para os lançamentos do motorista
+      if (targetReq) {
+        const targetDriverId = targetReq.driver_id;
+        const targetUserId = targetReq.driver_user_id;
+
+        if (status === "approved") {
+          if (targetDriverId) {
+            await supabase
+              .from("driver_earnings")
+              .update({ status: "paid", updated_at: new Date().toISOString() })
+              .eq("driver_id", targetDriverId)
+              .eq("status", "requested");
+          }
+          if (targetUserId && targetUserId !== targetDriverId) {
+            await supabase
+              .from("driver_earnings")
+              .update({ status: "paid", updated_at: new Date().toISOString() })
+              .eq("driver_id", targetUserId)
+              .eq("status", "requested");
+          }
+        } else if (status === "rejected") {
+          // Se recusado, estorna os valores imediatamente para 'pending' para não sumir da carteira do motorista
+          if (targetDriverId) {
+            await supabase
+              .from("driver_earnings")
+              .update({ status: "pending", updated_at: new Date().toISOString() })
+              .eq("driver_id", targetDriverId)
+              .eq("status", "requested");
+          }
+          if (targetUserId && targetUserId !== targetDriverId) {
+            await supabase
+              .from("driver_earnings")
+              .update({ status: "pending", updated_at: new Date().toISOString() })
+              .eq("driver_id", targetUserId)
+              .eq("status", "requested");
+          }
+        }
+      }
+
       toast.success(
         status === "approved"
           ? "Saque aprovado com sucesso! Lembre-se de realizar a transferência PIX."
-          : "Solicitação de saque recusada."
+          : "Solicitação de saque recusada e saldo estornado para a carteira do motorista."
       );
 
       queryClient.invalidateQueries({ queryKey: ["admin-withdrawals"] });

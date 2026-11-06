@@ -2114,7 +2114,30 @@ export async function handleEdgeFunction(
           await supabase.from("driver_earnings").delete().eq("id", entryId);
         }
         if (sourceTable === "withdrawal_requests") {
+          const { data: wRow } = await supabase
+            .from("withdrawal_requests")
+            .select("driver_id, driver_user_id, status")
+            .eq("id", entryId)
+            .maybeSingle();
+
           await supabase.from("withdrawal_requests").delete().eq("id", entryId);
+
+          if (wRow && wRow.status === "pending") {
+            if (wRow.driver_id) {
+              await supabase
+                .from("driver_earnings")
+                .update({ status: "pending", updated_at: new Date().toISOString() })
+                .eq("driver_id", wRow.driver_id)
+                .eq("status", "requested");
+            }
+            if (wRow.driver_user_id && wRow.driver_user_id !== wRow.driver_id) {
+              await supabase
+                .from("driver_earnings")
+                .update({ status: "pending", updated_at: new Date().toISOString() })
+                .eq("driver_id", wRow.driver_user_id)
+                .eq("status", "requested");
+            }
+          }
         }
         if (sourceTable === "delivery_requests") {
           await supabase.from("driver_earnings").update({ delivery_request_id: null }).eq("delivery_request_id", entryId);

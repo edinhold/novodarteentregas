@@ -102,7 +102,30 @@ export const UnifiedTransactionsTable: React.FC<UnifiedTransactionsTableProps> =
             await supabase.from("store_recharges").delete().eq("id", deleteConfirmTx.rawId);
             await supabase.from("credit_codes").delete().eq("id", deleteConfirmTx.rawId);
           } else if (deleteConfirmTx.type === "saque") {
+            const { data: wRow } = await supabase
+              .from("withdrawal_requests")
+              .select("driver_id, driver_user_id, status")
+              .eq("id", deleteConfirmTx.rawId)
+              .maybeSingle();
+
             await supabase.from("withdrawal_requests").delete().eq("id", deleteConfirmTx.rawId);
+
+            if (wRow && wRow.status === "pending") {
+              if (wRow.driver_id) {
+                await supabase
+                  .from("driver_earnings")
+                  .update({ status: "pending", updated_at: new Date().toISOString() })
+                  .eq("driver_id", wRow.driver_id)
+                  .eq("status", "requested");
+              }
+              if (wRow.driver_user_id && wRow.driver_user_id !== wRow.driver_id) {
+                await supabase
+                  .from("driver_earnings")
+                  .update({ status: "pending", updated_at: new Date().toISOString() })
+                  .eq("driver_id", wRow.driver_user_id)
+                  .eq("status", "requested");
+              }
+            }
           } else if (deleteConfirmTx.type === "corrida") {
             await supabase.from("driver_earnings").update({ delivery_request_id: null }).eq("delivery_request_id", deleteConfirmTx.rawId);
             await supabase.from("orders").update({ delivery_request_id: null }).eq("delivery_request_id", deleteConfirmTx.rawId);
