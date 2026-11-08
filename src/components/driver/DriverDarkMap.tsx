@@ -11,6 +11,8 @@ interface DriverDarkMapProps {
   pickupLocation?: { lat: number; lng: number; name?: string } | null;
   deliveryLocation?: { lat: number; lng: number; address?: string } | null;
   pendingLocations?: Array<{ id: string; lat: number; lng: number; name?: string }>;
+  hasActiveDelivery?: boolean;
+  activeStatus?: "accepted" | "picked_up" | string | null;
   onSelectPending?: (id: string) => void;
   isBottomCardCollapsed?: boolean;
 }
@@ -72,6 +74,8 @@ export const DriverDarkMap: React.FC<DriverDarkMapProps> = ({
   pickupLocation,
   deliveryLocation,
   pendingLocations = [],
+  hasActiveDelivery = false,
+  activeStatus = null,
   onSelectPending,
   isBottomCardCollapsed = false,
 }) => {
@@ -83,6 +87,12 @@ export const DriverDarkMap: React.FC<DriverDarkMapProps> = ({
   const deliveryMarkerRef = useRef<L.Marker | null>(null);
   const pendingMarkersRef = useRef<L.Marker[]>([]);
   const routePolylineRef = useRef<L.Polyline | null>(null);
+
+  // Rastreamento de rota contínua e sem piscamento
+  const lastRouteOriginRef = useRef<{ lat: number; lng: number } | null>(null);
+  const lastRouteDestRef = useRef<{ lat: number; lng: number } | null>(null);
+  const currentRoutePointsRef = useRef<[number, number][]>([]);
+  const isFetchingRouteRef = useRef<boolean>(false);
 
   const [autoFollow, setAutoFollow] = useState(true);
   const [mapType, setMapType] = useState<keyof typeof MAP_LAYERS>("streets");
@@ -162,7 +172,7 @@ export const DriverDarkMap: React.FC<DriverDarkMapProps> = ({
     }
   }, [driverPosition, heading, autoFollow]);
 
-  // Marcador de Coleta (Loja)
+  // Marcador de Coleta (Loja) - Apenas se houver corrida aceita ativa
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -172,15 +182,16 @@ export const DriverDarkMap: React.FC<DriverDarkMapProps> = ({
       pickupMarkerRef.current = null;
     }
 
-    if (pickupLocation && pickupLocation.lat && pickupLocation.lng) {
+    // Apenas exibe o marcador de coleta se o motorista tiver aceito a corrida e ainda não tiver coletado o pedido
+    if (hasActiveDelivery && activeStatus !== "picked_up" && pickupLocation && pickupLocation.lat && pickupLocation.lng) {
       pickupMarkerRef.current = L.marker([pickupLocation.lat, pickupLocation.lng], {
         icon: pickupIcon,
         zIndexOffset: 500,
       }).addTo(map);
     }
-  }, [pickupLocation?.lat, pickupLocation?.lng]);
+  }, [hasActiveDelivery, activeStatus, pickupLocation?.lat, pickupLocation?.lng]);
 
-  // Marcador de Entrega (Cliente)
+  // Marcador de Entrega (Cliente) - Apenas se houver corrida aceita ativa
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -190,106 +201,172 @@ export const DriverDarkMap: React.FC<DriverDarkMapProps> = ({
       deliveryMarkerRef.current = null;
     }
 
-    if (deliveryLocation && deliveryLocation.lat && deliveryLocation.lng) {
+    // Apenas exibe o marcador de entrega se houver corrida aceita ativa
+    if (hasActiveDelivery && deliveryLocation && deliveryLocation.lat && deliveryLocation.lng) {
       deliveryMarkerRef.current = L.marker([deliveryLocation.lat, deliveryLocation.lng], {
         icon: deliveryIcon,
         zIndexOffset: 600,
       }).addTo(map);
     }
-  }, [deliveryLocation?.lat, deliveryLocation?.lng]);
+  }, [hasActiveDelivery, deliveryLocation?.lat, deliveryLocation?.lng]);
 
   // Traçado da Rota em Azul Ciano (Directions v5 / Polyline)
+  // REGRA SÊNIOR: NUNCA traça rota sem que haja um chamado aceito pelo motorista (hasActiveDelivery).
+  // E NUNCA remove a polyline antes da nova estar pronta (evita efeito "piscando" / flashing no GPS).
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
 
-    if (routePolylineRef.current) {
-      map.removeLayer(routePolylineRef.current);
-      routePolylineRef.current = null;
+    // Se NÃO houver corrida aceita ativa, remove imediatamente qualquer traçado do mapa
+    if (!hasActiveDelivery) {
+      if (routePolylineRef.current) {
+        map.removeLayer(routePolylineRef.current);
+        routePolylineRef.current = null;
+      }
+      currentRoutePointsRef.current = [];
+      lastRouteOriginRef.current = null;
+      lastRouteDestRef.current = null;
+      return;
     }
 
-    // Determinar os dois pontos prioritários para rota
-    // 1. Motorista -> Coleta (se ainda não coletou)
-    // 2. Coleta -> Entrega (se já coletou ou traçando caminho completo)
-    let startPoint = driverPosition;
-    let endPoint = pickupLocation || deliveryLocation;
+    // Determina o destino prioritário da rota conforme a etapa da entrega ativa:
+    // Se status === 'picked_up' (já coletou): o destino é a Entrega (cliente)
+    // Se status === 'accepted' (ainda não coletou): o destino é a Coleta (loja)
+    const targetDestination =
+      activeStatus === "picked_up"
+        ? (deliveryLocation || pickupLocation)
+        : (pickupLocation || deliveryLocation);
 
-    if (!startPoint || !endPoint) return;
-
-    let isSubscribed = true;
-
-    const drawPolyline = (points: [number, number][]) => {
-      if (!isSubscribed || !mapRef.current) return;
+    if (!driverPosition || !targetDestination || !targetDestination.lat || !targetDestination.lng) {
       if (routePolylineRef.current) {
-        mapRef.current.removeLayer(routePolylineRef.current);
+        map.removeLayer(routePolylineRef.current);
+        routePolylineRef.current = null;
       }
-      routePolylineRef.current = L.polyline(points, {
-        color: "#0ea5e9", // Azul Ciano vibrante do mockup
-        weight: 5,
-        opacity: 0.95,
-        lineCap: "round",
-        lineJoin: "round",
-      }).addTo(mapRef.current);
+      currentRoutePointsRef.current = [];
+      lastRouteOriginRef.current = null;
+      lastRouteDestRef.current = null;
+      return;
+    }
+
+    const calcDistanceMeters = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+      const R = 6371e3;
+      const p1 = (lat1 * Math.PI) / 180;
+      const p2 = (lat2 * Math.PI) / 180;
+      const dp = ((lat2 - lat1) * Math.PI) / 180;
+      const dl = ((lon2 - lon1) * Math.PI) / 180;
+      const a =
+        Math.sin(dp / 2) * Math.sin(dp / 2) +
+        Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) * Math.sin(dl / 2);
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     };
 
-    // Tentar obter rota real pelas ruas via Mapbox / OSRM
-    const fetchRoutes = async () => {
+    const destChanged =
+      !lastRouteDestRef.current ||
+      calcDistanceMeters(
+        lastRouteDestRef.current.lat,
+        lastRouteDestRef.current.lng,
+        targetDestination.lat,
+        targetDestination.lng
+      ) > 10;
+
+    const driverMovedFar =
+      !lastRouteOriginRef.current ||
+      calcDistanceMeters(
+        lastRouteOriginRef.current.lat,
+        lastRouteOriginRef.current.lng,
+        driverPosition.lat,
+        driverPosition.lng
+      ) > 25;
+
+    // Se já temos a rota traçada e o motorista apenas teve micro-oscilação do GPS (<25m),
+    // atualizamos suavemente apenas a ponta inicial do traçado sem requisição de rede e sem piscar!
+    if (routePolylineRef.current && !destChanged && !driverMovedFar) {
+      if (currentRoutePointsRef.current.length > 0) {
+        const updatedPoints: [number, number][] = [
+          [driverPosition.lat, driverPosition.lng],
+          ...currentRoutePointsRef.current.slice(1),
+        ];
+        currentRoutePointsRef.current = updatedPoints;
+        routePolylineRef.current.setLatLngs(updatedPoints);
+      }
+      return;
+    }
+
+    let isCancelled = false;
+
+    const updateRoute = async () => {
+      if (isFetchingRouteRef.current) return;
+      isFetchingRouteRef.current = true;
+
       try {
-        if (driverPosition && pickupLocation && deliveryLocation) {
-          // Trajeto completo de 2 etapas: Motorista -> Coleta -> Entrega
-          const [res1, res2] = await Promise.allSettled([
-            calculateRoute(
-              { lat: driverPosition.lat, lng: driverPosition.lng },
-              { lat: pickupLocation.lat, lng: pickupLocation.lng }
-            ),
-            calculateRoute(
-              { lat: pickupLocation.lat, lng: pickupLocation.lng },
-              { lat: deliveryLocation.lat, lng: deliveryLocation.lng }
-            ),
-          ]);
-
-          const geom1 = res1.status === "fulfilled" && res1.value?.geometry?.length ? res1.value.geometry : [
-            [driverPosition.lat, driverPosition.lng] as [number, number],
-            [pickupLocation.lat, pickupLocation.lng] as [number, number],
-          ];
-
-          const geom2 = res2.status === "fulfilled" && res2.value?.geometry?.length ? res2.value.geometry : [
-            [pickupLocation.lat, pickupLocation.lng] as [number, number],
-            [deliveryLocation.lat, deliveryLocation.lng] as [number, number],
-          ];
-
-          drawPolyline([...geom1, ...geom2]);
-          return;
-        }
-
-        // Caso tenha apenas 1 destino (Coleta ou Entrega)
         const res = await calculateRoute(
-          { lat: startPoint.lat, lng: startPoint.lng },
-          { lat: endPoint.lat, lng: endPoint.lng }
+          { lat: driverPosition.lat, lng: driverPosition.lng },
+          { lat: targetDestination.lat, lng: targetDestination.lng }
         );
 
-        if (res?.geometry && res.geometry.length > 0) {
-          drawPolyline(res.geometry);
+        if (isCancelled || !mapRef.current) return;
+
+        const points: [number, number][] =
+          res?.geometry && res.geometry.length > 0
+            ? res.geometry
+            : [
+                [driverPosition.lat, driverPosition.lng],
+                [targetDestination.lat, targetDestination.lng],
+              ];
+
+        currentRoutePointsRef.current = points;
+        lastRouteOriginRef.current = { lat: driverPosition.lat, lng: driverPosition.lng };
+        lastRouteDestRef.current = { lat: targetDestination.lat, lng: targetDestination.lng };
+
+        // Atualiza a polyline existente in-place com setLatLngs (Zero piscamento!)
+        if (routePolylineRef.current) {
+          routePolylineRef.current.setLatLngs(points);
         } else {
-          drawPolyline([
-            [startPoint!.lat, startPoint!.lng],
-            [endPoint!.lat, endPoint!.lng],
-          ]);
+          routePolylineRef.current = L.polyline(points, {
+            color: "#0ea5e9", // Azul Ciano vibrante
+            weight: 5,
+            opacity: 0.95,
+            lineCap: "round",
+            lineJoin: "round",
+          }).addTo(mapRef.current);
         }
       } catch {
-        drawPolyline([
-          [startPoint!.lat, startPoint!.lng],
-          [endPoint!.lat, endPoint!.lng],
-        ]);
+        if (isCancelled || !mapRef.current) return;
+        const fallbackPoints: [number, number][] = [
+          [driverPosition.lat, driverPosition.lng],
+          [targetDestination.lat, targetDestination.lng],
+        ];
+        if (routePolylineRef.current) {
+          routePolylineRef.current.setLatLngs(fallbackPoints);
+        } else {
+          routePolylineRef.current = L.polyline(fallbackPoints, {
+            color: "#0ea5e9",
+            weight: 5,
+            opacity: 0.95,
+            lineCap: "round",
+            lineJoin: "round",
+          }).addTo(mapRef.current);
+        }
+      } finally {
+        isFetchingRouteRef.current = false;
       }
     };
 
-    fetchRoutes();
+    updateRoute();
 
     return () => {
-      isSubscribed = false;
+      isCancelled = true;
     };
-  }, [driverPosition?.lat, driverPosition?.lng, pickupLocation?.lat, pickupLocation?.lng, deliveryLocation?.lat, deliveryLocation?.lng]);
+  }, [
+    hasActiveDelivery,
+    activeStatus,
+    driverPosition?.lat,
+    driverPosition?.lng,
+    pickupLocation?.lat,
+    pickupLocation?.lng,
+    deliveryLocation?.lat,
+    deliveryLocation?.lng,
+  ]);
 
   // Marcadores de chamados pendentes adicionais
   useEffect(() => {
