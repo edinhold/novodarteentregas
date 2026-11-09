@@ -30,6 +30,7 @@ import {
   Home,
   Store as StoreIcon,
   FileText,
+  Flame,
 } from "lucide-react";
 import { searchAddressSuggestions, geocodeAddress, calculateRoute, detectLocationCategory } from "@/services/mapbox";
 import { DEFAULT_CENTER, resolveStoreCoordinates, formatStorePickupAddress, isWithinPrimaveraBounds } from "@/config/maps";
@@ -339,7 +340,8 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
       const { data: tableData } = await supabase.from("delivery_config").select("*").limit(1).maybeSingle();
       return Array.isArray(tableData) ? tableData[0] : tableData;
     },
-    staleTime: 1000 * 30, // 30s para atualizar taxas com rapidez caso o admin altere
+    staleTime: 1000 * 15, // 15s para atualizar taxas com rapidez caso o admin altere
+    refetchInterval: 1000 * 15, // Atualiza dinamicamente se o admin ligar/desligar a tarifa dinâmica
   });
 
   const deliveryConfig = useMemo(() => {
@@ -614,9 +616,13 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
     }
 
     const baseFee = Number(deliveryConfig?.base_fee ?? 5.3);
+    const baseKmFee = Number(deliveryConfig?.fee_per_km ?? 1.7);
     const dynamicEnabled = Boolean(deliveryConfig?.dynamic_pricing_enabled);
-    const dynamicFee = Number(deliveryConfig?.dynamic_fee_per_km ?? 0);
-    const feePerKm = dynamicEnabled && dynamicFee > 0 ? dynamicFee : Number(deliveryConfig?.fee_per_km ?? 1.7);
+    const dynamicFee = (dynamicEnabled && Number(deliveryConfig?.dynamic_fee_per_km ?? 0) > 0)
+      ? Number(deliveryConfig?.dynamic_fee_per_km)
+      : 0;
+    // REGRA SÊNIOR: A taxa dinâmica SOMA com a taxa regular por km (baseKmFee + dynamicFee)
+    const feePerKm = baseKmFee + dynamicFee;
     const minKm = Number(deliveryConfig?.min_km ?? 0);
     const maxKm = Number(deliveryConfig?.max_km ?? 0);
     const roundKmUp = Boolean(deliveryConfig?.round_km_up ?? false);
@@ -640,6 +646,9 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
       rawKm,
       feePerKm,
       baseFee,
+      baseKmFee,
+      dynamicFee,
+      isDynamicActive: dynamicEnabled && dynamicFee > 0,
     };
   }, [deliveryConfig, estimatedDistanceKm, deliveryCoordinates, addressInput]);
 
@@ -793,9 +802,13 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
     const minKm = Number(deliveryConfig?.min_km ?? 0);
     const maxKm = Number(deliveryConfig?.max_km ?? 0);
     const baseFee = Number(deliveryConfig?.base_fee ?? 5.3);
+    const baseKmFee = Number(deliveryConfig?.fee_per_km ?? 1.7);
     const dynamicEnabled = Boolean(deliveryConfig?.dynamic_pricing_enabled);
-    const dynamicFee = Number(deliveryConfig?.dynamic_fee_per_km ?? 0);
-    const feePerKm = dynamicEnabled && dynamicFee > 0 ? dynamicFee : Number(deliveryConfig?.fee_per_km ?? 1.7);
+    const dynamicFee = (dynamicEnabled && Number(deliveryConfig?.dynamic_fee_per_km ?? 0) > 0)
+      ? Number(deliveryConfig?.dynamic_fee_per_km)
+      : 0;
+    // REGRA SÊNIOR: A taxa dinâmica SOMA com a taxa regular por km
+    const feePerKm = baseKmFee + dynamicFee;
 
     let effectiveKm = distanceToSend;
     if (roundKmUp && effectiveKm > 0) effectiveKm = Math.ceil(effectiveKm);
@@ -1357,6 +1370,18 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
                         </div>
                       )}
                     </div>
+
+                    {fareDetails.isDynamicActive && (
+                      <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-800 dark:text-amber-300 text-xs">
+                        <span className="flex items-center gap-1.5 font-bold">
+                          <Flame className="w-3.5 h-3.5 text-amber-500 fill-amber-500 animate-pulse" />
+                          Tarifa Dinâmica Ativa
+                        </span>
+                        <span className="font-semibold text-[11px]">
+                          + R$ {fareDetails.dynamicFee.toFixed(2)}/km (Total: R$ {fareDetails.feePerKm.toFixed(2)}/km)
+                        </span>
+                      </div>
+                    )}
 
                     {/* Informações complementares de saldo (SEM taxa base para evitar confusão) */}
                     <div className="pt-2 border-t border-border/40 flex items-center justify-between text-[11px] text-muted-foreground">

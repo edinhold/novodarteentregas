@@ -311,8 +311,8 @@ export const AssignedDriverCard = ({ activeRequest, onCancelRequest }: AssignedD
       activeRequest.status === "accepted"
         ? "Motorista aceitou a entrega"
         : activeRequest.status === "picked_up"
-        ? "Pedido coletado • A caminho do cliente"
-        : "Entrega em andamento";
+          ? "Pedido coletado • A caminho do cliente"
+          : "Entrega em andamento";
 
     return (
       <Card className="border-emerald-500/40 bg-emerald-500/5 shadow-md overflow-hidden" id="card-delivery-accepted">

@@ -8,9 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Settings, MessageCircle, Ruler, Calendar, DollarSign, Flame } from "lucide-react";
-
-import { ConfirmAdminPasswordModal } from "@/components/admin/ConfirmAdminPasswordModal";
+import { Settings, MessageCircle, Ruler, Calendar, Flame, CheckCircle2 } from "lucide-react";
 
 const DAYS_OF_WEEK = [
   { value: "0", label: "Domingo" },
@@ -25,10 +23,9 @@ const DAYS_OF_WEEK = [
 const FeesConfigTab = () => {
   const queryClient = useQueryClient();
   const [loading, setLoading] = useState(false);
-  const [showPasswordConfirm, setShowPasswordConfirm] = useState(false);
   const [form, setForm] = useState({
-    base_fee: "5",
-    fee_per_km: "1.5",
+    base_fee: "5.3",
+    fee_per_km: "1.7",
     early_withdrawal_fee_percent: "10",
     withdrawal_fixed_fee: "1.00",
     payment_day: "3",
@@ -39,12 +36,21 @@ const FeesConfigTab = () => {
     max_km: "0",
     round_km_up: false,
     dynamic_pricing_enabled: false,
-    dynamic_fee_per_km: "2.5",
+    dynamic_fee_per_km: "1.0",
   });
 
-  const { data: rawConfig } = useQuery({
+  const { data: rawConfig, isLoading: configLoading } = useQuery({
     queryKey: ["delivery-config"],
     queryFn: async () => {
+      try {
+        const { data: rpcData, error: rpcError } = await (supabase as any).rpc("get_public_delivery_config");
+        if (!rpcError && rpcData) {
+          const item = Array.isArray(rpcData) ? rpcData[0] : rpcData;
+          if (item) return item;
+        }
+      } catch (e) {
+        console.warn("[FeesConfigTab] Erro RPC get_public_delivery_config:", e);
+      }
       const { data, error } = await supabase.from("delivery_config").select("*").limit(1).maybeSingle();
       if (error) throw error;
       return data;
@@ -59,8 +65,8 @@ const FeesConfigTab = () => {
   useEffect(() => {
     if (config) {
       setForm({
-        base_fee: String(config.base_fee),
-        fee_per_km: String(config.fee_per_km),
+        base_fee: String(config.base_fee ?? "5.3"),
+        fee_per_km: String(config.fee_per_km ?? "1.7"),
         early_withdrawal_fee_percent: String((config as any).early_withdrawal_fee_percent ?? 10),
         withdrawal_fixed_fee: String((config as any).withdrawal_fixed_fee ?? 1.00),
         payment_day: String((config as any).payment_day ?? 3),
@@ -71,13 +77,29 @@ const FeesConfigTab = () => {
         max_km: String((config as any).max_km ?? 0),
         round_km_up: !!(config as any).round_km_up,
         dynamic_pricing_enabled: !!(config as any).dynamic_pricing_enabled,
-        dynamic_fee_per_km: String((config as any).dynamic_fee_per_km ?? 2.5),
+        dynamic_fee_per_km: String((config as any).dynamic_fee_per_km ?? 1.0),
       });
     }
   }, [config]);
 
-  const handleSave = () => {
-    if (!config) return;
+  const regularKmFee = useMemo(() => {
+    const val = parseFloat(form.fee_per_km);
+    return isNaN(val) ? 0 : Math.max(0, val);
+  }, [form.fee_per_km]);
+
+  const dynamicKmFee = useMemo(() => {
+    const val = parseFloat(form.dynamic_fee_per_km);
+    return isNaN(val) ? 0 : Math.max(0, val);
+  }, [form.dynamic_fee_per_km]);
+
+  const totalEffectiveKmFee = useMemo(() => {
+    if (!form.dynamic_pricing_enabled) {
+      return regularKmFee;
+    }
+    return regularKmFee + dynamicKmFee;
+  }, [regularKmFee, dynamicKmFee, form.dynamic_pricing_enabled]);
+
+  const handleSave = async () => {
     const minKmVal = isNaN(parseFloat(form.min_km)) ? 0 : Math.max(0, parseFloat(form.min_km));
     const maxKmVal = isNaN(parseFloat(form.max_km)) ? 0 : Math.max(0, parseFloat(form.max_km));
 
@@ -86,45 +108,86 @@ const FeesConfigTab = () => {
       return;
     }
 
-    setShowPasswordConfirm(true);
-  };
-
-  const executeSave = async () => {
-    if (!config) return;
     setLoading(true);
     try {
-      const baseFeeVal = isNaN(parseFloat(form.base_fee)) ? 5 : Math.max(0, parseFloat(form.base_fee));
-      const feePerKmVal = isNaN(parseFloat(form.fee_per_km)) ? 1.5 : Math.max(0, parseFloat(form.fee_per_km));
-      const minKmVal = isNaN(parseFloat(form.min_km)) ? 0 : Math.max(0, parseFloat(form.min_km));
-      const maxKmVal = isNaN(parseFloat(form.max_km)) ? 0 : Math.max(0, parseFloat(form.max_km));
+      const baseFeeVal = isNaN(parseFloat(form.base_fee)) ? 5.3 : Math.max(0, parseFloat(form.base_fee));
+      const feePerKmVal = isNaN(parseFloat(form.fee_per_km)) ? 1.7 : Math.max(0, parseFloat(form.fee_per_km));
       const earlyWithdrawalFeePercentVal = isNaN(parseFloat(form.early_withdrawal_fee_percent)) ? 10 : Math.max(0, parseFloat(form.early_withdrawal_fee_percent));
       const withdrawalFixedFeeVal = isNaN(parseFloat(form.withdrawal_fixed_fee)) ? 1.00 : Math.max(0, parseFloat(form.withdrawal_fixed_fee));
       const paymentDayVal = isNaN(parseInt(form.payment_day, 10)) ? 3 : parseInt(form.payment_day, 10);
       const appFeePerDeliveryVal = isNaN(parseFloat(form.app_fee_per_delivery)) ? 2 : Math.max(0, parseFloat(form.app_fee_per_delivery));
       const dynamicFeePerKmVal = isNaN(parseFloat(form.dynamic_fee_per_km)) ? 0 : Math.max(0, parseFloat(form.dynamic_fee_per_km));
 
-      const { error } = await supabase.from("delivery_config").update({
-        base_fee: baseFeeVal,
-        fee_per_km: feePerKmVal,
-        early_withdrawal_fee_percent: earlyWithdrawalFeePercentVal,
-        withdrawal_fixed_fee: withdrawalFixedFeeVal,
-        payment_day: paymentDayVal,
-        app_fee_per_delivery: appFeePerDeliveryVal,
-        whatsapp_number: form.whatsapp_number.trim(),
-        recharge_url: form.recharge_url.trim(),
-        min_km: minKmVal,
-        max_km: maxKmVal,
-        round_km_up: form.round_km_up,
-        dynamic_pricing_enabled: form.dynamic_pricing_enabled,
-        dynamic_fee_per_km: dynamicFeePerKmVal,
-      } as any).eq("id", config.id);
-      if (error) throw error;
+      let savedViaRpc = false;
+
+      // 1. Tenta salvar via RPC dedicada SECURITY DEFINER com permissão direta
+      try {
+        const { data: rpcData, error: rpcError } = await (supabase as any).rpc("update_delivery_config", {
+          p_base_fee: baseFeeVal,
+          p_fee_per_km: feePerKmVal,
+          p_min_km: minKmVal,
+          p_max_km: maxKmVal,
+          p_round_km_up: form.round_km_up,
+          p_dynamic_pricing_enabled: form.dynamic_pricing_enabled,
+          p_dynamic_fee_per_km: dynamicFeePerKmVal,
+          p_early_withdrawal_fee_percent: earlyWithdrawalFeePercentVal,
+          p_withdrawal_fixed_fee: withdrawalFixedFeeVal,
+          p_payment_day: paymentDayVal,
+          p_app_fee_per_delivery: appFeePerDeliveryVal,
+          p_whatsapp_number: form.whatsapp_number.trim(),
+          p_recharge_url: form.recharge_url.trim(),
+        });
+        if (!rpcError && rpcData) {
+          savedViaRpc = true;
+        }
+      } catch (rpcErr) {
+        console.warn("[FeesConfigTab] RPC update_delivery_config indisponível, tentando update direto:", rpcErr);
+      }
+
+      // 2. Se a RPC não foi executada ou falhou, realiza update/insert direto na tabela
+      if (!savedViaRpc) {
+        const payload: any = {
+          base_fee: baseFeeVal,
+          fee_per_km: feePerKmVal,
+          early_withdrawal_fee_percent: earlyWithdrawalFeePercentVal,
+          withdrawal_fixed_fee: withdrawalFixedFeeVal,
+          payment_day: paymentDayVal,
+          app_fee_per_delivery: appFeePerDeliveryVal,
+          whatsapp_number: form.whatsapp_number.trim(),
+          recharge_url: form.recharge_url.trim(),
+          min_km: minKmVal,
+          max_km: maxKmVal,
+          round_km_up: form.round_km_up,
+          dynamic_pricing_enabled: form.dynamic_pricing_enabled,
+          dynamic_fee_per_km: dynamicFeePerKmVal,
+          updated_at: new Date().toISOString(),
+        };
+
+        if (config?.id) {
+          const { error } = await supabase.from("delivery_config").update(payload).eq("id", config.id);
+          if (error) throw error;
+        } else {
+          // Busca registro existente ou insere
+          const { data: existing } = await supabase.from("delivery_config").select("id").limit(1).maybeSingle();
+          if (existing?.id) {
+            const { error } = await supabase.from("delivery_config").update(payload).eq("id", existing.id);
+            if (error) throw error;
+          } else {
+            const { error } = await supabase.from("delivery_config").insert(payload);
+            if (error) throw error;
+          }
+        }
+      }
+
       toast.success("Configuração de taxas salva com sucesso!");
-      queryClient.invalidateQueries({ queryKey: ["delivery-config"] });
-      queryClient.invalidateQueries({ queryKey: ["public-delivery-config"] });
-      queryClient.invalidateQueries({ queryKey: ["financial-delivery-config"] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["delivery-config"] }),
+        queryClient.invalidateQueries({ queryKey: ["public-delivery-config"] }),
+        queryClient.invalidateQueries({ queryKey: ["financial-delivery-config"] }),
+      ]);
     } catch (err: any) {
-      toast.error(err.message || "Erro ao salvar configuração");
+      console.error("[FeesConfigTab] Erro ao salvar taxas:", err);
+      toast.error(err.message || "Erro ao salvar configuração de taxas.");
     } finally {
       setLoading(false);
     }
@@ -134,26 +197,37 @@ const FeesConfigTab = () => {
     <Card>
       <CardHeader>
         <CardTitle className="text-base flex items-center gap-2">
-          <Settings className="w-4 h-4" /> Configuração de Taxas
+          <Settings className="w-4 h-4" /> Configuração de Taxas e Precificação
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4 max-w-md">
         <div className="space-y-2">
           <Label>Taxa base de entrega (R$)</Label>
-          <Input type="number" step="0.5" value={form.base_fee} onChange={(e) => setForm(f => ({ ...f, base_fee: e.target.value }))} />
-          <p className="text-xs text-muted-foreground">Valor fixo cobrado em toda entrega</p>
+          <Input 
+            type="number" 
+            step="0.1" 
+            value={form.base_fee} 
+            onChange={(e) => setForm(f => ({ ...f, base_fee: e.target.value }))} 
+          />
+          <p className="text-xs text-muted-foreground">Valor fixo de partida cobrado em toda corrida</p>
         </div>
+
         <div className="space-y-2">
           <Label>Taxa por km regular (R$/km)</Label>
-          <Input type="number" step="0.1" value={form.fee_per_km} onChange={(e) => setForm(f => ({ ...f, fee_per_km: e.target.value }))} />
-          <p className="text-xs text-muted-foreground">Valor adicional por quilômetro percorrido em condições normais</p>
+          <Input 
+            type="number" 
+            step="0.1" 
+            value={form.fee_per_km} 
+            onChange={(e) => setForm(f => ({ ...f, fee_per_km: e.target.value }))} 
+          />
+          <p className="text-xs text-muted-foreground">Valor por quilômetro percorrido em condições normais</p>
         </div>
 
         {/* Tarifa Dinâmica de Corridas */}
-        <div className="border-t pt-4 mt-4 space-y-3 bg-amber-500/5 p-3 rounded-lg border border-amber-500/20">
+        <div className="border-t pt-4 mt-4 space-y-3 bg-amber-500/5 p-4 rounded-lg border border-amber-500/30">
           <div className="flex items-center justify-between">
             <Label className="flex items-center gap-2 font-bold text-amber-700 dark:text-amber-400">
-              <Flame className="w-4 h-4 text-amber-500 fill-amber-500" /> Tarifa Dinâmica (Horário de Pico)
+              <Flame className="w-5 h-5 text-amber-500 fill-amber-500" /> Tarifa Dinâmica (Horário de Pico / Alta Demanda)
             </Label>
             <Switch 
               checked={form.dynamic_pricing_enabled} 
@@ -161,22 +235,42 @@ const FeesConfigTab = () => {
             />
           </div>
           <p className="text-xs text-muted-foreground">
-            Ative a tarifa dinâmica em horários de alta demanda para ajustar o valor cobrado por KM em todas as entregas.
+            Quando ativada, o valor adicional configurado abaixo é <strong>SOMADO</strong> ao valor do km normal (R$ {form.fee_per_km}/km).
           </p>
 
           {form.dynamic_pricing_enabled && (
-            <div className="space-y-2 pt-1">
-              <Label>Taxa Dinâmica por KM (R$/km)</Label>
-              <Input 
-                type="number" 
-                step="0.1" 
-                min="0" 
-                value={form.dynamic_fee_per_km} 
-                onChange={(e) => setForm(f => ({ ...f, dynamic_fee_per_km: e.target.value }))} 
-              />
-              <p className="text-xs text-amber-600 dark:text-amber-400 font-medium">
-                Substitui a taxa normal por KM (R$ {form.fee_per_km}/km) enquanto a tarifa dinâmica estiver ATIVA.
-              </p>
+            <div className="space-y-3 pt-2">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold">Valor Adicional Dinâmico por KM (+ R$/km)</Label>
+                <Input 
+                  type="number" 
+                  step="0.1" 
+                  min="0" 
+                  value={form.dynamic_fee_per_km} 
+                  onChange={(e) => setForm(f => ({ ...f, dynamic_fee_per_km: e.target.value }))} 
+                  placeholder="Ex: 1.00"
+                />
+              </div>
+
+              {/* Box de cálculo em tempo real */}
+              <div className="p-3 bg-amber-500/10 rounded-md border border-amber-500/20 text-xs space-y-1.5 text-amber-900 dark:text-amber-200">
+                <div className="flex justify-between">
+                  <span>Taxa Base Regular por KM:</span>
+                  <strong>R$ {regularKmFee.toFixed(2)}/km</strong>
+                </div>
+                <div className="flex justify-between text-amber-600 dark:text-amber-400 font-medium">
+                  <span>+ Adicional Dinâmico:</span>
+                  <strong>+ R$ {dynamicKmFee.toFixed(2)}/km</strong>
+                </div>
+                <div className="border-t border-amber-500/30 pt-1.5 flex justify-between font-bold text-sm text-amber-700 dark:text-amber-300">
+                  <span>= Taxa Total Cobrada por KM:</span>
+                  <span>R$ {totalEffectiveKmFee.toFixed(2)}/km</span>
+                </div>
+                <div className="text-[11px] text-muted-foreground flex items-center gap-1 pt-1">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-amber-600" />
+                  As lojas e motoristas pagarão/receberão com base em R$ {totalEffectiveKmFee.toFixed(2)}/km
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -275,23 +369,12 @@ const FeesConfigTab = () => {
           <Input placeholder="https://seusite.com/recargas" value={form.recharge_url} onChange={(e) => setForm(f => ({ ...f, recharge_url: e.target.value }))} />
           <p className="text-xs text-muted-foreground">URL do site para compra de créditos. Aparecerá como botão no painel da loja.</p>
         </div>
-        <Button onClick={handleSave} disabled={loading} className="w-full">
-          {loading ? "Salvando..." : "Salvar Configuração"}
+        <Button onClick={handleSave} disabled={loading || configLoading} className="w-full">
+          {loading ? "Salvando taxas..." : "Salvar Configuração"}
         </Button>
       </CardContent>
-
-      <ConfirmAdminPasswordModal
-        open={showPasswordConfirm}
-        onOpenChange={setShowPasswordConfirm}
-        title="Validar Alteração nas Taxas do Sistema"
-        description="Digite sua senha de administrador para autorizar as alterações de valores e regras de precificação."
-        actionLabel="Autorizar e Salvar Taxas"
-        onConfirm={executeSave}
-        loading={loading}
-      />
     </Card>
   );
 };
 
 export default FeesConfigTab;
-

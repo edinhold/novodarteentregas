@@ -493,9 +493,19 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
   const { data: deliveryConfig } = useQuery({
     queryKey: ["delivery-config"],
     queryFn: async () => {
-      const { data } = await (supabase as any).rpc("get_public_delivery_config");
-      return Array.isArray(data) ? data[0] : data;
+      try {
+        const { data, error } = await (supabase as any).rpc("get_public_delivery_config");
+        if (!error && data) {
+          return Array.isArray(data) ? data[0] : data;
+        }
+      } catch (e) {
+        console.warn("[CallDriverTab] Erro RPC get_public_delivery_config:", e);
+      }
+      const { data: tableData } = await supabase.from("delivery_config").select("*").limit(1).maybeSingle();
+      return Array.isArray(tableData) ? tableData[0] : tableData;
     },
+    staleTime: 1000 * 15,
+    refetchInterval: 1000 * 15,
   });
 
   const configObj = useMemo(() => {
@@ -506,10 +516,11 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
   // Delivery config loaded for price calculations
   const configLoaded = !!configObj;
   const baseFee = Number(configObj?.base_fee ?? 5.3);
+  const baseKmFee = Number(configObj?.fee_per_km ?? 1.7);
   const isDynamicPricing = !!configObj?.dynamic_pricing_enabled && Number(configObj?.dynamic_fee_per_km ?? 0) > 0;
-  const feePerKm = isDynamicPricing 
-    ? Number(configObj.dynamic_fee_per_km) 
-    : Number(configObj?.fee_per_km ?? 1.7);
+  const dynamicKmFee = isDynamicPricing ? Number(configObj.dynamic_fee_per_km) : 0;
+  // REGRA SÊNIOR: A taxa dinâmica SOMA com a taxa por km regular
+  const feePerKm = baseKmFee + dynamicKmFee;
   const minKm = Number(configObj?.min_km ?? 0);
   const maxKm = Number(configObj?.max_km ?? 0);
   const roundKmUp = !!configObj?.round_km_up;
@@ -1725,6 +1736,11 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
                 <p className="text-xs text-muted-foreground">
                   Taxa fixa R$ {(baseFee || 0).toFixed(2).replace(".", ",")} + {(distanceKm || 0).toFixed(1)} km × R$ {(feePerKm || 0).toFixed(2).replace(".", ",")} = R$ {((feePerKm || 0) * (distanceKm || 0)).toFixed(2).replace(".", ",")}
                 </p>
+                {isDynamicPricing && (
+                  <p className="text-[11px] text-amber-600 dark:text-amber-400 font-semibold mt-0.5">
+                    🔥 Tarifa Dinâmica Ativa: Base R$ {baseKmFee.toFixed(2)}/km + Dinâmica R$ {dynamicKmFee.toFixed(2)}/km = R$ {feePerKm.toFixed(2)}/km
+                  </p>
+                )}
                 <div className="flex items-center gap-2 mt-1">
                   <Route className="w-3 h-3 text-muted-foreground" />
                   <span className="text-[10px] text-muted-foreground">
