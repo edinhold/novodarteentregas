@@ -2019,6 +2019,7 @@ export type Database = {
       get_public_delivery_config: {
         Args: never
         Returns: {
+          app_fee_per_delivery: number
           base_fee: number
           dynamic_fee_per_km: number
           dynamic_pricing_enabled: boolean

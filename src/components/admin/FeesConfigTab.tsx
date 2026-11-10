@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Settings, MessageCircle, Ruler, Calendar, Flame, CheckCircle2 } from "lucide-react";
+import { Settings, MessageCircle, Ruler, Calendar, Flame, CheckCircle2, Percent } from "lucide-react";
 
 const DAYS_OF_WEEK = [
   { value: "0", label: "Domingo" },
@@ -23,6 +23,8 @@ const DAYS_OF_WEEK = [
 const FeesConfigTab = () => {
   const queryClient = useQueryClient();
   const [loading, setLoading] = useState(false);
+  const isSavingRef = useRef(false);
+
   const [form, setForm] = useState({
     base_fee: "5.3",
     fee_per_km: "1.7",
@@ -40,8 +42,35 @@ const FeesConfigTab = () => {
   });
 
   const { data: rawConfig, isLoading: configLoading } = useQuery({
-    queryKey: ["delivery-config"],
+    queryKey: ["admin-delivery-config"],
     queryFn: async () => {
+      // 1. Prioridade máxima: SELECT direto da tabela delivery_config (traz todos os campos do admin)
+      try {
+        const { data: tableData, error: tableError } = await supabase
+          .from("delivery_config")
+          .select("*")
+          .limit(1)
+          .maybeSingle();
+
+        if (!tableError && tableData) {
+          return tableData;
+        }
+      } catch (e) {
+        console.warn("[FeesConfigTab] Aviso ao buscar direto da tabela delivery_config:", e);
+      }
+
+      // 2. RPC get_admin_delivery_config (retorna JSONB com todos os campos)
+      try {
+        const { data: adminRpcData, error: adminRpcError } = await (supabase as any).rpc("get_admin_delivery_config");
+        if (!adminRpcError && adminRpcData) {
+          const item = Array.isArray(adminRpcData) ? adminRpcData[0] : adminRpcData;
+          if (item) return item;
+        }
+      } catch (e) {
+        console.warn("[FeesConfigTab] Aviso RPC get_admin_delivery_config:", e);
+      }
+
+      // 3. Fallback para get_public_delivery_config
       try {
         const { data: rpcData, error: rpcError } = await (supabase as any).rpc("get_public_delivery_config");
         if (!rpcError && rpcData) {
@@ -51,10 +80,10 @@ const FeesConfigTab = () => {
       } catch (e) {
         console.warn("[FeesConfigTab] Erro RPC get_public_delivery_config:", e);
       }
-      const { data, error } = await supabase.from("delivery_config").select("*").limit(1).maybeSingle();
-      if (error) throw error;
-      return data;
+
+      return null;
     },
+    staleTime: 1000 * 30,
   });
 
   const config = useMemo(() => {
@@ -63,14 +92,20 @@ const FeesConfigTab = () => {
   }, [rawConfig]);
 
   useEffect(() => {
-    if (config) {
+    // Não substitui o formulário durante uma operação ativa de salvamento
+    if (config && !isSavingRef.current) {
+      const rawAppFee = (config as any).app_fee_per_delivery;
+      const parsedAppFee = rawAppFee !== undefined && rawAppFee !== null && !isNaN(Number(rawAppFee))
+        ? String(rawAppFee)
+        : "2";
+
       setForm({
         base_fee: String(config.base_fee ?? "5.3"),
         fee_per_km: String(config.fee_per_km ?? "1.7"),
         early_withdrawal_fee_percent: String((config as any).early_withdrawal_fee_percent ?? 10),
         withdrawal_fixed_fee: String((config as any).withdrawal_fixed_fee ?? 1.00),
         payment_day: String((config as any).payment_day ?? 3),
-        app_fee_per_delivery: String((config as any).app_fee_per_delivery ?? 2),
+        app_fee_per_delivery: parsedAppFee,
         whatsapp_number: (config as any).whatsapp_number || "",
         recharge_url: (config as any).recharge_url || "",
         min_km: String((config as any).min_km ?? 0),
@@ -99,6 +134,11 @@ const FeesConfigTab = () => {
     return regularKmFee + dynamicKmFee;
   }, [regularKmFee, dynamicKmFee, form.dynamic_pricing_enabled]);
 
+  const appFeePercentNumber = useMemo(() => {
+    const val = parseFloat(form.app_fee_per_delivery);
+    return isNaN(val) ? 0 : Math.max(0, val);
+  }, [form.app_fee_per_delivery]);
+
   const handleSave = async () => {
     const minKmVal = isNaN(parseFloat(form.min_km)) ? 0 : Math.max(0, parseFloat(form.min_km));
     const maxKmVal = isNaN(parseFloat(form.max_km)) ? 0 : Math.max(0, parseFloat(form.max_km));
@@ -109,6 +149,8 @@ const FeesConfigTab = () => {
     }
 
     setLoading(true);
+    isSavingRef.current = true;
+
     try {
       const baseFeeVal = isNaN(parseFloat(form.base_fee)) ? 5.3 : Math.max(0, parseFloat(form.base_fee));
       const feePerKmVal = isNaN(parseFloat(form.fee_per_km)) ? 1.7 : Math.max(0, parseFloat(form.fee_per_km));
@@ -118,7 +160,7 @@ const FeesConfigTab = () => {
       const appFeePerDeliveryVal = isNaN(parseFloat(form.app_fee_per_delivery)) ? 2 : Math.max(0, parseFloat(form.app_fee_per_delivery));
       const dynamicFeePerKmVal = isNaN(parseFloat(form.dynamic_fee_per_km)) ? 0 : Math.max(0, parseFloat(form.dynamic_fee_per_km));
 
-      let savedViaRpc = false;
+      let savedRecord: any = null;
 
       // 1. Tenta salvar via RPC dedicada SECURITY DEFINER com permissão direta
       try {
@@ -138,14 +180,14 @@ const FeesConfigTab = () => {
           p_recharge_url: form.recharge_url.trim(),
         });
         if (!rpcError && rpcData) {
-          savedViaRpc = true;
+          savedRecord = Array.isArray(rpcData) ? rpcData[0] : rpcData;
         }
       } catch (rpcErr) {
         console.warn("[FeesConfigTab] RPC update_delivery_config indisponível, tentando update direto:", rpcErr);
       }
 
       // 2. Se a RPC não foi executada ou falhou, realiza update/insert direto na tabela
-      if (!savedViaRpc) {
+      if (!savedRecord) {
         const payload: any = {
           base_fee: baseFeeVal,
           fee_per_km: feePerKmVal,
@@ -164,23 +206,51 @@ const FeesConfigTab = () => {
         };
 
         if (config?.id) {
-          const { error } = await supabase.from("delivery_config").update(payload).eq("id", config.id);
+          const { data: updated, error } = await supabase
+            .from("delivery_config")
+            .update(payload)
+            .eq("id", config.id)
+            .select()
+            .maybeSingle();
+
           if (error) throw error;
+          savedRecord = updated || payload;
         } else {
           // Busca registro existente ou insere
           const { data: existing } = await supabase.from("delivery_config").select("id").limit(1).maybeSingle();
           if (existing?.id) {
-            const { error } = await supabase.from("delivery_config").update(payload).eq("id", existing.id);
+            const { data: updated, error } = await supabase
+              .from("delivery_config")
+              .update(payload)
+              .eq("id", existing.id)
+              .select()
+              .maybeSingle();
+
             if (error) throw error;
+            savedRecord = updated || payload;
           } else {
-            const { error } = await supabase.from("delivery_config").insert(payload);
+            const { data: inserted, error } = await supabase
+              .from("delivery_config")
+              .insert(payload)
+              .select()
+              .maybeSingle();
+
             if (error) throw error;
+            savedRecord = inserted || payload;
           }
         }
       }
 
+      // Atualiza o cache imediatamente com o registro salvo com sucesso
+      if (savedRecord) {
+        queryClient.setQueryData(["admin-delivery-config"], savedRecord);
+        queryClient.setQueryData(["delivery-config"], savedRecord);
+      }
+
       toast.success("Configuração de taxas salva com sucesso!");
+
       await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["admin-delivery-config"] }),
         queryClient.invalidateQueries({ queryKey: ["delivery-config"] }),
         queryClient.invalidateQueries({ queryKey: ["public-delivery-config"] }),
         queryClient.invalidateQueries({ queryKey: ["financial-delivery-config"] }),
@@ -190,6 +260,9 @@ const FeesConfigTab = () => {
       toast.error(err.message || "Erro ao salvar configuração de taxas.");
     } finally {
       setLoading(false);
+      setTimeout(() => {
+        isSavingRef.current = false;
+      }, 500);
     }
   };
 
@@ -298,10 +371,41 @@ const FeesConfigTab = () => {
           <Switch checked={form.round_km_up} onCheckedChange={(v) => setForm(f => ({ ...f, round_km_up: v }))} />
         </div>
 
-        <div className="space-y-2 border-t pt-4 mt-4">
-          <Label>Taxa do app por corrida (%)</Label>
-          <Input type="number" step="1" min="0" max="100" value={form.app_fee_per_delivery} onChange={(e) => setForm(f => ({ ...f, app_fee_per_delivery: e.target.value }))} />
-          <p className="text-xs text-muted-foreground">Porcentagem que o aplicativo cobra do motorista por corrida. O restante fica com o motorista.</p>
+        {/* Taxa do App por Corrida (%) com visualização explicativa */}
+        <div className="space-y-3 border-t pt-4 mt-4 bg-muted/20 p-3 rounded-lg border">
+          <div className="flex items-center justify-between">
+            <Label className="flex items-center gap-2 font-semibold">
+              <Percent className="w-4 h-4 text-primary" /> Taxa do app por corrida (%)
+            </Label>
+            <span className="text-xs font-bold px-2 py-0.5 rounded bg-primary/10 text-primary">
+              {appFeePercentNumber}%
+            </span>
+          </div>
+          <Input 
+            type="number" 
+            step="0.5" 
+            min="0" 
+            max="100" 
+            value={form.app_fee_per_delivery} 
+            onChange={(e) => setForm(f => ({ ...f, app_fee_per_delivery: e.target.value }))} 
+            placeholder="Ex: 2.0"
+          />
+          <p className="text-xs text-muted-foreground">
+            Porcentagem que o aplicativo retém de cada corrida realizada pelos entregadores.
+          </p>
+
+          <div className="p-2.5 bg-background rounded border text-xs space-y-1 text-muted-foreground">
+            <div className="flex justify-between">
+              <span>Exemplo corrida de R$ 10,00:</span>
+              <span className="font-semibold text-foreground">
+                Retenção App ({appFeePercentNumber}%): R$ {((10 * appFeePercentNumber) / 100).toFixed(2).replace(".", ",")}
+              </span>
+            </div>
+            <div className="flex justify-between text-emerald-600 dark:text-emerald-400 font-medium">
+              <span>Líquido para o motorista:</span>
+              <span>R$ {(Math.max(0, 10 - (10 * appFeePercentNumber) / 100)).toFixed(2).replace(".", ",")}</span>
+            </div>
+          </div>
         </div>
 
         {/* Regras de Saques e Adiantamentos de Motoristas */}
