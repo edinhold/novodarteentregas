@@ -3,8 +3,8 @@
  * Token oficial e parâmetros geográficos padronizados para Primavera do Leste - MT - Brasil.
  */
 
-const TOKEN_P1 = "pk.eyJ1IjoiZWRpbmhvbGQxMiIsImEiOiJjbXRpeXNiZGEwM3ppMnhwdm1wbjh2am4yIn0";
-const TOKEN_P2 = "2cq78NnItjzxCNtFRrW1vQ";
+const TOKEN_P1 = "pk.eyJ1IjoiZWRpbmhvbGQxMiIsImEiOiJjbXdjajB3c2YwMzE4MnpwbDRvYmpjMzYwIn0";
+const TOKEN_P2 = "Y-SqDijgndJyDgj43nXiOQ";
 const FALLBACK_MAPBOX_TOKEN = `${TOKEN_P1}.${TOKEN_P2}`;
 
 export const MAPBOX_ACCESS_TOKEN: string =
