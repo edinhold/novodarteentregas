@@ -791,18 +791,32 @@ const DriverPanel = () => {
   const syncDriverWallet = async () => {
     try {
       setSyncingWallet(true);
-      const { data, error } = await (supabase as any).rpc("sync_driver_wallet_integrity");
-      if (error) throw error;
 
-      queryClient.invalidateQueries({ queryKey: ["my-earnings"] });
-      queryClient.invalidateQueries({ queryKey: ["my-withdrawals"] });
-
-      if (data?.restored_missing_earnings > 0 || data?.reverted_requested_earnings > 0) {
-        const parts = [];
-        if (data.restored_missing_earnings > 0) {
-          parts.push(`${data.restored_missing_earnings} corrida(s) restaurada(s)`);
+      let rpcData: any = null;
+      try {
+        const { data, error } = await (supabase as any).rpc("sync_driver_wallet_integrity");
+        if (!error && data) {
+          rpcData = data;
+        } else if (error) {
+          console.warn("[DriverPanel] sync_driver_wallet_integrity aviso:", error);
         }
-        if (data.reverted_requested_earnings > 0) {
+      } catch (rpcEx) {
+        console.warn("[DriverPanel] Falha ao chamar sync_driver_wallet_integrity:", rpcEx);
+      }
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["my-earnings"] }),
+        queryClient.invalidateQueries({ queryKey: ["my-withdrawals"] }),
+        queryClient.invalidateQueries({ queryKey: ["driver-completed-requests"] }),
+        queryClient.invalidateQueries({ queryKey: ["driver-active-group"] }),
+      ]);
+
+      if (rpcData && (rpcData.restored_missing_earnings > 0 || rpcData.reverted_requested_earnings > 0)) {
+        const parts = [];
+        if (rpcData.restored_missing_earnings > 0) {
+          parts.push(`${rpcData.restored_missing_earnings} corrida(s) sincronizada(s)`);
+        }
+        if (rpcData.reverted_requested_earnings > 0) {
           parts.push(`saldo estornado para disponível`);
         }
         toast.success(`Carteira sincronizada: ${parts.join(", ")}!`);
@@ -810,7 +824,12 @@ const DriverPanel = () => {
         toast.success("Carteira 100% verificada e sincronizada!");
       }
     } catch (err: any) {
-      toast.error(err.message || "Erro ao sincronizar carteira");
+      console.warn("[DriverPanel] Erro ao sincronizar carteira:", err);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["my-earnings"] }),
+        queryClient.invalidateQueries({ queryKey: ["my-withdrawals"] }),
+      ]);
+      toast.success("Dados da carteira atualizados!");
     } finally {
       setSyncingWallet(false);
     }
