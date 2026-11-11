@@ -80,3 +80,4 @@ export const PWARecoveryHandler = () => {
 };
 
 export default PWARecoveryHandler;
+
