@@ -216,3 +216,4 @@ END;
 $$;
 
 GRANT EXECUTE ON FUNCTION public.confirm_user_email(TEXT) TO anon, authenticated, service_role;
+

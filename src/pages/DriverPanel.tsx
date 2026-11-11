@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { ArrowLeft, MapPin, Phone, MessageSquare, Send, Check, CheckCircle, Unlock, DollarSign, Key, Wallet, XCircle, Home, History, Settings, Map as MapIcon, Signal, SignalZero, Calendar, Radar, PanelLeft, AlertTriangle, Loader2, Bell, BellRing, BellOff, Clock, RefreshCw, ShieldCheck } from "lucide-react";
+import { ArrowLeft, MapPin, Phone, MessageSquare, Send, Check, CheckCircle, Unlock, DollarSign, Key, Wallet, XCircle, Home, History, Settings, Map as MapIcon, Signal, SignalZero, Calendar, Radar, PanelLeft, AlertTriangle, Loader2, Bell, BellRing, BellOff, Clock, RefreshCw, ShieldCheck, Coins, TrendingUp, Receipt } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
@@ -80,6 +80,8 @@ const DriverPanel = () => {
   const [pixKeyType, setPixKeyType] = useState("cpf");
   const [savingPix, setSavingPix] = useState(false);
   const [withdrawing, setWithdrawing] = useState(false);
+  const [earningsFilter, setEarningsFilter] = useState<"all" | "month" | "today">("month");
+  const [earningsDisplayCount, setEarningsDisplayCount] = useState(10);
   const [cancelRequestId, setCancelRequestId] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [activeTab, setActiveTab] = useState("home");
@@ -374,7 +376,9 @@ const DriverPanel = () => {
       const userId = user?.id;
       if (!driverId && !userId) return [];
 
-      let query = supabase.from("driver_earnings").select("*");
+      let query = supabase
+        .from("driver_earnings")
+        .select("*, delivery_requests(id, customer_name, delivery_address, restaurant_id, restaurants(name))");
       if (driverId && userId && driverId !== userId) {
         query = query.or(`driver_id.eq.${driverId},driver_id.eq.${userId}`);
       } else {
@@ -898,11 +902,14 @@ const DriverPanel = () => {
 
   const requestWithdrawal = async () => {
     const totalPending = earnings
-      .filter((e: any) => e.status === "pending")
+      .filter((e: any) => 
+        (e.status === "pending" || (!hasActiveWithdrawalRequest && e.status === "requested")) &&
+        isThisMonth(new Date(e.created_at))
+      )
       .reduce((sum: number, e: any) => sum + Number(e.amount), 0);
 
     if (totalPending <= 0) {
-      toast.error("Sem saldo disponível para saque");
+      toast.error("Sem saldo disponível para saque no mês atual");
       return;
     }
 
@@ -1000,9 +1007,21 @@ const DriverPanel = () => {
 
   const weekdayNames = ["Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado"];
   const hasActiveWithdrawalRequest = withdrawals.some((w: any) => w.status === "pending");
+  // Saldo Disponível considera estritamente os ganhos do mês atual (valores antigos não acumulam mais)
   const pendingBalance = earnings
-    .filter((e: any) => e.status === "pending" || (!hasActiveWithdrawalRequest && e.status === "requested"))
+    .filter((e: any) => 
+      (e.status === "pending" || (!hasActiveWithdrawalRequest && e.status === "requested")) &&
+      isThisMonth(new Date(e.created_at))
+    )
     .reduce((sum: number, e: any) => sum + Number(e.amount), 0);
+
+  // Lista filtrada para o Histórico de Ganhos das Corridas
+  const filteredEarnings = earnings.filter((e: any) => {
+    if (earningsFilter === "today") return isToday(new Date(e.created_at));
+    if (earningsFilter === "month") return isThisMonth(new Date(e.created_at));
+    return true;
+  });
+  const displayedEarnings = filteredEarnings.slice(0, earningsDisplayCount);
   const paymentDay = Number((deliveryConfig as any)?.payment_day ?? 3);
   const isPaymentDay = new Date().getDay() === paymentDay;
   const fixedFee = Number((deliveryConfig as any)?.withdrawal_fixed_fee ?? 1.00);
@@ -1544,8 +1563,8 @@ const DriverPanel = () => {
                   <div className="grid grid-cols-2 gap-3">
                     <Card className="bg-primary/5 border-primary/20">
                       <CardContent className="p-4 text-center">
-                        <p className="text-2xl font-extrabold text-primary">R$ {totalEarnings.toFixed(2)}</p>
-                        <p className="text-xs text-muted-foreground">Total Ganho</p>
+                        <p className="text-2xl font-extrabold text-primary">R$ {monthlyEarnings.toFixed(2)}</p>
+                        <p className="text-xs text-muted-foreground">Ganhos do Mês</p>
                       </CardContent>
                     </Card>
                     <Card className="bg-accent/5 border-accent/20">
@@ -1593,9 +1612,6 @@ const DriverPanel = () => {
                       </div>
                     </CardContent>
                   </Card>
-
-
-
 
                   {/* PIX Key */}
                   <Card>
@@ -1673,13 +1689,137 @@ const DriverPanel = () => {
                           </div>
                         </div>
 
-
                         <Button onClick={requestWithdrawal} disabled={withdrawing} className="w-full mt-2" variant="default">
                           {withdrawing ? "Processando..." : "Confirmar Solicitação de Saque"}
                         </Button>
                       </CardContent>
                     </Card>
                   )}
+
+                  {/* Histórico de Ganhos das Corridas */}
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <CardTitle className="text-base flex items-center gap-2">
+                          <Coins className="w-4 h-4 text-emerald-500" />
+                          <span>Histórico de Ganhos das Corridas</span>
+                          <Badge variant="outline" className="text-xs font-mono">
+                            {filteredEarnings.length}
+                          </Badge>
+                        </CardTitle>
+
+                        <div className="flex items-center gap-1 bg-muted/60 p-0.5 rounded-lg self-start sm:self-auto border">
+                          <button
+                            type="button"
+                            onClick={() => { setEarningsFilter("month"); setEarningsDisplayCount(10); }}
+                            className={`px-2.5 py-1 text-xs rounded-md font-medium transition-all ${
+                              earningsFilter === "month"
+                                ? "bg-background text-foreground shadow-sm font-semibold"
+                                : "text-muted-foreground hover:text-foreground"
+                            }`}
+                          >
+                            Este Mês
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { setEarningsFilter("today"); setEarningsDisplayCount(10); }}
+                            className={`px-2.5 py-1 text-xs rounded-md font-medium transition-all ${
+                              earningsFilter === "today"
+                                ? "bg-background text-foreground shadow-sm font-semibold"
+                                : "text-muted-foreground hover:text-foreground"
+                            }`}
+                          >
+                            Hoje
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { setEarningsFilter("all"); setEarningsDisplayCount(10); }}
+                            className={`px-2.5 py-1 text-xs rounded-md font-medium transition-all ${
+                              earningsFilter === "all"
+                                ? "bg-background text-foreground shadow-sm font-semibold"
+                                : "text-muted-foreground hover:text-foreground"
+                            }`}
+                          >
+                            Todos
+                          </button>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      {displayedEarnings.length === 0 ? (
+                        <div className="text-center py-6 text-muted-foreground space-y-1">
+                          <Receipt className="w-8 h-8 mx-auto opacity-30 text-muted-foreground" />
+                          <p className="text-sm font-medium">Nenhum ganho registrado neste período</p>
+                          <p className="text-xs">Os valores recebidos por cada entrega concluída aparecerão aqui.</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {displayedEarnings.map((e: any) => {
+                            const amt = Number(e.amount || 0);
+                            const isCurrentMonth = isThisMonth(new Date(e.created_at));
+                            const restName = e.delivery_requests?.restaurants?.name;
+                            const custName = e.delivery_requests?.customer_name;
+                            const title = restName ? `Entrega • ${restName}` : custName ? `Entrega • ${custName}` : "Corrida Concluída";
+                            const address = e.delivery_requests?.delivery_address;
+                            const dateStr = safeFormatDateTime(e.created_at);
+
+                            return (
+                              <div key={e.id} className="p-3 rounded-xl border bg-card hover:bg-muted/10 transition-colors flex items-center justify-between gap-3">
+                                <div className="flex items-start gap-2.5 min-w-0">
+                                  <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5">
+                                    <TrendingUp className="w-4 h-4" />
+                                  </div>
+                                  <div className="min-w-0 space-y-0.5">
+                                    <p className="text-sm font-semibold text-foreground truncate">{title}</p>
+                                    {address && (
+                                      <p className="text-xs text-muted-foreground truncate max-w-[200px] sm:max-w-xs">{address}</p>
+                                    )}
+                                    <p className="text-[11px] text-muted-foreground">{dateStr}</p>
+                                  </div>
+                                </div>
+
+                                <div className="text-right shrink-0 space-y-1">
+                                  <p className="text-base font-extrabold text-emerald-600 dark:text-emerald-400 font-mono">
+                                    + R$ {amt.toFixed(2)}
+                                  </p>
+                                  <div>
+                                    {e.status === "paid" ? (
+                                      <Badge className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 text-[10px] py-0">
+                                        ✅ Pago
+                                      </Badge>
+                                    ) : e.status === "requested" ? (
+                                      <Badge className="bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30 text-[10px] py-0">
+                                        ⏳ Em Saque
+                                      </Badge>
+                                    ) : e.status === "settled" || !isCurrentMonth ? (
+                                      <Badge variant="outline" className="text-muted-foreground text-[10px] py-0">
+                                        Liquidado
+                                      </Badge>
+                                    ) : (
+                                      <Badge className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30 text-[10px] py-0">
+                                        ● Disponível
+                                      </Badge>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+
+                          {filteredEarnings.length > earningsDisplayCount && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="w-full mt-2 text-xs"
+                              onClick={() => setEarningsDisplayCount((prev) => prev + 15)}
+                            >
+                              Ver mais corridas (+{filteredEarnings.length - earningsDisplayCount})
+                            </Button>
+                          )}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
 
                   {/* Withdrawal History */}
                   {withdrawals.length > 0 && (

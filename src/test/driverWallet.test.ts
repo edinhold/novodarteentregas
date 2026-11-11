@@ -191,5 +191,171 @@ describe("Blindagem da Carteira dos Motoristas e Integridade de Saldos", () => {
     expect(toastShown).toBe("Carteira 100% verificada e sincronizada!");
     expect(toastShown).not.toContain("Could not find the function");
   });
+
+  describe("Isolamento de Ganhos do Mês Atual e Histórico de Ganhos das Corridas", () => {
+    // Datas de referência: mês atual, hoje, e meses anteriores
+    const now = new Date();
+    const currentMonthIso = now.toISOString();
+    const todayIso = now.toISOString();
+
+    const pastMonthDate = new Date(now.getFullYear(), now.getMonth() - 2, 15);
+    const pastMonthIso = pastMonthDate.toISOString();
+
+    const mockEarnings = [
+      {
+        id: "earn-curr-1",
+        driver_id: "driver-1",
+        amount: 25.50,
+        status: "pending",
+        created_at: currentMonthIso,
+        delivery_requests: {
+          id: "req-1",
+          customer_name: "João Silva",
+          delivery_address: "Rua das Flores, 123",
+          restaurants: { name: "Pizzaria Bella" }
+        }
+      },
+      {
+        id: "earn-curr-2",
+        driver_id: "driver-1",
+        amount: 14.50,
+        status: "pending",
+        created_at: currentMonthIso,
+        delivery_requests: {
+          id: "req-2",
+          customer_name: "Maria Santos",
+          delivery_address: "Av. Central, 456",
+          restaurants: { name: "Burger House" }
+        }
+      },
+      {
+        id: "earn-old-1",
+        driver_id: "driver-1",
+        amount: 150.00,
+        status: "pending", // Antigo acumulado que não deve entrar no saldo disponível
+        created_at: pastMonthIso,
+        delivery_requests: {
+          id: "req-old-1",
+          customer_name: "Carlos Velho",
+          delivery_address: "Rua Antiga, 789",
+          restaurants: { name: "Lanchonete 2025" }
+        }
+      },
+      {
+        id: "earn-old-2",
+        driver_id: "driver-1",
+        amount: 80.00,
+        status: "settled",
+        created_at: pastMonthIso,
+        delivery_requests: {
+          id: "req-old-2",
+          customer_name: "Ana Antiga",
+          delivery_address: "Rua Passada, 101",
+          restaurants: { name: "Sushi Antigo" }
+        }
+      }
+    ];
+
+    it("deve isolar o 'Saldo Disponível' apenas para os ganhos pendentes do mês atual, desconsiderando acúmulo antigo", () => {
+      const isThisMonth = (date: Date) => {
+        return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
+      };
+
+      const hasActiveWithdrawalRequest = false;
+
+      // Lógica idêntica à do DriverPanel.tsx
+      const pendingBalance = mockEarnings
+        .filter((e) =>
+          (e.status === "pending" || (!hasActiveWithdrawalRequest && e.status === "requested")) &&
+          isThisMonth(new Date(e.created_at))
+        )
+        .reduce((sum, e) => sum + Number(e.amount), 0);
+
+      // Apenas earn-curr-1 (25.50) + earn-curr-2 (14.50) = 40.00
+      // O valor antigo de 150.00 NÃO deve entrar no saldo disponível
+      expect(pendingBalance).toBe(40.00);
+    });
+
+    it("deve calcular 'Ganhos do Mês' isolando estritamente os rendimentos do mês corrente", () => {
+      const isThisMonth = (date: Date) => {
+        return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
+      };
+
+      const monthlyEarnings = mockEarnings
+        .filter((e) => isThisMonth(new Date(e.created_at)))
+        .reduce((sum, e) => sum + Number(e.amount), 0);
+
+      expect(monthlyEarnings).toBe(40.00);
+    });
+
+    it("deve filtrar o histórico de corridas por período ('month', 'today', 'all')", () => {
+      const isThisMonth = (date: Date) => {
+        return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
+      };
+      const isToday = (date: Date) => {
+        return (
+          date.getFullYear() === now.getFullYear() &&
+          date.getMonth() === now.getMonth() &&
+          date.getDate() === now.getDate()
+        );
+      };
+
+      const filterBy = (period: "month" | "today" | "all") => {
+        return mockEarnings.filter((e) => {
+          if (period === "today") return isToday(new Date(e.created_at));
+          if (period === "month") return isThisMonth(new Date(e.created_at));
+          return true;
+        });
+      };
+
+      const monthList = filterBy("month");
+      const todayList = filterBy("today");
+      const allList = filterBy("all");
+
+      expect(monthList.length).toBe(2);
+      expect(monthList.map((e) => e.id)).toEqual(["earn-curr-1", "earn-curr-2"]);
+
+      expect(todayList.length).toBe(2);
+      expect(allList.length).toBe(4);
+    });
+
+    it("deve rotular corretamente os status no histórico (Disponível, Pago, Em Saque, Liquidado)", () => {
+      const isThisMonth = (date: Date) => {
+        return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
+      };
+
+      const getStatusLabel = (e: { status: string; created_at: string }) => {
+        const isCurrentMonth = isThisMonth(new Date(e.created_at));
+        if (e.status === "paid") return "Pago";
+        if (e.status === "requested") return "Em Saque";
+        if (e.status === "settled" || !isCurrentMonth) return "Liquidado";
+        return "Disponível";
+      };
+
+      expect(getStatusLabel({ status: "pending", created_at: currentMonthIso })).toBe("Disponível");
+      expect(getStatusLabel({ status: "pending", created_at: pastMonthIso })).toBe("Liquidado");
+      expect(getStatusLabel({ status: "settled", created_at: pastMonthIso })).toBe("Liquidado");
+      expect(getStatusLabel({ status: "paid", created_at: currentMonthIso })).toBe("Pago");
+      expect(getStatusLabel({ status: "requested", created_at: currentMonthIso })).toBe("Em Saque");
+    });
+
+    it("deve impedir solicitação de saque se não houver saldo pendente no mês atual", () => {
+      const isThisMonth = (date: Date) => {
+        return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
+      };
+
+      // Cenário onde motorista tem apenas ganhos do mês passado
+      const oldEarningsOnly = [
+        { id: "e-old", amount: 200.00, status: "pending", created_at: pastMonthIso },
+      ];
+
+      const totalPendingCurrentMonth = oldEarningsOnly
+        .filter((e) => e.status === "pending" && isThisMonth(new Date(e.created_at)))
+        .reduce((sum, e) => sum + Number(e.amount), 0);
+
+      expect(totalPendingCurrentMonth).toBe(0);
+      expect(totalPendingCurrentMonth <= 0).toBe(true);
+    });
+  });
 });
 
