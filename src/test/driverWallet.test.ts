@@ -131,5 +131,26 @@ describe("Blindagem da Carteira dos Motoristas e Integridade de Saldos", () => {
     expect(existingEarnings[0].amount).toBe(22.50);
     expect(existingEarnings[0].status).toBe("pending");
   });
+
+  it("deve unificar saldo 'requested' órfão no saldo disponível quando não há solicitação pendente de saque", () => {
+    const withdrawals: Array<{ id: string; status: string }> = [
+      { id: "w1", status: "approved" }, // Já foi pago
+    ];
+
+    const earnings = [
+      { id: "e1", amount: 20.00, status: "pending" },
+      { id: "e2", amount: 30.00, status: "requested" }, // Órfão sem solicitação pendente correspondente
+    ];
+
+    const hasActiveWithdrawalRequest = withdrawals.some((w) => w.status === "pending");
+
+    const pendingBalance = earnings
+      .filter((e) => e.status === "pending" || (!hasActiveWithdrawalRequest && e.status === "requested"))
+      .reduce((sum, e) => sum + Number(e.amount), 0);
+
+    // Sem a solicitação pendente, o motorista não fica com valor travado e tem R$ 50,00 disponíveis
+    expect(hasActiveWithdrawalRequest).toBe(false);
+    expect(pendingBalance).toBe(50.00);
+  });
 });
 

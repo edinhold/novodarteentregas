@@ -980,11 +980,9 @@ const DriverPanel = () => {
     .reduce((sum: number, e: any) => sum + Number(e.amount), 0);
 
   const weekdayNames = ["Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado"];
+  const hasActiveWithdrawalRequest = withdrawals.some((w: any) => w.status === "pending");
   const pendingBalance = earnings
-    .filter((e: any) => e.status === "pending")
-    .reduce((sum: number, e: any) => sum + Number(e.amount), 0);
-  const requestedBalance = earnings
-    .filter((e: any) => e.status === "requested")
+    .filter((e: any) => e.status === "pending" || (!hasActiveWithdrawalRequest && e.status === "requested"))
     .reduce((sum: number, e: any) => sum + Number(e.amount), 0);
   const paymentDay = Number((deliveryConfig as any)?.payment_day ?? 3);
   const isPaymentDay = new Date().getDay() === paymentDay;
@@ -1538,28 +1536,6 @@ const DriverPanel = () => {
                       </CardContent>
                     </Card>
                   </div>
-
-                  {/* Saque em análise pelo administrador */}
-                  {requestedBalance > 0 && (
-                    <Card className="bg-amber-500/10 border-amber-500/30">
-                      <CardContent className="p-3.5 flex items-center justify-between">
-                        <div className="flex items-center gap-2.5">
-                          <Clock className="w-4 h-4 text-amber-500 animate-pulse shrink-0" />
-                          <div>
-                            <p className="text-xs font-semibold text-amber-800 dark:text-amber-300">
-                              Saque em Processamento
-                            </p>
-                            <p className="text-[10px] text-muted-foreground">
-                              Aguardando conferência do PIX pelo administrador
-                            </p>
-                          </div>
-                        </div>
-                        <span className="text-base font-extrabold text-amber-600 dark:text-amber-400 font-mono">
-                          R$ {requestedBalance.toFixed(2)}
-                        </span>
-                      </CardContent>
-                    </Card>
-                  )}
 
                   {/* Earnings Report */}
                   <Card>
