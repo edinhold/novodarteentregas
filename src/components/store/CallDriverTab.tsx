@@ -22,7 +22,7 @@ import ReportLocationButton from "@/components/ReportLocationButton";
 import ChatWidget from "@/components/ChatWidget";
 import { useDriverLocations } from "@/hooks/useDriverLocations";
 import L from "leaflet";
-import { MAP_LAYERS, resolveStoreCoordinates } from "@/config/maps";
+import { MAP_LAYERS, resolveStoreCoordinates, isWithinPrimaveraBounds } from "@/config/maps";
 import { getBestLocation, isValidCoordinate } from "@/utils/geolocation";
 import {
   searchAddressSuggestions,
@@ -158,6 +158,10 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
   const [calling, setCalling] = useState(false);
   const [deliveryLatLng, setDeliveryLatLng] = useState<[number, number] | null>(null);
   const [storeLatLng, setStoreLatLng] = useState<[number, number] | null>(null);
+  const [pinPlacementMode, setPinPlacementMode] = useState<"delivery" | "store">("delivery");
+  const pinPlacementModeRef = useRef<"delivery" | "store">("delivery");
+  pinPlacementModeRef.current = pinPlacementMode;
+  const [savingStoreCoords, setSavingStoreCoords] = useState(false);
   const [gpsStatus, setGpsStatus] = useState<"idle" | "requesting" | "granted" | "denied" | "timeout" | "unsupported" | "error">("idle");
   const [gpsMessage, setGpsMessage] = useState<string | null>(null);
   const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
@@ -910,9 +914,85 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
         setGpsStatus("granted");
         setGpsAccuracy(null);
         setGpsMessage(null);
+
+        if (restaurant?.id && isWithinPrimaveraBounds(parsed.coordinates.latitude, parsed.coordinates.longitude)) {
+          void supabase
+            .from("restaurants")
+            .update({ latitude: parsed.coordinates.latitude, longitude: parsed.coordinates.longitude, address })
+            .eq("id", restaurant.id);
+        }
       }
     } catch (e) {
       console.warn(`${GPS_LOG} endereço manual não localizado`, e);
+    }
+  }, [restaurant?.id]);
+
+  // Atualiza e fixa permanentemente a posição da loja pelo mapa ou arrasto
+  const updateStoreLocationFromCoords = useCallback(async (lat: number, lng: number) => {
+    if (!isValidCoordinate(lat, lng)) return;
+    pickupManualRef.current = false;
+    setStoreLatLng([lat, lng]);
+    setGpsStatus("granted");
+    setGpsAccuracy(null);
+    setGpsMessage(null);
+    setPickupGpsState("success");
+
+    let geocoded: string | null = null;
+    try {
+      const parsed = await reverseGeocodeMapbox(lat, lng);
+      if (parsed?.fullAddress) {
+        geocoded = parsed.fullAddress;
+        setCallForm((f) => ({ ...f, pickup: parsed.fullAddress }));
+      }
+    } catch (e) {
+      console.warn("Reverse geocode loja error:", e);
+    }
+
+    if (restaurant?.id && isWithinPrimaveraBounds(lat, lng)) {
+      setSavingStoreCoords(true);
+      try {
+        const payload: { latitude: number; longitude: number; address?: string } = {
+          latitude: lat,
+          longitude: lng,
+        };
+        if (geocoded && !restaurant.address) {
+          payload.address = geocoded;
+        }
+        const { error } = await supabase.from("restaurants").update(payload).eq("id", restaurant.id);
+        if (!error) {
+          toast.success("🏪 Local da loja fixado e salvo com sucesso!");
+          queryClient.invalidateQueries({ queryKey: ["restaurant"] });
+        } else {
+          console.warn("Erro ao salvar coordenadas da loja no banco:", error.message);
+          toast.success("🏪 Local da loja marcado no mapa!");
+        }
+      } catch (err) {
+        console.warn("Erro ao atualizar loja:", err);
+      } finally {
+        setSavingStoreCoords(false);
+      }
+    } else {
+      toast.success("🏪 Local da loja marcado no mapa!");
+    }
+  }, [restaurant?.id, restaurant?.address, queryClient]);
+
+  // Atualiza a posição de entrega pelo mapa ou arrasto
+  const updateDeliveryLocationFromCoords = useCallback(async (lat: number, lng: number) => {
+    if (!isValidCoordinate(lat, lng)) return;
+    setDeliveryLatLng([lat, lng]);
+    setManualDistanceEnabled(false);
+
+    try {
+      const parsed = await reverseGeocodeMapbox(lat, lng);
+      if (parsed?.fullAddress) {
+        setCallForm((f) => ({
+          ...f,
+          delivery: parsed.fullAddress,
+          delivery_number: parsed.number || f.delivery_number,
+        }));
+      }
+    } catch (err) {
+      console.error("Map click geocode delivery error:", err);
     }
   }, []);
 
@@ -1004,7 +1084,9 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
         ? [storeLat, storeLng]
         : [-15.5454, -54.2958];
 
-      const map = L.map(containerRef.current).setView(center, 14);
+      const map = L.map(containerRef.current, {
+        doubleClickZoom: false,
+      }).setView(center, 14);
       mapRef.current = map;
       
       tileLayerRef.current = L.tileLayer(MAP_LAYERS[mapType].url, {
@@ -1014,20 +1096,12 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
 
       map.on("click", async (e: L.LeafletMouseEvent) => {
         const { lat, lng } = e.latlng;
-        setDeliveryLatLng([lat, lng]);
-        setManualDistanceEnabled(false);
-        
-        try {
-          const parsed = await reverseGeocodeMapbox(lat, lng);
-          if (parsed?.fullAddress) {
-            setCallForm(f => ({
-              ...f,
-              delivery: parsed.fullAddress,
-              delivery_number: parsed.number || f.delivery_number,
-            }));
-          }
-        } catch (err) {
-          console.error("Map click geocode error:", err);
+        if (!isValidCoordinate(lat, lng)) return;
+
+        if (pinPlacementModeRef.current === "store") {
+          await updateStoreLocationFromCoords(lat, lng);
+        } else {
+          await updateDeliveryLocationFromCoords(lat, lng);
         }
       });
     } catch (err) {
@@ -1048,7 +1122,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
         console.error("[CallDriverTab] Map cleanup error:", err);
       }
     };
-  }, [storeLat, storeLng, mapType, formatAddress]);
+  }, [storeLat, storeLng, mapType, formatAddress, updateStoreLocationFromCoords, updateDeliveryLocationFromCoords]);
 
   // Update tile layer if mapType changed
   useEffect(() => {
@@ -1065,7 +1139,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
     }
   }, [mapType]);
 
-  // Update store marker
+  // Update store marker (arrastável para fixação manual exata)
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !isValidCoordinate(storeLat, storeLng)) return;
@@ -1077,9 +1151,23 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
         } catch {}
       }
 
-      storeMarkerRef.current = L.marker([storeLat, storeLng], { icon: storeIcon })
+      storeMarkerRef.current = L.marker([storeLat, storeLng], {
+        icon: storeIcon,
+        draggable: true,
+      })
         .addTo(map)
-        .bindPopup(`<b>🏪 ${restaurant?.name || "Sua Loja"}</b>`);
+        .bindPopup(`<b>🏪 ${restaurant?.name || "Sua Loja"}</b><br><small>Arraste para fixar a localização exata da sua loja</small>`);
+
+      storeMarkerRef.current.on("dragend", async () => {
+        try {
+          const pos = storeMarkerRef.current?.getLatLng();
+          if (pos && isValidCoordinate(pos.lat, pos.lng)) {
+            await updateStoreLocationFromCoords(pos.lat, pos.lng);
+          }
+        } catch (err) {
+          console.error("Store marker drag error:", err);
+        }
+      });
 
       // Only set view if not manual dragging or searching
       if (!deliveryLatLng && !searchingAddress) {
@@ -1088,7 +1176,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
     } catch (err) {
       console.warn("[CallDriverTab] Erro ao atualizar marcador da loja:", err);
     }
-  }, [storeLat, storeLng, restaurant?.name]);
+  }, [storeLat, storeLng, restaurant?.name, updateStoreLocationFromCoords]);
 
   // Update delivery marker + route line
   useEffect(() => {
@@ -1112,7 +1200,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
       if (deliveryLatLng && isValidCoordinate(deliveryLatLng[0], deliveryLatLng[1])) {
         deliveryMarkerRef.current = L.marker(deliveryLatLng, { icon: deliveryIcon, draggable: true })
           .addTo(map)
-          .bindPopup("<b>📍 Ponto de Entrega</b><br><small>Arraste para ajustar</small>")
+          .bindPopup("<b>📍 Ponto de Entrega</b><br><small>Arraste para ajustar o destino</small>")
           .openPopup();
 
         // Reverse geocode on drag end
@@ -1120,17 +1208,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
           try {
             const pos = deliveryMarkerRef.current?.getLatLng();
             if (pos && isValidCoordinate(pos.lat, pos.lng)) {
-              setDeliveryLatLng([pos.lat, pos.lng]);
-              setManualDistanceEnabled(false);
-              
-              const parsed = await reverseGeocodeMapbox(pos.lat, pos.lng);
-              if (parsed?.fullAddress) {
-                setCallForm(f => ({
-                  ...f,
-                  delivery: parsed.fullAddress,
-                  delivery_number: parsed.number || f.delivery_number,
-                }));
-              }
+              await updateDeliveryLocationFromCoords(pos.lat, pos.lng);
             }
           } catch (err) {
             console.error("Marker drag geocode error:", err);
@@ -1164,7 +1242,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
     } catch (err) {
       console.warn("[CallDriverTab] Erro no efeito de rota de entrega:", err);
     }
-  }, [deliveryLatLng, storeLat, storeLng, routeCoords, routeProfile]);
+  }, [deliveryLatLng, storeLat, storeLng, routeCoords, routeProfile, updateDeliveryLocationFromCoords]);
 
   // Driver markers + nearest
   const [nearestDriverInfo, setNearestDriverInfo] = useState<{
@@ -1236,13 +1314,25 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
     }
   };
 
+  const handleSelectDeliveryPinMode = () => {
+    setPinPlacementMode("delivery");
+    containerRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    toast.info("📍 Modo Entrega ativado: clique no mapa para posicionar o ponto de entrega.");
+  };
+
+  const handleSelectStorePinMode = () => {
+    setPinPlacementMode("store");
+    containerRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    toast.info("🏪 Modo Loja ativado: clique no mapa ou arraste o ponto vermelho para fixar sua loja.");
+  };
+
   const handleDeliveryNumberBlur = async () => {
     const num = callForm.delivery_number.trim();
     if (!num || !callForm.delivery.trim()) return;
 
     const fullAddr = formatDeliveryAddressWithNumber(callForm.delivery, num);
     try {
-      const parsed = await geocodeAddressMapbox(fullAddr);
+      const parsed = await geocodeAddressMapbox(fullAddr, { houseNumber: num });
       if (parsed?.coordinates) {
         setDeliveryLatLng([parsed.coordinates.latitude, parsed.coordinates.longitude]);
         setManualDistanceEnabled(false);
@@ -1253,9 +1343,27 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
           ]);
           mapRef.current.fitBounds(bounds, { padding: [40, 40] });
         }
+        return;
       }
     } catch {
-      // Se não encontrar o número exato, mantém a posição atual da rua
+      // Fallback: se o número exato não for localizado, busca a rua e anexa o número
+    }
+
+    try {
+      const parsedStreet = await geocodeAddressMapbox(callForm.delivery, { houseNumber: num });
+      if (parsedStreet?.coordinates) {
+        setDeliveryLatLng([parsedStreet.coordinates.latitude, parsedStreet.coordinates.longitude]);
+        setManualDistanceEnabled(false);
+        if (mapRef.current && storeLat && storeLng) {
+          const bounds = L.latLngBounds([
+            [storeLat, storeLng],
+            [parsedStreet.coordinates.latitude, parsedStreet.coordinates.longitude],
+          ]);
+          mapRef.current.fitBounds(bounds, { padding: [40, 40] });
+        }
+      }
+    } catch (e) {
+      console.warn("Geocodificação de rua fallback falhou:", e);
     }
   };
 
@@ -1286,8 +1394,35 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
       }
     }
 
+    // Se ainda não temos coordenadas de entrega, tenta geocodificação direta antes de dar erro
+    if (!finalLatLng) {
+      try {
+        const parsed = await geocodeAddressMapbox(finalDeliveryAddress, { houseNumber: callForm.delivery_number });
+        if (parsed?.coordinates) {
+          finalLatLng = [parsed.coordinates.latitude, parsed.coordinates.longitude];
+          setDeliveryLatLng(finalLatLng);
+          if (storeLat && storeLng) {
+            finalDistance = haversineKm(storeLat, storeLng, finalLatLng[0], finalLatLng[1]);
+          }
+        }
+      } catch {
+        try {
+          const parsedStreet = await geocodeAddressMapbox(callForm.delivery);
+          if (parsedStreet?.coordinates) {
+            finalLatLng = [parsedStreet.coordinates.latitude, parsedStreet.coordinates.longitude];
+            setDeliveryLatLng(finalLatLng);
+            if (storeLat && storeLng) {
+              finalDistance = haversineKm(storeLat, storeLng, finalLatLng[0], finalLatLng[1]);
+            }
+          }
+        } catch {}
+      }
+    }
+
     if (finalDistance <= 0 || !finalLatLng) {
-      toast.error("Localização de entrega não definida. Selecione um endereço da lista ou clique no mapa.");
+      setPinPlacementMode("delivery");
+      containerRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      toast.error("Localização de entrega não definida. Selecione um endereço da lista ou clique no mapa para posicionar.");
       return;
     }
 
@@ -1463,11 +1598,74 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
+          {/* Seletor do Modo de Marcação no Mapa (Loja vs Entrega) */}
+          <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 bg-muted/40 rounded-lg border">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold text-foreground">Definir no mapa:</span>
+              <Button
+                type="button"
+                size="sm"
+                variant={pinPlacementMode === "delivery" ? "default" : "outline"}
+                className={`h-7 text-xs gap-1.5 font-medium ${
+                  pinPlacementMode === "delivery"
+                    ? "bg-green-600 hover:bg-green-700 text-white shadow-sm"
+                    : "border-green-600/40 text-foreground"
+                }`}
+                onClick={() => setPinPlacementMode("delivery")}
+              >
+                <span className="inline-block w-2.5 h-2.5 rounded-full bg-green-400" />
+                📍 Ponto de Entrega (Destino)
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={pinPlacementMode === "store" ? "default" : "outline"}
+                className={`h-7 text-xs gap-1.5 font-medium ${
+                  pinPlacementMode === "store"
+                    ? "bg-red-600 hover:bg-red-700 text-white shadow-sm"
+                    : "border-red-600/40 text-foreground"
+                }`}
+                onClick={() => setPinPlacementMode("store")}
+              >
+                <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-400" />
+                🏪 Ponto da Loja (Coleta)
+              </Button>
+            </div>
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              {savingStoreCoords ? (
+                <span className="text-primary font-medium flex items-center gap-1">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Salvando posição da loja...
+                </span>
+              ) : pinPlacementMode === "store" ? (
+                <span className="text-red-600 dark:text-red-400 font-medium">
+                  💡 Clique no mapa ou arraste o pino 🔴 vermelho para fixar sua loja
+                </span>
+              ) : (
+                <span className="text-green-600 dark:text-green-400 font-medium">
+                  💡 Clique no mapa para posicionar a entrega do cliente 🟢
+                </span>
+              )}
+            </div>
+          </div>
+
           <div ref={containerRef} style={{ width: "100%", height: 320, borderRadius: 8 }} className="border border-border" />
-          <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-            <span className="flex items-center gap-1">🔴 Sua loja</span>
-            <span className="flex items-center gap-1">🟢 Ponto de entrega</span>
-            <span className="flex items-center gap-1">🔵 Entregadores</span>
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+            <div className="flex flex-wrap gap-3">
+              <span className="flex items-center gap-1 font-medium text-red-600 dark:text-red-400">
+                🔴 Sua loja (arraste p/ fixar)
+              </span>
+              <span className="flex items-center gap-1 font-medium text-green-600 dark:text-green-400">
+                🟢 Ponto de entrega (arraste p/ ajustar)
+              </span>
+              <span className="flex items-center gap-1 text-blue-500">
+                🔵 Entregadores
+              </span>
+            </div>
+            {storeLat && storeLng && (
+              <span className="text-[11px] text-muted-foreground font-mono">
+                Loja: {storeLat.toFixed(5)}, {storeLng.toFixed(5)}
+              </span>
+            )}
           </div>
 
           {/* Route Profile Selector */}
@@ -1588,12 +1786,22 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
                 variant="outline"
                 size="icon"
                 onClick={handlePickupGpsClick}
-                title="Atualizar localização"
+                title="Atualizar localização via GPS"
                 disabled={pickupGpsState === "loading"}
               >
                 {pickupGpsState === "loading"
                   ? <Loader2 className="w-4 h-4 animate-spin" />
                   : <Navigation className="w-4 h-4" />}
+              </Button>
+              <Button
+                type="button"
+                variant={pinPlacementMode === "store" ? "default" : "outline"}
+                size="icon"
+                onClick={handleSelectStorePinMode}
+                title="Marcar / Ajustar localização da loja no mapa"
+                className={pinPlacementMode === "store" ? "bg-red-600 hover:bg-red-700 text-white" : ""}
+              >
+                <MapPin className="w-4 h-4 text-red-500" />
               </Button>
             </div>
             {pickupGpsState === "loading" ? (
@@ -1605,14 +1813,26 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
                 {pickupManualRef.current ? "✓ Endereço informado manualmente" : "✓ Endereço de coleta definido"}
               </p>
             ) : gpsMessage ? (
-              <p className="text-[10px] text-muted-foreground">{gpsMessage} Você pode digitar o endereço manualmente.</p>
+              <p className="text-[10px] text-muted-foreground">{gpsMessage} Você pode digitar o endereço manualmente ou usar o mapa.</p>
             ) : null}
 
           </div>
           <div className="space-y-3">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
               <div className="md:col-span-3 space-y-2">
-                <Label>Endereço de entrega *</Label>
+                <div className="flex items-center justify-between">
+                  <Label>Endereço de entrega *</Label>
+                  <Button
+                    type="button"
+                    variant={pinPlacementMode === "delivery" ? "secondary" : "ghost"}
+                    size="sm"
+                    onClick={handleSelectDeliveryPinMode}
+                    className="h-6 px-2 text-xs gap-1 text-green-600 dark:text-green-400 hover:text-green-700"
+                  >
+                    <MapPin className="w-3 h-3 text-green-500" />
+                    Marcar entrega no mapa
+                  </Button>
+                </div>
                 <div className="relative" ref={suggestionsRef}>
                   <Input
                     value={callForm.delivery}

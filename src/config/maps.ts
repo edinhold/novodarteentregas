@@ -32,7 +32,7 @@ export const MAP_LAYERS = {
  */
 export function isWithinPrimaveraBounds(lat?: number | null, lng?: number | null): boolean {
   if (lat == null || lng == null || !isFinite(lat) || !isFinite(lng)) return false;
-  return lat >= -15.68 && lat <= -15.42 && lng >= -54.42 && lng <= -54.18;
+  return lat >= -15.80 && lat <= -15.35 && lng >= -54.55 && lng <= -54.05;
 }
 
 /**

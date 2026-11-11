@@ -294,12 +294,7 @@ export function isValidCoordinate(latitude: number, longitude: number): boolean 
  */
 export function isWithinPrimaveraBounds(lat: number, lng: number): boolean {
   if (!isValidCoordinate(lat, lng)) return false;
-  return (
-    lat >= PRIMAVERA_DO_LESTE.LAT_RANGE.min &&
-    lat <= PRIMAVERA_DO_LESTE.LAT_RANGE.max &&
-    lng >= PRIMAVERA_DO_LESTE.LNG_RANGE.min &&
-    lng <= PRIMAVERA_DO_LESTE.LNG_RANGE.max
-  );
+  return lat >= -15.80 && lat <= -15.35 && lng >= -54.55 && lng <= -54.05;
 }
 
 /**
@@ -356,40 +351,26 @@ export function validatePrimaveraFeature(feature: MapboxGeocodeFeature): {
 
   const context = feature.properties.context || {};
   const placeName = (context.place?.name || "").toLowerCase().trim();
-  const regionName = (context.region?.name || "").toLowerCase().trim();
   const regionCode = (context.region?.region_code || "").toUpperCase().trim();
   const countryCode = (context.country?.country_code || "").toUpperCase().trim();
-  const countryName = (context.country?.name || "").toLowerCase().trim();
 
-  const fullAddress = (feature.properties.full_address || "").toLowerCase();
-  const placeFormatted = (feature.properties.place_formatted || "").toLowerCase();
-
-  // 2. País deve ser Brasil
-  const isBrazil =
-    countryCode === "BR" ||
-    countryName.includes("brasil") ||
-    countryName.includes("brazil") ||
-    fullAddress.includes("brasil");
-
-  if (!isBrazil) {
+  // 2. País deve ser Brasil se informado explicitamente
+  if (countryCode && countryCode !== "BR") {
     return { valid: false, reason: "Endereço localizado fora do Brasil." };
   }
 
-  // 3. Estado deve ser Mato Grosso (MT)
-  const isMatoGrosso =
-    regionCode === "MT" ||
-    regionName.includes("mato grosso") ||
-    fullAddress.includes("mato grosso") ||
-    placeFormatted.includes("mato grosso") ||
-    /\bmt\b/.test(fullAddress) ||
-    /\bmt\b/.test(placeFormatted);
-
-  if (!isMatoGrosso) {
+  // 3. Estado deve ser MT se informado explicitamente
+  if (regionCode && regionCode !== "MT") {
     return { valid: false, reason: "Endereço localizado fora de Mato Grosso (MT)." };
   }
 
-  // 4. Se a feição identificou especificamente outro município, rejeitar
-  if (placeName && !placeName.includes("primavera do leste")) {
+  // 4. Se a feição identificou especificamente outro município conhecido fora de Primavera do Leste, rejeitar
+  const otherCities = [
+    "cuiabá", "cuiaba", "rondonópolis", "rondonopolis", "campo verde",
+    "paranatinga", "poxoréu", "poxoreu", "barra do garças", "barra do garcas",
+    "sinop", "sorriso", "lucas do rio verde", "nova mutum", "são paulo", "rio de janeiro"
+  ];
+  if (placeName && otherCities.some(city => placeName.includes(city)) && !placeName.includes("primavera do leste")) {
     return {
       valid: false,
       reason: `O endereço encontrado pertence a outro município (${context.place?.name}). Apenas Primavera do Leste - MT é aceito.`,
@@ -456,7 +437,10 @@ export function parseMapboxFeature(
     neighborhood = "";
   }
 
-  const city = context.place?.name || PRIMAVERA_DO_LESTE.CITY_NAME;
+  let city = context.place?.name || PRIMAVERA_DO_LESTE.CITY_NAME;
+  if (!city || !city.toLowerCase().includes("primavera")) {
+    city = PRIMAVERA_DO_LESTE.CITY_NAME;
+  }
   const state = context.region?.name || PRIMAVERA_DO_LESTE.STATE_NAME;
   const stateCode = context.region?.region_code || PRIMAVERA_DO_LESTE.STATE_CODE;
   const country = context.country?.name || PRIMAVERA_DO_LESTE.COUNTRY_NAME;
@@ -543,7 +527,7 @@ async function fetchNominatimSuggestions(
     const nomUrl = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&countrycodes=br&limit=${limit}&q=${encodeURIComponent(nomQuery)}`;
     const nomRes = await fetch(nomUrl, {
       signal,
-      headers: { "Accept-Language": "pt-BR", "User-Agent": "DuarteEntregasApp/1.0" },
+      headers: { "Accept-Language": "pt-BR" },
     });
     if (nomRes.ok) {
       const nomData = await nomRes.json();
@@ -561,7 +545,7 @@ async function fetchNominatimSuggestions(
               osmType: item.type,
             });
             results.push({
-              fullAddress: item.display_name || `${road}${hNum ? ", " + hNum : ""}, Primavera do Leste - MT`,
+              fullAddress: `${road}${hNum ? ", " + hNum : ""}${suburb ? ", " + suburb : ""}, Primavera do Leste - MT`,
               street: road,
               number: hNum,
               neighborhood: suburb,
@@ -585,6 +569,15 @@ async function fetchNominatimSuggestions(
   } catch (err) {
     console.warn("[NominatimFallback] Erro ao buscar endereços:", err);
   }
+
+  // Fallback para nome de logradouro se a busca exata com número não retornou resultados
+  if (results.length === 0 && detectedNumber) {
+    const streetOnly = query.replace(new RegExp(`[,\\s]*${detectedNumber}\\b`, "i"), "").trim();
+    if (streetOnly.length >= 3 && streetOnly !== query) {
+      return fetchNominatimSuggestions(streetOnly, limit, detectedNumber, signal);
+    }
+  }
+
   return results;
 }
 
@@ -644,15 +637,53 @@ export async function searchAddressSuggestions(
     }
 
     const data = (await response.json()) as MapboxGeocodeResponse;
-    if (!data || !Array.isArray(data.features)) {
-      return fetchNominatimSuggestions(trimmed, limit, detectedNumber, activeSignal);
+    const parsedList: MapboxParsedAddress[] = [];
+
+    if (data && Array.isArray(data.features)) {
+      for (const feature of data.features) {
+        const parsed = parseMapboxFeature(feature, detectedNumber);
+        if (parsed.isValidPrimavera) {
+          parsedList.push(parsed);
+        }
+      }
     }
 
-    const parsedList: MapboxParsedAddress[] = [];
-    for (const feature of data.features) {
-      const parsed = parseMapboxFeature(feature, detectedNumber);
-      if (parsed.isValidPrimavera) {
-        parsedList.push(parsed);
+    // Se Mapbox retornou 0 resultados e a busca continha número predial,
+    // tenta buscar pelo nome do logradouro para cidades onde a Mapbox só indexa ruas
+    if (parsedList.length === 0 && detectedNumber) {
+      const streetOnly = trimmed.replace(new RegExp(`[,\\s]*${detectedNumber}\\b`, "i"), "").trim();
+      if (streetOnly.length >= 3 && streetOnly !== trimmed) {
+        const streetUrl = new URL(MAPBOX_GEOCODE_FORWARD_URL);
+        streetUrl.searchParams.set("q", buildPrimaveraQuery(streetOnly));
+        streetUrl.searchParams.set("access_token", token);
+        streetUrl.searchParams.set("country", "br");
+        streetUrl.searchParams.set("language", "pt");
+        streetUrl.searchParams.set("limit", limit.toString());
+        streetUrl.searchParams.set("bbox", PRIMAVERA_DO_LESTE.BBOX.join(","));
+        streetUrl.searchParams.set(
+          "proximity",
+          `${PRIMAVERA_DO_LESTE.CENTER_LNG_LAT[0]},${PRIMAVERA_DO_LESTE.CENTER_LNG_LAT[1]}`
+        );
+
+        try {
+          const streetRes = await fetch(streetUrl.toString(), {
+            signal: activeSignal,
+            headers: { Accept: "application/json" },
+          });
+          if (streetRes.ok) {
+            const streetData = (await streetRes.json()) as MapboxGeocodeResponse;
+            if (streetData && Array.isArray(streetData.features)) {
+              for (const feature of streetData.features) {
+                const parsed = parseMapboxFeature(feature, detectedNumber);
+                if (parsed.isValidPrimavera) {
+                  parsedList.push(parsed);
+                }
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("[searchAddressSuggestions] Fallback de logradouro na Mapbox falhou:", e);
+        }
       }
     }
 
@@ -699,16 +730,28 @@ export async function geocodeAddress(
   }
 
   const detectedNumber = options.houseNumber || extractHouseNumber(trimmed);
-  const suggestions = await searchAddressSuggestions(trimmed, {
+  let suggestions = await searchAddressSuggestions(trimmed, {
     signal: options.signal,
     limit: 3,
     userNumber: detectedNumber,
   });
 
+  // Se não encontrou e possui número, tenta buscar apenas pelo nome da rua
+  if (suggestions.length === 0 && detectedNumber) {
+    const streetOnly = trimmed.replace(new RegExp(`[,\\s]*${detectedNumber}\\b`, "i"), "").trim();
+    if (streetOnly.length >= 3 && streetOnly !== trimmed) {
+      suggestions = await searchAddressSuggestions(streetOnly, {
+        signal: options.signal,
+        limit: 3,
+        userNumber: detectedNumber,
+      });
+    }
+  }
+
   if (suggestions.length === 0) {
     throw new MapboxServiceError(
       "ADDRESS_NOT_FOUND",
-      "Não foi possível localizar este endereço em Primavera do Leste - MT. Confira a rua, o número e o bairro."
+      "Não foi possível localizar este endereço em Primavera do Leste - MT. Confira a rua, o número e o bairro ou selecione o ponto no mapa."
     );
   }
 
@@ -724,15 +767,13 @@ export async function geocodeAddress(
 }
 
 /**
- * 3. GEOCODIFICAÇÃO REVERSA (Reverse Geocoding v6)
+ * 3. GEOCODIFICAÇÃO REVERSA (Reverse Geocoding v6 + Fallback Resiliente)
  */
 export async function reverseGeocode(
   latitude: number,
   longitude: number,
   options: { signal?: AbortSignal } = {}
 ): Promise<MapboxParsedAddress> {
-  const token = assertMapboxToken();
-
   if (!isValidCoordinate(latitude, longitude)) {
     throw new MapboxServiceError(
       "INVALID_COORDINATES",
@@ -740,71 +781,106 @@ export async function reverseGeocode(
     );
   }
 
-  const url = new URL(MAPBOX_GEOCODE_REVERSE_URL);
-  url.searchParams.set("longitude", longitude.toString());
-  url.searchParams.set("latitude", latitude.toString());
-  url.searchParams.set("access_token", token);
-  url.searchParams.set("country", "br");
-  url.searchParams.set("language", "pt");
-  url.searchParams.set("types", "address,street");
+  const token = hasMapboxToken() ? assertMapboxToken() : "";
 
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), MAPBOX_REQUEST_TIMEOUT_MS);
-    const activeSignal = options.signal || controller.signal;
+  if (token) {
+    const url = new URL(MAPBOX_GEOCODE_REVERSE_URL);
+    url.searchParams.set("longitude", longitude.toString());
+    url.searchParams.set("latitude", latitude.toString());
+    url.searchParams.set("access_token", token);
+    url.searchParams.set("country", "br");
+    url.searchParams.set("language", "pt");
+    url.searchParams.set("types", "address,street,neighborhood,place");
 
-    const response = await fetch(url.toString(), {
-      signal: activeSignal,
-      headers: { Accept: "application/json" },
-    });
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), MAPBOX_REQUEST_TIMEOUT_MS);
+      const activeSignal = options.signal || controller.signal;
 
-    clearTimeout(timeoutId);
+      const response = await fetch(url.toString(), {
+        signal: activeSignal,
+        headers: { Accept: "application/json" },
+      });
 
-    if (response.status === 401 || response.status === 403) {
-      throw new MapboxServiceError(
-        "AUTH_ERROR",
-        "Chave de acesso da Mapbox inválida ou não autorizada."
-      );
-    }
-    if (response.status === 429) {
-      throw new MapboxServiceError(
-        "RATE_LIMIT",
-        "Limite de requisições da Mapbox atingido."
-      );
-    }
-    if (!response.ok) {
-      throw new MapboxServiceError(
-        "MAPBOX_API_ERROR",
-        `Erro na geocodificação reversa (${response.status})`
-      );
-    }
+      clearTimeout(timeoutId);
 
-    const data = (await response.json()) as MapboxGeocodeResponse;
-    if (!data.features || data.features.length === 0) {
-      throw new MapboxServiceError(
-        "ADDRESS_NOT_FOUND",
-        "Nenhum endereço encontrado para este ponto no mapa."
-      );
+      if (response.ok) {
+        const data = (await response.json()) as MapboxGeocodeResponse;
+        if (data.features && data.features.length > 0) {
+          return parseMapboxFeature(data.features[0]);
+        }
+      }
+    } catch (error: any) {
+      if (error?.name === "AbortError") {
+        throw new MapboxServiceError(
+          "NETWORK_ERROR",
+          "Geocodificação reversa cancelada."
+        );
+      }
+      console.warn("[reverseGeocode] Mapbox falhou, tentando fallback Nominatim:", error);
     }
-
-    const bestFeature = data.features[0];
-    return parseMapboxFeature(bestFeature);
-  } catch (error: any) {
-    if (error?.name === "AbortError") {
-      throw new MapboxServiceError(
-        "NETWORK_ERROR",
-        "Geocodificação reversa cancelada."
-      );
-    }
-    if (error instanceof MapboxServiceError) {
-      throw error;
-    }
-    throw new MapboxServiceError(
-      "NETWORK_ERROR",
-      "Falha ao conectar com o serviço de geocodificação reversa da Mapbox.",
-      error
-    );
   }
+
+  // Fallback via Nominatim Reverse
+  try {
+    const nomUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&addressdetails=1`;
+    const nomRes = await fetch(nomUrl, {
+      signal: options.signal,
+      headers: { "Accept-Language": "pt-BR" },
+    });
+    if (nomRes.ok) {
+      const item = await nomRes.json();
+      if (item && item.address) {
+        const addr = item.address;
+        const road = addr.road || addr.pedestrian || addr.suburb || (item.display_name ? item.display_name.split(",")[0] : "");
+        const suburb = addr.suburb || addr.neighbourhood || addr.city_district || "";
+        const hNum = addr.house_number || "";
+        const cat = detectLocationCategory(road || item.display_name, item.display_name, item.type);
+        const fullAddress = `${road || "Rua Local"}${hNum ? ", " + hNum : ""}${suburb ? ", " + suburb : ""}, Primavera do Leste - MT`;
+
+        return {
+          fullAddress,
+          street: road || "Rua Local",
+          number: hNum,
+          neighborhood: suburb,
+          city: "Primavera do Leste",
+          state: "Mato Grosso",
+          stateCode: "MT",
+          country: "Brasil",
+          postalCode: addr.postcode || "",
+          coordinates: { latitude, longitude },
+          lngLat: [longitude, latitude],
+          mapboxId: `osm-rev-${item.place_id || item.osm_id || Math.random().toString(36).substring(7)}`,
+          featureType: "address",
+          isValidPrimavera: isWithinPrimaveraBounds(latitude, longitude),
+          placeCategory: cat.type,
+          placeCategoryLabel: cat.badge,
+        };
+      }
+    }
+  } catch (nomErr) {
+    console.warn("[reverseGeocode] Falha também no fallback Nominatim:", nomErr);
+  }
+
+  // Fallback gracioso com formato legível por coordenadas
+  return {
+    fullAddress: `Ponto no Mapa (${latitude.toFixed(5)}, ${longitude.toFixed(5)}), Primavera do Leste - MT`,
+    street: "Ponto no Mapa",
+    number: "",
+    neighborhood: "",
+    city: "Primavera do Leste",
+    state: "Mato Grosso",
+    stateCode: "MT",
+    country: "Brasil",
+    postalCode: "",
+    coordinates: { latitude, longitude },
+    lngLat: [longitude, latitude],
+    mapboxId: `coord-${latitude}-${longitude}`,
+    featureType: "coordinate",
+    isValidPrimavera: isWithinPrimaveraBounds(latitude, longitude),
+    placeCategory: "other",
+    placeCategoryLabel: "Ponto Selecionado",
+  };
 }
 
 /**
