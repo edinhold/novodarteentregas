@@ -4,6 +4,7 @@ import { supabase, createFreshChannel } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { playUrgentNotification, startDeliveryRingtone, stopDeliveryRingtone } from "@/lib/notificationSound";
 import { cancelDeliveryNotification } from "@/lib/push";
+import { showSafeNotification } from "@/lib/safeNotification";
 import { toast } from "sonner";
 
 
@@ -261,32 +262,21 @@ export function useDeliveryOverlay({ standby, timeoutMs = 30000, onAccepted }: O
           startAlerts(row.id);
           loadDelivery(row.id);
 
-          // Show OS-level notification so the driver is alerted even when the
-          // tab is in background, screen is off, or another app is focused.
+          // Show OS-level notification safely across platforms (including Safari iOS PWA)
           void (async () => {
             try {
-              if (
-                typeof window !== "undefined" &&
-                "Notification" in window &&
-                Notification.permission === "granted"
-              ) {
-                const { data: cfg } = await supabase.from("delivery_config").select("app_fee_per_delivery").limit(1).maybeSingle();
-                const appFeePct = Number((cfg as any)?.app_fee_per_delivery ?? 2);
-                const grossFee = Number(row.driver_fee ?? 0);
-                const netFee = Math.max(0, grossFee * (1 - appFeePct / 100));
+              const { data: cfg } = await supabase.from("delivery_config").select("app_fee_per_delivery").limit(1).maybeSingle();
+              const appFeePct = Number((cfg as any)?.app_fee_per_delivery ?? 2);
+              const grossFee = Number(row.driver_fee ?? 0);
+              const netFee = Math.max(0, grossFee * (1 - appFeePct / 100));
 
-                const n = new Notification("🚨 Nova entrega disponível!", {
-                  body: `Ganho Líquido: R$ ${netFee.toFixed(2)} · Toque para aceitar`,
-                  tag: `delivery-${row.id}`,
-                  requireInteraction: true,
-                  icon: "/pwa-192x192.png",
-                  badge: "/pwa-192x192.png",
-                } as NotificationOptions);
-                n.onclick = () => {
-                  window.focus();
-                  n.close();
-                };
-              }
+              await showSafeNotification("🚨 Nova entrega disponível!", {
+                body: `Ganho Líquido: R$ ${netFee.toFixed(2)} · Toque para aceitar`,
+                tag: `delivery-${row.id}`,
+                requireInteraction: true,
+                icon: "/pwa-192x192.png",
+                badge: "/pwa-192x192.png",
+              } as NotificationOptions);
             } catch (e) {
               console.log("[DeliveryOverlay] Falha ao exibir notificação OS", e);
             }

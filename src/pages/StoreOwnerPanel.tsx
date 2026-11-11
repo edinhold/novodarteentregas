@@ -14,6 +14,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { DriverPhoto } from "@/components/DriverPhoto";
 import { normalizeWhatsAppNumber, formatPhoneNumber } from "@/lib/phoneUtils";
+import { showSafeNotification } from "@/lib/safeNotification";
+import { resumeAudioContext } from "@/lib/notificationSound";
 import ThemeToggle from "@/components/ThemeToggle";
 import CallDriverTab from "@/components/store/CallDriverTab";
 import MenuTab from "@/components/store/MenuTab";
@@ -85,10 +87,28 @@ const StoreOwnerPanel = () => {
   const impersonatedStoreName = typeof window !== "undefined" ? sessionStorage.getItem("admin_impersonated_store_name") : null;
   const activeUserId = impersonatedUserId || user?.id;
 
+  const [verifyTimeoutReached, setVerifyTimeoutReached] = useState(false);
+
+  // Watchdog de segurança: garante que no PWA/Safari a tela nunca fique bloqueada ou deslogue indevidamente
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setVerifyTimeoutReached(true);
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Checagem de token existente em localStorage para evitar redirecionamento indevido no PWA
+  const hasLocalAuthToken = typeof window !== "undefined" && Object.keys(localStorage).some(
+    (k) => k.startsWith("sb-") && k.endsWith("-auth-token")
+  );
+
   useEffect(() => {
     if (loading) return;
-    if (!user && !impersonatedUserId) navigate("/auth", { replace: true });
-  }, [loading, user, impersonatedUserId, navigate]);
+    // No PWA ou standalone Safari, só redireciona se realmente NÃO houver sessão nem token salvo e já houver estourado o tempo
+    if (!user && !impersonatedUserId && !hasLocalAuthToken && verifyTimeoutReached) {
+      navigate("/auth", { replace: true });
+    }
+  }, [loading, user, impersonatedUserId, hasLocalAuthToken, verifyTimeoutReached, navigate]);
 
   const { data: restaurant } = useQuery({
     queryKey: ["my-restaurant", activeUserId],
@@ -231,8 +251,12 @@ const StoreOwnerPanel = () => {
   };
 
   useEffect(() => {
-    if ("Notification" in window && Notification.permission === "default") {
-      Notification.requestPermission();
+    // Permissão de notificação segura para Safari iOS (não disparar automaticamente se exigir gesto)
+    const isIOS = typeof navigator !== "undefined" && /iPad|iPhone|iPod/.test(navigator.userAgent);
+    if (!isIOS && typeof window !== "undefined" && "Notification" in window && Notification.permission === "default") {
+      try {
+        Notification.requestPermission().catch(() => {});
+      } catch {}
     }
   }, []);
 
@@ -253,9 +277,11 @@ const StoreOwnerPanel = () => {
 
             if (newStatus === "accepted" && oldStatus === "pending") {
               toast.success("🎉 Um entregador aceitou sua entrega!", { duration: 8000 });
-              if ("Notification" in window && Notification.permission === "granted") {
-                new Notification("Entrega Aceita!", { body: "Um entregador aceitou seu pedido de entrega.", icon: "/favicon.ico" });
-              }
+              resumeAudioContext();
+              showSafeNotification("Entrega Aceita!", {
+                body: "Um entregador aceitou seu pedido de entrega.",
+                icon: "/favicon.ico",
+              });
             }
             if (newStatus === "picked_up") toast.info("📦 Entregador coletou o pedido!");
             if (newStatus === "delivered") toast.success("✅ Entrega concluída!");
@@ -267,9 +293,11 @@ const StoreOwnerPanel = () => {
           queryClient.invalidateQueries({ queryKey: ["chat-messages", activeRequest.id] });
           if (payload.new?.sender_id !== activeUserId) {
             toast("💬 Nova mensagem do entregador");
-            if ("Notification" in window && Notification.permission === "granted") {
-              new Notification("Nova mensagem", { body: payload.new?.message || "Mensagem recebida", icon: "/favicon.ico" });
-            }
+            resumeAudioContext();
+            showSafeNotification("Nova mensagem", {
+              body: payload.new?.message || "Mensagem recebida",
+              icon: "/favicon.ico",
+            });
           }
         }
       })
@@ -277,7 +305,7 @@ const StoreOwnerPanel = () => {
     return () => { supabase.removeChannel(channel); };
   }, [activeUserId, activeRequest, queryClient]);
 
-  if (loading || (!user && !impersonatedUserId)) {
+  if ((loading && !verifyTimeoutReached) || (!user && !impersonatedUserId && hasLocalAuthToken && !verifyTimeoutReached)) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <p className="text-muted-foreground">Verificando login...</p>

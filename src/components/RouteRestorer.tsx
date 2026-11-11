@@ -48,8 +48,14 @@ const RouteRestorer = () => {
   useEffect(() => {
     if (loading || roleLoading) return;
     if (restoreAttempted) return;
-    restoreAttempted = true;
     if (isExcludedRoute(location.pathname)) return;
+
+    // Se o usuário está logado mas a role ainda não foi resolvida nem existe no cache, aguardar resolução
+    const cachedRole = typeof window !== "undefined" ? localStorage.getItem("cached_user_role") : null;
+    const effectiveRole = role || cachedRole;
+    if (user && !effectiveRole) return;
+
+    restoreAttempted = true;
 
     try {
       const saved = localStorage.getItem(STORAGE_KEY);

@@ -42,6 +42,34 @@ export const resumeAudioContext = async () => {
   }
 };
 
+// Auto-desbloqueio de áudio no primeiro gesto do usuário (fundamental para Safari iOS PWA)
+if (typeof window !== "undefined") {
+  const unlockAudioOnGesture = () => {
+    resumeAudioContext();
+    try {
+      const audio = getRingtoneAudio();
+      if (audio && typeof audio.play === "function") {
+        const p = audio.play();
+        if (p && typeof p.then === "function") {
+          p.then(() => {
+            audio.pause();
+            audio.currentTime = 0;
+          }).catch(() => {});
+        }
+      }
+    } catch {}
+    window.removeEventListener("click", unlockAudioOnGesture);
+    window.removeEventListener("touchstart", unlockAudioOnGesture);
+    window.removeEventListener("touchend", unlockAudioOnGesture);
+    window.removeEventListener("keydown", unlockAudioOnGesture);
+  };
+
+  window.addEventListener("click", unlockAudioOnGesture, { passive: true, once: true });
+  window.addEventListener("touchstart", unlockAudioOnGesture, { passive: true, once: true });
+  window.addEventListener("touchend", unlockAudioOnGesture, { passive: true, once: true });
+  window.addEventListener("keydown", unlockAudioOnGesture, { passive: true, once: true });
+}
+
 export const setNotificationVolume = (vol: number) => {
   globalVolume = Math.max(0, Math.min(1, vol));
   if (ringtoneAudioElement) {

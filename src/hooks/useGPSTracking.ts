@@ -519,13 +519,25 @@ export const useGPSTracking = (options: GPSTrackingOptions = {}) => {
     setWatching(false);
   }, [releaseWakeLock]);
 
-  // Monitor permission
+  // Monitor permission com compatibilidade para Safari / iOS
   useEffect(() => {
-    if ("permissions" in navigator) {
-      navigator.permissions.query({ name: "geolocation" as any }).then((status) => {
-        setPermissionStatus(status.state);
-        status.onchange = () => setPermissionStatus(status.state);
-      });
+    if ("permissions" in navigator && typeof (navigator as any).permissions?.query === "function") {
+      try {
+        navigator.permissions
+          .query({ name: "geolocation" as any })
+          .then((status) => {
+            setPermissionStatus(status.state);
+            status.onchange = () => setPermissionStatus(status.state);
+          })
+          .catch((err) => {
+            // Safari lança TypeError: 'geolocation' is not a valid argument for PermissionDescriptor
+            console.log("[GPS] navigator.permissions.query('geolocation') não suportado no Safari:", err?.message);
+            setPermissionStatus("prompt");
+          });
+      } catch (err: any) {
+        console.log("[GPS] Erro ao consultar permissões:", err?.message);
+        setPermissionStatus("prompt");
+      }
     } else {
       setPermissionStatus("unsupported");
     }

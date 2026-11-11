@@ -76,13 +76,6 @@ BEGIN
       AND status IN ('pending', 'requested')
       AND created_at < v_month_start;
 
-    -- Revert any orphan 'requested' earnings of current month back to 'pending'
-    UPDATE public.driver_earnings
-    SET status = 'pending', updated_at = now()
-    WHERE (driver_id = v_driver_id OR driver_id = v_user_id)
-      AND status = 'requested'
-      AND created_at >= v_month_start;
-
     -- Calculate available pending earnings balance strictly for the current month
     SELECT COALESCE(SUM(amount), 0) INTO v_total_pending
     FROM public.driver_earnings
@@ -261,3 +254,4 @@ $$;
 GRANT EXECUTE ON FUNCTION public.sync_driver_wallet_integrity() TO authenticated, service_role, anon;
 
 NOTIFY pgrst, 'reload schema';
+

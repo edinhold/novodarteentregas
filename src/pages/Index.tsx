@@ -28,15 +28,21 @@ const Index = () => {
   const redirectedRef = useRef(false);
 
   // Redirecionamento ÚNICO para o painel correspondente.
-  // Só ocorre depois que a sessão e a role foram carregadas, e apenas
-  // uma vez por sessão do navegador (evita loop ao voltar para a home).
+  // Só ocorre depois que a sessão e a role foram carregadas.
+  // No PWA standalone (instalado via Safari/Chrome), garante que entregadores e lojistas
+  // sejam direcionados imediatamente ao seu painel em vez de ficarem presos na tela de clientes.
   useEffect(() => {
     if (loading || roleLoading) return;
     const currentRole = role || (typeof window !== "undefined" ? (localStorage.getItem("cached_user_role") as any) : null);
     if (!user || !currentRole) return;
     if (redirectedRef.current) return;
 
-    const alreadyRedirected = sessionStorage.getItem("authRedirectDone") === user.id;
+    const isStandalone = typeof window !== "undefined" && (
+      window.matchMedia("(display-mode: standalone)").matches ||
+      (window.navigator as unknown as { standalone?: boolean }).standalone === true
+    );
+
+    const alreadyRedirected = !isStandalone && sessionStorage.getItem("authRedirectDone") === user.id;
     const target = ROLE_HOME[currentRole];
     if (!target || alreadyRedirected) return;
 

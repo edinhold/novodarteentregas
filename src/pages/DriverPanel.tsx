@@ -23,6 +23,7 @@ import DriverProfileSettings from "@/components/driver/DriverProfileSettings";
 import PushStatusCard from "@/components/driver/PushStatusCard";
 import { cancelDeliveryNotification } from "@/lib/push";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
+import { showSafeNotification } from "@/lib/safeNotification";
 import { safeFormatTime, safeFormatDateTime, isFutureDate } from "@/lib/utils";
 
 import ChatWidget from "@/components/ChatWidget";
@@ -54,7 +55,7 @@ const getCachedDriverProfile = (userId?: string) => {
     if (!userId || parsed.user_id === userId || parsed.id === userId) {
       return parsed;
     }
-  } catch {}
+  } catch { }
   return null;
 };
 
@@ -62,7 +63,7 @@ const setCachedDriverProfile = (profile: any) => {
   if (typeof window === "undefined" || !profile) return;
   try {
     localStorage.setItem(CACHED_DRIVER_KEY, JSON.stringify(profile));
-  } catch {}
+  } catch { }
 };
 
 const DriverPanel = () => {
@@ -200,7 +201,7 @@ const DriverPanel = () => {
           if (result.id && result.user_id) {
             setCachedDriverProfile(result);
           }
-          supabase.from("user_roles").upsert({ user_id: user.id, role: "driver" as any }, { onConflict: "user_id,role" }).then(() => {}, () => {});
+          supabase.from("user_roles").upsert({ user_id: user.id, role: "driver" as any }, { onConflict: "user_id,role" }).then(() => { }, () => { });
           return result;
         }
 
@@ -251,7 +252,7 @@ const DriverPanel = () => {
   } : null);
 
   // Single instance of GPS tracking for the whole panel
-  const trackingData = useGPSTracking({ 
+  const trackingData = useGPSTracking({
     userId: user?.id,
     driverId: effectiveDriverProfile?.id
   });
@@ -293,7 +294,7 @@ const DriverPanel = () => {
       try {
         await (supabase as any).rpc("release_stale_directed_requests");
         queryClient.invalidateQueries({ queryKey: ["driver-pending-requests"] });
-      } catch {}
+      } catch { }
     };
     tick();
     const id = setInterval(tick, 10000);
@@ -338,9 +339,9 @@ const DriverPanel = () => {
 
   const displayPendingRequests = selectedNotificationOrder
     ? [
-        selectedNotificationOrder,
-        ...pendingRequests.filter((r: any) => r.id !== selectedNotificationOrder.id && !rejectedIds.includes(r.id)),
-      ]
+      selectedNotificationOrder,
+      ...pendingRequests.filter((r: any) => r.id !== selectedNotificationOrder.id && !rejectedIds.includes(r.id)),
+    ]
     : pendingRequests.filter((r: any) => !rejectedIds.includes(r.id));
 
   // Chat messages
@@ -469,7 +470,7 @@ const DriverPanel = () => {
   useEffect(() => {
     if (!user?.id) return;
     if ("Notification" in window && Notification.permission === "default") {
-      Notification.requestPermission().catch(() => {});
+      Notification.requestPermission().catch(() => { });
     }
   }, [user?.id]);
 
@@ -538,7 +539,7 @@ const DriverPanel = () => {
   // Realtime
   useEffect(() => {
     if (!user?.id) return;
-    
+
     // Unlock audio context on first user interaction in the panel
     const handleFirstInteraction = () => {
       resumeAudioContext();
@@ -561,12 +562,12 @@ const DriverPanel = () => {
         console.log("New delivery request received:", payload);
         queryClient.invalidateQueries({ queryKey: ["driver-pending-requests"] });
         queryClient.invalidateQueries({ queryKey: ["driver-pending-groups"] });
-        
+
         // Disparar toque constante imediatamente ao chegar corrida
         resumeAudioContext();
         startDeliveryRingtone(payload.new?.id);
 
-        toast("🚀 Nova entrega disponível!", { 
+        toast("🚀 Nova entrega disponível!", {
           duration: 10000,
           action: {
             label: "Ver",
@@ -574,12 +575,10 @@ const DriverPanel = () => {
           }
         });
 
-        if ("Notification" in window && Notification.permission === "granted") {
-          new Notification("Nova Entrega!", { 
-            body: "Uma nova solicitação de entrega está disponível. Toque para aceitar.", 
-            icon: "/favicon.ico"
-          });
-        }
+        showSafeNotification("Nova Entrega!", {
+          body: "Uma nova solicitação de entrega está disponível. Toque para aceitar.",
+          icon: "/favicon.ico",
+        });
       })
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "delivery_requests" }, (payload: any) => {
         console.log("Delivery request updated:", payload);
@@ -589,7 +588,7 @@ const DriverPanel = () => {
         queryClient.invalidateQueries({ queryKey: ["driver-active-group"] });
         queryClient.invalidateQueries({ queryKey: ["driver-completed-requests", user.id] });
         queryClient.invalidateQueries({ queryKey: ["my-earnings", effectiveDriverProfile?.id] });
-        
+
         // Se a entrega foi aceita por qualquer motorista ou cancelada, parar o toque imediatamente
         if (payload.new?.status !== "pending" || (payload.new?.driver_id && payload.new.driver_id !== user.id)) {
           stopDeliveryRingtone(payload.new?.id);
@@ -625,9 +624,10 @@ const DriverPanel = () => {
           if (payload.new?.sender_id !== user.id) {
             playNotificationSound();
             toast("💬 Nova mensagem do lojista");
-            if ("Notification" in window && Notification.permission === "granted") {
-              new Notification("Nova mensagem", { body: payload.new?.message || "Mensagem recebida", icon: "/favicon.ico" });
-            }
+            showSafeNotification("Nova mensagem", {
+              body: payload.new?.message || "Mensagem recebida",
+              icon: "/favicon.ico",
+            });
           }
         }
       })
@@ -640,15 +640,15 @@ const DriverPanel = () => {
         }
       });
 
-    return () => { 
-      supabase.removeChannel(channel); 
+    return () => {
+      supabase.removeChannel(channel);
       window.removeEventListener('click', handleFirstInteraction);
       window.removeEventListener('touchstart', handleFirstInteraction);
       window.removeEventListener("delivery-unavailable", handleUnavailable);
 
     };
   }, [user?.id, driverProfile?.id, queryClient]);
-  
+
   // Keep driver active+online status synced while panel is open
   useEffect(() => {
     if (!user?.id) return;
@@ -902,7 +902,7 @@ const DriverPanel = () => {
 
   const requestWithdrawal = async () => {
     const totalPending = earnings
-      .filter((e: any) => 
+      .filter((e: any) =>
         (e.status === "pending" || (!hasActiveWithdrawalRequest && e.status === "requested")) &&
         isThisMonth(new Date(e.created_at))
       )
@@ -1009,7 +1009,7 @@ const DriverPanel = () => {
   const hasActiveWithdrawalRequest = withdrawals.some((w: any) => w.status === "pending");
   // Saldo Disponível considera estritamente os ganhos do mês atual (valores antigos não acumulam mais)
   const pendingBalance = earnings
-    .filter((e: any) => 
+    .filter((e: any) =>
       (e.status === "pending" || (!hasActiveWithdrawalRequest && e.status === "requested")) &&
       isThisMonth(new Date(e.created_at))
     )
@@ -1172,11 +1172,10 @@ const DriverPanel = () => {
                       setActiveTab(item.id);
                       setMobileDrawerOpen(false);
                     }}
-                    className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl text-sm font-medium transition ${
-                      isActive
+                    className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl text-sm font-medium transition ${isActive
                         ? "bg-white text-black font-semibold shadow-md"
                         : "text-zinc-300 hover:bg-zinc-800 hover:text-white"
-                    }`}
+                      }`}
                   >
                     <Icon className="w-4 h-4" />
                     <span>{item.label}</span>
@@ -1239,27 +1238,27 @@ const DriverPanel = () => {
 
       <div className="flex min-h-screen w-full bg-background overflow-hidden">
         <AppSidebar role="driver" currentTab={activeTab} onTabChange={setActiveTab} />
-        
-        
+
+
         <SidebarInset className="flex-1 overflow-y-auto">
           <header className="bg-card border-b px-4 py-3 flex items-center gap-3 sticky top-0 z-30">
             <SidebarTrigger />
             <button onClick={() => navigate("/")} className="hover:bg-muted p-1 rounded-full transition-colors ml-1">
               <ArrowLeft className="w-5 h-5" />
             </button>
-            <img 
-              src={logoDuarte} 
-              alt="Duarte Delivery" 
-              className="h-8 w-8 rounded-lg object-cover cursor-pointer hover:opacity-90 transition-opacity" 
-              onClick={() => navigate("/")} 
+            <img
+              src={logoDuarte}
+              alt="Duarte Delivery"
+              className="h-8 w-8 rounded-lg object-cover cursor-pointer hover:opacity-90 transition-opacity"
+              onClick={() => navigate("/")}
             />
             <h1 className="font-bold text-lg flex-1 truncate">Painel do Entregador</h1>
-            
+
             <div className="flex items-center gap-2">
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                className="h-8 w-8 text-muted-foreground" 
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-muted-foreground"
                 onClick={() => { playUrgentNotification(); toast.info("Testando som de alerta..."); }}
                 title="Testar som de alerta"
               >
@@ -1367,10 +1366,10 @@ const DriverPanel = () => {
                 </Button>
               )}
 
-              <motion.div 
+              <motion.div
                 key={activeTab}
-                initial={{ opacity: 0, y: 10 }} 
-                animate={{ opacity: 1, y: 0 }} 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
                 className="space-y-4 outline-none"
               >
                 <TabsContent value="home" className="space-y-4 outline-none m-0">
@@ -1533,7 +1532,7 @@ const DriverPanel = () => {
                     </CardContent>
                   </Card>
                 </TabsContent>
-                
+
                 <TabsContent value="map" className="space-y-4 outline-none m-0 -mx-4">
                   <div className="h-[calc(100vh-160px)] w-full">
                     <DriverGPS
@@ -1712,33 +1711,30 @@ const DriverPanel = () => {
                           <button
                             type="button"
                             onClick={() => { setEarningsFilter("month"); setEarningsDisplayCount(10); }}
-                            className={`px-2.5 py-1 text-xs rounded-md font-medium transition-all ${
-                              earningsFilter === "month"
+                            className={`px-2.5 py-1 text-xs rounded-md font-medium transition-all ${earningsFilter === "month"
                                 ? "bg-background text-foreground shadow-sm font-semibold"
                                 : "text-muted-foreground hover:text-foreground"
-                            }`}
+                              }`}
                           >
                             Este Mês
                           </button>
                           <button
                             type="button"
                             onClick={() => { setEarningsFilter("today"); setEarningsDisplayCount(10); }}
-                            className={`px-2.5 py-1 text-xs rounded-md font-medium transition-all ${
-                              earningsFilter === "today"
+                            className={`px-2.5 py-1 text-xs rounded-md font-medium transition-all ${earningsFilter === "today"
                                 ? "bg-background text-foreground shadow-sm font-semibold"
                                 : "text-muted-foreground hover:text-foreground"
-                            }`}
+                              }`}
                           >
                             Hoje
                           </button>
                           <button
                             type="button"
                             onClick={() => { setEarningsFilter("all"); setEarningsDisplayCount(10); }}
-                            className={`px-2.5 py-1 text-xs rounded-md font-medium transition-all ${
-                              earningsFilter === "all"
+                            className={`px-2.5 py-1 text-xs rounded-md font-medium transition-all ${earningsFilter === "all"
                                 ? "bg-background text-foreground shadow-sm font-semibold"
                                 : "text-muted-foreground hover:text-foreground"
-                            }`}
+                              }`}
                           >
                             Todos
                           </button>
@@ -1849,8 +1845,8 @@ const DriverPanel = () => {
                                       Valor Solicitado: <span className="font-mono">R$ {reqAmt.toFixed(2)}</span>
                                     </p>
                                   </div>
-                                  <Badge 
-                                    variant={w.status === "approved" ? "default" : w.status === "rejected" ? "destructive" : "secondary"} 
+                                  <Badge
+                                    variant={w.status === "approved" ? "default" : w.status === "rejected" ? "destructive" : "secondary"}
                                     className="text-[10px] shrink-0"
                                   >
                                     {w.status === "approved" ? "✅ Aprovado" : w.status === "rejected" ? "❌ Rejeitado" : "⏳ Pendente"}
