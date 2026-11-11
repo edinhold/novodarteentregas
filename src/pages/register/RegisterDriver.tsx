@@ -103,7 +103,25 @@ const RegisterDriver = () => {
           if (cleanRes?.cleaned) {
             data = await doSignUp();
           } else {
-            throw signUpErr;
+            // Se já existe, tentar login imediato com a senha digitada
+            let signInRes = await supabase.auth.signInWithPassword({
+              email: cleanEmail,
+              password: form.password,
+            });
+            if (signInRes.error && /email not confirmed/i.test(signInRes.error.message || "")) {
+              try {
+                await (supabase as any).rpc("confirm_user_email", { p_email: cleanEmail });
+                signInRes = await supabase.auth.signInWithPassword({
+                  email: cleanEmail,
+                  password: form.password,
+                });
+              } catch {}
+            }
+            if (signInRes.data?.user) {
+              data = signInRes.data;
+            } else {
+              throw signUpErr;
+            }
           }
         } else {
           throw signUpErr;
@@ -120,6 +138,16 @@ const RegisterDriver = () => {
           } catch (sessionErr) {
             console.warn("[RegisterDriver] setSession non-blocking warning:", sessionErr);
           }
+        } else {
+          try {
+            const loginRes = await supabase.auth.signInWithPassword({
+              email: cleanEmail,
+              password: form.password,
+            });
+            if (loginRes.data?.session) {
+              await supabase.auth.setSession(loginRes.data.session);
+            }
+          } catch {}
         }
 
         let photoUrl: string | null = null;

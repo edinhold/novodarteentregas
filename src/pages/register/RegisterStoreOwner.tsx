@@ -90,7 +90,25 @@ const RegisterStoreOwner = () => {
           if (cleanRes?.cleaned) {
             data = await doSignUp();
           } else {
-            throw signUpErr;
+            // Se já existe, tentar login imediato com a senha digitada
+            let signInRes = await supabase.auth.signInWithPassword({
+              email: form.email.trim(),
+              password: form.password,
+            });
+            if (signInRes.error && /email not confirmed/i.test(signInRes.error.message || "")) {
+              try {
+                await (supabase as any).rpc("confirm_user_email", { p_email: form.email.trim() });
+                signInRes = await supabase.auth.signInWithPassword({
+                  email: form.email.trim(),
+                  password: form.password,
+                });
+              } catch {}
+            }
+            if (signInRes.data?.user) {
+              data = signInRes.data;
+            } else {
+              throw signUpErr;
+            }
           }
         } else {
           throw signUpErr;
@@ -98,6 +116,24 @@ const RegisterStoreOwner = () => {
       }
 
       if (data.user) {
+        if (data.session) {
+          try {
+            await supabase.auth.setSession(data.session);
+          } catch (sessionErr) {
+            console.warn("[RegisterStoreOwner] setSession warning:", sessionErr);
+          }
+        } else {
+          try {
+            const loginRes = await supabase.auth.signInWithPassword({
+              email: form.email.trim(),
+              password: form.password,
+            });
+            if (loginRes.data?.session) {
+              await supabase.auth.setSession(loginRes.data.session);
+            }
+          } catch {}
+        }
+
         await supabase.from("profiles").update({ phone: form.phone }).eq("user_id", data.user.id);
 
         // Upload images

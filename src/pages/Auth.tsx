@@ -6,8 +6,9 @@ import { lovable } from "@/integrations/lovable/index";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Mail, Lock, ArrowLeft } from "lucide-react";
+import { Mail, Lock, ArrowLeft, KeyRound } from "lucide-react";
 import { motion } from "framer-motion";
 
 const Auth = () => {
@@ -18,18 +19,101 @@ const Auth = () => {
   const [fullName, setFullName] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // Password recovery state
+  const [showForgotModal, setShowForgotModal] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [sendingForgot, setSendingForgot] = useState(false);
+
+  const handlePostAuthRedirect = async (uid: string) => {
+    try {
+      const { data: roles } = await supabase.from("user_roles").select("role").eq("user_id", uid);
+      const userRoles = roles?.map((r) => r.role) || [];
+
+      let targetPath = "/";
+      if (userRoles.includes("admin")) {
+        targetPath = "/admin";
+      } else if (userRoles.includes("store_owner")) {
+        targetPath = "/lojas";
+      } else if (userRoles.includes("driver")) {
+        targetPath = "/entregador";
+      } else {
+        const [{ data: driverProfiles }, { data: ownedRests }] = await Promise.all([
+          supabase.from("drivers").select("id").or(`user_id.eq.${uid},id.eq.${uid}`).limit(1),
+          supabase.from("restaurants").select("id").eq("owner_id", uid).limit(1),
+        ]);
+
+        const driverProfile = driverProfiles && driverProfiles[0];
+        const ownedRest = ownedRests && ownedRests[0];
+
+        if (driverProfile) {
+          targetPath = "/entregador";
+          await supabase.from("user_roles").upsert({ user_id: uid, role: "driver" as any }, { onConflict: "user_id,role" }).then(() => {}, () => {});
+        } else if (ownedRest) {
+          targetPath = "/lojas";
+          await supabase.from("user_roles").upsert({ user_id: uid, role: "store_owner" as any }, { onConflict: "user_id,role" }).then(() => {}, () => {});
+        }
+      }
+
+      localStorage.setItem("lastRoute", targetPath);
+      try { sessionStorage.setItem("authRedirectDone", uid); } catch {}
+      console.log("[Auth] Redirecionamento pós-autenticação:", targetPath);
+      navigate(targetPath, { replace: true });
+    } catch (e) {
+      console.warn("[Auth] Erro no redirecionamento pós-auth:", e);
+      navigate("/", { replace: true });
+    }
+  };
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const targetEmail = (forgotEmail || email).trim().toLowerCase();
+    if (!targetEmail) {
+      toast.error("Informe o e-mail cadastrado.");
+      return;
+    }
+
+    setSendingForgot(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(targetEmail, {
+        redirectTo: `${window.location.origin}/auth`,
+      });
+      if (error) throw error;
+      toast.success("E-mail de recuperação enviado! Verifique sua caixa de entrada e spam.");
+      setShowForgotModal(false);
+    } catch (err: any) {
+      toast.error(err.message || "Não foi possível enviar o e-mail de recuperação.");
+    } finally {
+      setSendingForgot(false);
+    }
+  };
+
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
 
-    const cleanEmail = email.trim();
+    const cleanEmail = email.trim().toLowerCase();
 
     try {
       if (isLogin) {
-        const { data: loginData, error } = await supabase.auth.signInWithPassword({
+        let { data: loginData, error } = await supabase.auth.signInWithPassword({
           email: cleanEmail,
           password,
         });
+
+        // Caso o usuário esteja com confirmação pendente no GoTrue, auto-confirmar e retentar
+        if (error && /email not confirmed/i.test(error.message || "")) {
+          try {
+            await (supabase as any).rpc("confirm_user_email", { p_email: cleanEmail });
+            const retryRes = await supabase.auth.signInWithPassword({
+              email: cleanEmail,
+              password,
+            });
+            if (!retryRes.error && retryRes.data?.user) {
+              loginData = retryRes.data;
+              error = null;
+            }
+          } catch {}
+        }
 
         if (error) {
           const msg = error.message || "";
@@ -46,53 +130,19 @@ const Auth = () => {
         }
 
         toast.success("Login realizado com sucesso!");
-        
-        // Check user role and redirect accordingly
         if (loginData?.user) {
-          const uid = loginData.user.id;
-          const { data: roles } = await supabase.from("user_roles").select("role").eq("user_id", uid);
-          const userRoles = roles?.map(r => r.role) || [];
-
-          let targetPath = "/";
-          if (userRoles.includes("admin")) {
-            targetPath = "/admin";
-          } else if (userRoles.includes("store_owner")) {
-            targetPath = "/lojas";
-          } else if (userRoles.includes("driver")) {
-            targetPath = "/entregador";
-          } else {
-            // Fallback: detect by associated data (driver profile or owned restaurant)
-            const [{ data: driverProfiles }, { data: ownedRests }] = await Promise.all([
-              supabase.from("drivers").select("id").or(`user_id.eq.${uid},id.eq.${uid}`).limit(1),
-              supabase.from("restaurants").select("id").eq("owner_id", uid).limit(1),
-            ]);
-
-            const driverProfile = driverProfiles && driverProfiles[0];
-            const ownedRest = ownedRests && ownedRests[0];
-
-            if (driverProfile) {
-              targetPath = "/entregador";
-              await supabase.from("user_roles").upsert({ user_id: uid, role: "driver" as any }, { onConflict: "user_id,role" }).then(() => {}, () => {});
-            } else if (ownedRest) {
-              targetPath = "/lojas";
-              await supabase.from("user_roles").upsert({ user_id: uid, role: "store_owner" as any }, { onConflict: "user_id,role" }).then(() => {}, () => {});
-            }
-          }
-
-          localStorage.setItem("lastRoute", targetPath);
-          try { sessionStorage.setItem("authRedirectDone", uid); } catch {}
-          console.log("[Auth] Redirect de login:", targetPath);
-          navigate(targetPath, { replace: true });
+          await handlePostAuthRedirect(loginData.user.id);
         } else {
           navigate("/");
         }
       } else {
+        // Fluxo de Cadastro de Cliente
         const doSignUp = async () => {
           const res = await supabase.auth.signUp({
             email: cleanEmail,
             password,
             options: {
-              data: { full_name: fullName },
+              data: { full_name: fullName.trim() },
               emailRedirectTo: window.location.origin,
             },
           });
@@ -100,25 +150,93 @@ const Auth = () => {
           return res.data;
         };
 
+        let signUpData: any = null;
         try {
-          await doSignUp();
+          signUpData = await doSignUp();
         } catch (signUpErr: any) {
-          if (/already registered|user_already_exists|já cadastrado/i.test(signUpErr?.message || "")) {
-            const { data: cleanRes } = await supabase.functions.invoke("clean-orphan-signup", {
-              body: { email: cleanEmail },
-            });
-            if (cleanRes?.active) {
-              throw new Error("Este e-mail já possui um cadastro ativo no sistema.");
+          const isDuplicate = /already registered|user_already_exists|já cadastrado/i.test(signUpErr?.message || "");
+
+          if (isDuplicate) {
+            // 1. Tentar limpar cadastro órfão/incompleto para permitir cadastro novo
+            let cleaned = false;
+            try {
+              const { data: cleanRes } = await supabase.functions.invoke("clean-orphan-signup", {
+                body: { email: cleanEmail },
+              });
+              cleaned = !!cleanRes?.cleaned;
+            } catch (cErr) {
+              console.warn("[Auth] clean-orphan-signup fallback aviso:", cErr);
             }
-            if (cleanRes?.cleaned) {
-              await doSignUp();
+
+            if (cleaned) {
+              // Registro órfão limpo com sucesso! Tentar novamente o cadastro limpo
+              signUpData = await doSignUp();
             } else {
-              throw signUpErr;
+              // 2. Se a conta já existe, tentar login imediato com a senha digitada
+              let signInRes = await supabase.auth.signInWithPassword({
+                email: cleanEmail,
+                password,
+              });
+
+              if (signInRes.error && /email not confirmed/i.test(signInRes.error.message || "")) {
+                try {
+                  await (supabase as any).rpc("confirm_user_email", { p_email: cleanEmail });
+                  signInRes = await supabase.auth.signInWithPassword({
+                    email: cleanEmail,
+                    password,
+                  });
+                } catch {}
+              }
+
+              if (signInRes.data?.user) {
+                // A senha bate com a conta existente! Autentica diretamente e finaliza
+                if (fullName.trim()) {
+                  await supabase
+                    .from("profiles")
+                    .update({ full_name: fullName.trim() })
+                    .eq("user_id", signInRes.data.user.id)
+                    .then(() => {}, () => {});
+                }
+                toast.success("Conta já existente identificada! Login realizado com sucesso.");
+                await handlePostAuthRedirect(signInRes.data.user.id);
+                return;
+              }
+
+              // Senha diferente da cadastrada: direcionar amigavelmente para login
+              setIsLogin(true);
+              throw new Error("Este e-mail já possui cadastro no sistema. Insira sua senha para entrar ou clique em 'Esqueceu a senha?' para redefinir.");
             }
           } else {
             throw signUpErr;
           }
         }
+
+        // Se o cadastro foi efetuado, garantir sessão ativa no cliente
+        if (signUpData?.user) {
+          if (signUpData.session) {
+            try { await supabase.auth.setSession(signUpData.session); } catch {}
+          } else {
+            // Auto-login caso o GoTrue não retorne sessão imediata
+            let autoLoginRes = await supabase.auth.signInWithPassword({
+              email: cleanEmail,
+              password,
+            });
+            if (autoLoginRes.error && /email not confirmed/i.test(autoLoginRes.error.message || "")) {
+              try {
+                await (supabase as any).rpc("confirm_user_email", { p_email: cleanEmail });
+                autoLoginRes = await supabase.auth.signInWithPassword({
+                  email: cleanEmail,
+                  password,
+                });
+              } catch {}
+            }
+          }
+
+          toast.success("Cadastro realizado com sucesso! Bem-vindo(a).");
+          await handlePostAuthRedirect(signUpData.user.id);
+          return;
+        }
+
         toast.success("Cadastro realizado com sucesso!");
         navigate("/");
       }
@@ -226,7 +344,21 @@ const Auth = () => {
               </div>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">Senha</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="password">Senha</Label>
+                {isLogin && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setForgotEmail(email);
+                      setShowForgotModal(true);
+                    }}
+                    className="text-xs text-primary hover:underline font-medium"
+                  >
+                    Esqueceu a senha?
+                  </button>
+                )}
+              </div>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 <Input
@@ -248,7 +380,12 @@ const Auth = () => {
 
           <p className="text-center text-sm text-muted-foreground mt-4">
             {isLogin ? "Não tem conta?" : "Já tem conta?"}{" "}
-            <button onClick={() => setIsLogin(!isLogin)} className="text-primary font-semibold">
+            <button
+              onClick={() => {
+                setIsLogin(!isLogin);
+              }}
+              className="text-primary font-semibold"
+            >
               {isLogin ? "Cadastre-se" : "Faça login"}
             </button>
           </p>
@@ -275,6 +412,46 @@ const Auth = () => {
           </div>
         </div>
       </motion.div>
+
+      {/* Modal Esqueci Minha Senha */}
+      <Dialog open={showForgotModal} onOpenChange={setShowForgotModal}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <KeyRound className="w-5 h-5 text-primary" />
+              Recuperar Senha
+            </DialogTitle>
+            <DialogDescription>
+              Informe seu e-mail cadastrado para receber as instruções e link de redefinição de senha.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleForgotPassword} className="space-y-4 pt-2">
+            <div className="space-y-2">
+              <Label htmlFor="forgot-email">E-mail cadastrado</Label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <Input
+                  id="forgot-email"
+                  type="email"
+                  placeholder="seu@email.com"
+                  value={forgotEmail}
+                  onChange={(e) => setForgotEmail(e.target.value)}
+                  className="pl-10 rounded-xl"
+                  required
+                />
+              </div>
+            </div>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button type="button" variant="outline" onClick={() => setShowForgotModal(false)}>
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={sendingForgot}>
+                {sendingForgot ? "Enviando..." : "Enviar link de recuperação"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

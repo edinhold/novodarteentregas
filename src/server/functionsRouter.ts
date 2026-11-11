@@ -2183,6 +2183,31 @@ export async function handleEdgeFunction(
     }
 
     try {
+      // 1. Try atomic database RPC first (runs with SECURITY DEFINER and superuser access to auth.users)
+      try {
+        const { data: rpcRes, error: rpcErr } = await (supabase as any).rpc("clean_orphan_signup", {
+          p_email: email || null,
+          p_phone: phone || null,
+        });
+
+        if (!rpcErr && rpcRes && typeof rpcRes.cleaned === "boolean") {
+          console.log("[clean-orphan-signup] Executado via RPC com sucesso:", rpcRes);
+          return {
+            status: 200,
+            body: {
+              success: true,
+              cleaned: Boolean(rpcRes.cleaned),
+              active: Boolean(rpcRes.active),
+              message: rpcRes.message || "Operação realizada com sucesso.",
+              request_id: requestId,
+            },
+          };
+        }
+      } catch (rpcEx: any) {
+        console.warn("[clean-orphan-signup] RPC indisponível, usando fallback:", rpcEx?.message);
+      }
+
+      // 2. Fallback via admin client if available
       try {
         const { data: usersData, error: listErr } = await (supabase.auth.admin as any).listUsers();
         const users: any[] = usersData?.users || [];
@@ -2197,14 +2222,15 @@ export async function handleEdgeFunction(
           if (matchedUser) {
             const uid = matchedUser.id;
             // Check if user has an ACTIVE store, ACTIVE driver, or ADMIN role
-            const [{ data: ownedStore }, { data: driverRow }, { data: roles }] = await Promise.all([
+            const [{ data: ownedStore }, { data: driverRow }, { data: roles }, { data: orders }] = await Promise.all([
               supabase.from("restaurants").select("id").eq("owner_id", uid).maybeSingle(),
               supabase.from("drivers").select("id").eq("user_id", uid).maybeSingle(),
               supabase.from("user_roles").select("role").eq("user_id", uid),
+              supabase.from("orders").select("id").eq("user_id", uid).maybeSingle(),
             ]);
 
             const isAdmin = roles?.some((r: any) => r.role === "admin");
-            const isActive = !!ownedStore || !!driverRow || isAdmin;
+            const isActive = !!ownedStore || !!driverRow || !!orders || isAdmin;
             if (isActive) {
               return {
                 status: 200,
@@ -2215,7 +2241,7 @@ export async function handleEdgeFunction(
             // User is an orphan! Perform complete cleanup
             await supabase.from("profiles").delete().eq("user_id", uid);
             await supabase.from("user_roles").delete().eq("user_id", uid);
-            await supabase.auth.admin.deleteUser(uid);
+            await (supabase.auth.admin as any).deleteUser(uid);
 
             console.log("[clean-orphan-signup] Conta auth órfã limpa com sucesso:", uid, email);
             return {
@@ -2226,6 +2252,38 @@ export async function handleEdgeFunction(
         }
       } catch (adminErr: any) {
         console.warn("[clean-orphan-signup] Aviso na API auth admin:", adminErr?.message);
+      }
+
+      // 3. Fallback: check profiles table directly
+      const cleanPhone = phone ? phone.replace(/\D/g, "") : "";
+      let query = supabase.from("profiles").select("id, user_id, phone, full_name");
+      if (cleanPhone) {
+        query = query.or(`phone.ilike.%${cleanPhone}%`);
+      }
+      const { data: matchedProfiles } = await query.limit(5);
+      if (matchedProfiles && matchedProfiles.length > 0) {
+        for (const p of matchedProfiles) {
+          const uid = p.user_id;
+          const [{ data: ownedStore }, { data: driverRow }, { data: roles }, { data: orders }] = await Promise.all([
+            supabase.from("restaurants").select("id").eq("owner_id", uid).maybeSingle(),
+            supabase.from("drivers").select("id").eq("user_id", uid).maybeSingle(),
+            supabase.from("user_roles").select("role").eq("user_id", uid),
+            supabase.from("orders").select("id").eq("user_id", uid).maybeSingle(),
+          ]);
+          const isActive = !!ownedStore || !!driverRow || !!orders || roles?.some((r: any) => r.role === "admin");
+          if (isActive) {
+            return {
+              status: 200,
+              body: { success: true, cleaned: false, active: true, message: "Usuário com cadastro ativo.", request_id: requestId },
+            };
+          }
+          await supabase.from("profiles").delete().eq("user_id", uid);
+          await supabase.from("user_roles").delete().eq("user_id", uid);
+          return {
+            status: 200,
+            body: { success: true, cleaned: true, active: false, message: "Perfil órfão limpo com sucesso.", request_id: requestId },
+          };
+        }
       }
 
       return {
