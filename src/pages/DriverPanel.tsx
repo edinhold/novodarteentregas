@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { ArrowLeft, MapPin, Phone, MessageSquare, Send, Check, CheckCircle, Unlock, DollarSign, Key, Wallet, XCircle, Home, History, Settings, Map as MapIcon, Signal, SignalZero, Calendar, Radar, PanelLeft, AlertTriangle, Loader2, Bell, BellRing, BellOff, Clock, RefreshCw, ShieldCheck, Coins, TrendingUp, Receipt } from "lucide-react";
+import { ArrowLeft, MapPin, Phone, MessageSquare, Send, Check, CheckCircle, Unlock, DollarSign, Key, Wallet, XCircle, Home, History, Settings, Map as MapIcon, Signal, SignalZero, Calendar, Radar, PanelLeft, AlertTriangle, Loader2, Bell, BellRing, BellOff, Clock, RefreshCw, ShieldCheck, Coins, TrendingUp, Receipt, LogOut } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
@@ -67,8 +67,19 @@ const setCachedDriverProfile = (profile: any) => {
 };
 
 const DriverPanel = () => {
-  const { user, loading } = useAuth();
+  const { user, loading, signOut } = useAuth();
   const navigate = useNavigate();
+
+  const handleLogout = async () => {
+    try {
+      toast.info("Encerrando sessão...");
+      await signOut();
+    } catch (err) {
+      console.error("Erro ao encerrar sessão do motorista:", err);
+    } finally {
+      navigate("/auth", { replace: true });
+    }
+  };
   const [searchParams, setSearchParams] = useSearchParams();
   const pedidoParam = searchParams.get("pedido") || searchParams.get("pedido_id");
   const queryClient = useQueryClient();
@@ -1086,8 +1097,8 @@ const DriverPanel = () => {
               <Button onClick={() => navigate("/cadastro/entregador")}>
                 Completar Cadastro de Entregador
               </Button>
-              <Button variant="outline" onClick={async () => { await supabase.auth.signOut(); navigate("/auth", { replace: true }); }}>
-                Sair
+              <Button variant="outline" onClick={handleLogout} className="gap-2">
+                <LogOut className="w-4 h-4" /> Sair
               </Button>
             </div>
           </CardContent>
@@ -1117,8 +1128,8 @@ const DriverPanel = () => {
               Status: {rejected ? "Rejeitado" : "Pendente"}
             </Badge>
             <div className="pt-2">
-              <Button variant="outline" onClick={async () => { await supabase.auth.signOut(); navigate("/auth", { replace: true }); }}>
-                Sair
+              <Button variant="outline" onClick={handleLogout} className="gap-2">
+                <LogOut className="w-4 h-4" /> Sair
               </Button>
             </div>
           </CardContent>
@@ -1200,12 +1211,10 @@ const DriverPanel = () => {
             <Button
               variant="outline"
               size="sm"
-              onClick={async () => {
-                await supabase.auth.signOut();
-                navigate("/auth", { replace: true });
-              }}
-              className="w-full border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white text-xs h-9"
+              onClick={handleLogout}
+              className="w-full border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white text-xs h-9 gap-2"
             >
+              <LogOut className="w-3.5 h-3.5" />
               Sair da Conta
             </Button>
           </div>
@@ -1279,6 +1288,16 @@ const DriverPanel = () => {
                 </Badge>
               )}
               <ThemeToggle />
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleLogout}
+                className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 h-8 gap-1.5 text-xs px-2.5"
+                title="Sair da conta"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Sair</span>
+              </Button>
             </div>
           </header>
 
@@ -1915,6 +1934,28 @@ const DriverPanel = () => {
                   <PushStatusCard userId={user?.id} />
                   {/* Notification Settings */}
                   <DriverNotificationSettings />
+
+                  {/* Sessão / Sair */}
+                  <Card className="border-red-500/20 bg-red-500/5">
+                    <CardHeader className="py-3 px-4">
+                      <CardTitle className="text-sm font-semibold flex items-center gap-2 text-destructive">
+                        <LogOut className="w-4 h-4" /> Encerramento de Sessão
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="px-4 pb-4 pt-0">
+                      <p className="text-xs text-muted-foreground mb-3">
+                        Deseja desconectar sua conta deste dispositivo? Você precisará fazer login novamente com suas credenciais.
+                      </p>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={handleLogout}
+                        className="gap-2 text-xs"
+                      >
+                        <LogOut className="w-4 h-4" /> Sair da Conta
+                      </Button>
+                    </CardContent>
+                  </Card>
                 </TabsContent>
 
 

@@ -1,5 +1,5 @@
 import React from "react";
-import { Home, LayoutGrid, Settings, Bike, Sun, Moon, PanelLeftClose, ArrowLeft } from "lucide-react";
+import { Home, LayoutGrid, Settings, Bike, Sun, Moon, PanelLeftClose, ArrowLeft, LogOut } from "lucide-react";
 
 interface StoreSlimSidebarProps {
   currentTab: string;
@@ -10,6 +10,7 @@ interface StoreSlimSidebarProps {
   isCollapsed: boolean;
   onToggleCollapse: () => void;
   onGoBackHome?: () => void;
+  onSignOut?: () => void;
 }
 
 export const StoreSlimSidebar: React.FC<StoreSlimSidebarProps> = ({
@@ -21,6 +22,7 @@ export const StoreSlimSidebar: React.FC<StoreSlimSidebarProps> = ({
   isCollapsed,
   onToggleCollapse,
   onGoBackHome,
+  onSignOut,
 }) => {
   const navItems = [
     { id: "dashboard", label: "Início", icon: Home },
@@ -111,6 +113,19 @@ export const StoreSlimSidebar: React.FC<StoreSlimSidebarProps> = ({
             <Moon className="w-5 h-5 text-zinc-300" />
           )}
         </button>
+
+        {/* Botão Sair da Conta */}
+        {onSignOut && (
+          <button
+            type="button"
+            onClick={onSignOut}
+            title="Sair da conta"
+            aria-label="Sair da conta"
+            className="w-10 h-10 rounded-2xl bg-white/5 hover:bg-red-500/20 text-zinc-400 hover:text-red-400 border border-white/10 hover:border-red-500/30 flex items-center justify-center transition-all active:scale-95 group cursor-pointer"
+          >
+            <LogOut className="w-5 h-5 transition-transform group-hover:scale-110" />
+          </button>
+        )}
 
         {/* Botão de Recolher o Menu Lateral */}
         <button

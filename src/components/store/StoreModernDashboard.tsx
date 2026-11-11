@@ -22,6 +22,7 @@ import {
   Plus,
   PanelLeftOpen,
   ArrowLeft,
+  LogOut,
   DollarSign,
   Route,
   Building2,
@@ -217,6 +218,7 @@ interface StoreModernDashboardProps {
   isSidebarCollapsed?: boolean;
   onToggleSidebar?: () => void;
   onGoBackHome?: () => void;
+  onSignOut?: () => void;
 }
 
 export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
@@ -231,6 +233,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
   isSidebarCollapsed = false,
   onToggleSidebar,
   onGoBackHome,
+  onSignOut,
 }) => {
   const queryClient = useQueryClient();
   const formCardRef = useRef<HTMLDivElement>(null);
@@ -1019,8 +1022,8 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
           </div>
         </div>
 
-        {/* Lado Direito: Saldo de Créditos e Botão Laranja "Solicitar Nova Entrega" */}
-        <div className="flex items-center gap-3">
+        {/* Lado Direito: Saldo de Créditos, Botão Sair e Botão Laranja "Solicitar Nova Entrega" */}
+        <div className="flex items-center gap-2 sm:gap-3">
           {credits && (
             <button
               type="button"
@@ -1034,6 +1037,19 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
             >
               <Wallet className="w-3.5 h-3.5 text-emerald-500" />
               <span>Saldo: R$ {Number(credits.balance || 0).toFixed(2)}</span>
+            </button>
+          )}
+
+          {onSignOut && (
+            <button
+              type="button"
+              onClick={onSignOut}
+              className="px-2.5 py-1.5 rounded-xl text-zinc-400 hover:text-red-500 hover:bg-red-500/10 border border-zinc-700/50 hover:border-red-500/30 transition-all flex items-center gap-1.5 text-xs font-semibold cursor-pointer active:scale-95"
+              title="Sair da conta"
+              aria-label="Sair da conta"
+            >
+              <LogOut className="w-4 h-4 text-red-500" />
+              <span className="hidden sm:inline">Sair</span>
             </button>
           )}
 

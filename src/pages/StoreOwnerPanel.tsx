@@ -3,7 +3,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { supabase, createFreshChannel } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArrowLeft, Truck, UtensilsCrossed, CreditCard, Store, Map as MapIcon, Star, RefreshCw, Route, MessageSquare, Settings, XCircle, Loader2, Phone, MessageCircle, Car, PanelLeftOpen } from "lucide-react";
+import { ArrowLeft, Truck, UtensilsCrossed, CreditCard, Store, Map as MapIcon, Star, RefreshCw, Route, MessageSquare, Settings, XCircle, Loader2, Phone, MessageCircle, Car, PanelLeftOpen, LogOut } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -31,10 +31,20 @@ import { StoreSlimSidebar } from "@/components/store/StoreSlimSidebar";
 import { StoreModernDashboard } from "@/components/store/StoreModernDashboard";
 
 const StoreOwnerPanel = () => {
-  const { user, loading } = useAuth();
+  const { user, loading, signOut } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState("dashboard");
+
+  const handleLogout = async () => {
+    try {
+      await signOut();
+      toast.success("Desconectado com sucesso.");
+    } catch (e) {
+      console.warn("[StoreOwnerPanel] Erro ao deslogar:", e);
+    }
+    navigate("/auth", { replace: true });
+  };
 
   const [isDark, setIsDark] = useState(() => {
     if (typeof window !== "undefined") {
@@ -350,6 +360,7 @@ const StoreOwnerPanel = () => {
           isCollapsed={isSidebarCollapsed}
           onToggleCollapse={toggleSidebarCollapse}
           onGoBackHome={() => navigate("/")}
+          onSignOut={handleLogout}
         />
 
         {/* Área Central / Conteúdo Principal */}
@@ -367,6 +378,7 @@ const StoreOwnerPanel = () => {
               isSidebarCollapsed={isSidebarCollapsed}
               onToggleSidebar={toggleSidebarCollapse}
               onGoBackHome={() => navigate("/")}
+              onSignOut={handleLogout}
             />
           ) : (
             <div className="flex flex-col flex-1 w-full">
@@ -399,13 +411,23 @@ const StoreOwnerPanel = () => {
                     <span>Voltar ao Início (Envio)</span>
                   </Button>
                   <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleLogout}
+                    className="gap-1.5 text-xs font-semibold text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/20 border-red-200 dark:border-red-900/40 rounded-xl"
+                    title="Sair da conta"
+                  >
+                    <LogOut className="w-3.5 h-3.5 text-red-500" />
+                    <span>Sair</span>
+                  </Button>
+                  <Button
                     variant="ghost"
                     size="sm"
                     onClick={() => navigate("/")}
                     className="gap-1 text-xs text-muted-foreground hover:text-foreground hidden sm:flex"
-                    title="Voltar para a página inicial"
+                    title="Ver página inicial de clientes"
                   >
-                    <span>Sair</span>
+                    <span>Cardápio Geral</span>
                   </Button>
                   <h2 className="text-sm sm:text-base font-extrabold truncate">
                     {activeTab === "orders" && "Histórico & Pedidos"}

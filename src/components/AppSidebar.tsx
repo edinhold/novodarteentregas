@@ -76,8 +76,12 @@ const AppSidebar = ({ role, currentTab, onTabChange }: AppSidebarProps) => {
   const menuItems = getMenuItems();
 
   const handleLogout = async () => {
-    await signOut();
-    navigate("/");
+    try {
+      await signOut();
+    } catch (e) {
+      console.warn("[AppSidebar] Erro ao deslogar:", e);
+    }
+    navigate("/auth", { replace: true });
   };
 
   return (

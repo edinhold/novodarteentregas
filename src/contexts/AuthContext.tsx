@@ -202,13 +202,38 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signOut = async () => {
     try {
       sessionStorage.removeItem("authRedirectDone");
+      sessionStorage.removeItem("admin_impersonated_user_id");
+      sessionStorage.removeItem("admin_impersonated_store_name");
       localStorage.removeItem("cached_user_role");
       localStorage.removeItem("cached_driver_profile");
+      localStorage.removeItem("lastRoute");
+      // Remove todas as chaves de autenticação do Supabase de forma imediata e síncrona
+      Object.keys(localStorage).forEach((key) => {
+        if (key.startsWith("sb-") && key.endsWith("-auth-token")) {
+          localStorage.removeItem(key);
+        }
+      });
     } catch {}
+
     setUser(null);
     setSession(null);
     setRole(null);
-    await supabase.auth.signOut();
+    setRoleLoading(false);
+
+    try {
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.warn("[Auth] Erro ao deslogar no servidor Supabase:", err);
+    } finally {
+      // Limpeza forçada de qualquer chave residual do Supabase
+      try {
+        Object.keys(localStorage).forEach((key) => {
+          if (key.startsWith("sb-")) {
+            localStorage.removeItem(key);
+          }
+        });
+      } catch {}
+    }
   };
 
   return (
