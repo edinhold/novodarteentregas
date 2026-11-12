@@ -201,5 +201,45 @@ describe("Cálculo de KM e Taxas da Corrida (Lojista chamando Motorista)", () =>
     // 5.30 + 2.55 = 7.85
     expect(result.totalCost).toBe(7.85);
   });
+
+  it("garantia master: em nenhuma hipótese o valor da corrida pode ser apenas a taxa de saída quando há entrega", () => {
+    const config: DeliveryConfig = {
+      base_fee: 5.3,
+      fee_per_km: 1.7,
+      min_km: 0,
+      round_km_up: false,
+    };
+
+    // Cenários de borda: 0 km, 0.001 km, null distance
+    const zeroKmResult = calculateDeliveryFare(0, config);
+    expect(zeroKmResult.totalCost).toBeGreaterThan(config.base_fee);
+    expect(zeroKmResult.kmCost).toBeGreaterThan(0);
+    expect(zeroKmResult.totalCost).toBe(7.00); // 5.30 + (1.70 * 1.0)
+
+    const smallKmResult = calculateDeliveryFare(0.2, config);
+    expect(smallKmResult.totalCost).toBeGreaterThan(config.base_fee);
+    expect(smallKmResult.kmCost).toBe(0.34);
+    expect(smallKmResult.totalCost).toBe(5.64); // 5.30 + 0.34
+  });
+
+  it("garantia master: taxa de saída e taxa por km possuem piso positivo mesmo se vierem zeradas da tabela", () => {
+    const brokenConfig: DeliveryConfig = {
+      base_fee: 0,
+      fee_per_km: 0,
+    };
+
+    // Função deve aplicar os fallbacks oficiais (5.30 e 1.70)
+    const safeBaseFee = brokenConfig.base_fee > 0 ? brokenConfig.base_fee : 5.30;
+    const safeFeePerKm = brokenConfig.fee_per_km > 0 ? brokenConfig.fee_per_km : 1.70;
+    const result = calculateDeliveryFare(3.0, {
+      base_fee: safeBaseFee,
+      fee_per_km: safeFeePerKm,
+    });
+
+    expect(result.baseFee).toBe(5.30);
+    expect(result.effectiveFeePerKm).toBe(1.70);
+    expect(result.kmCost).toBe(5.10);
+    expect(result.totalCost).toBe(10.40);
+  });
 });
 

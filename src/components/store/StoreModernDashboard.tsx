@@ -462,6 +462,14 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
 
         setAddressSuggestions(formatted);
         setShowSuggestions(formatted.length > 0);
+
+        // Auto-fixa as coordenadas de entrega na primeira sugestão encontrada caso o lojista ainda não tenha marcado no mapa
+        if (formatted.length > 0) {
+          setDeliveryCoordinates((prev) => prev ?? { lat: formatted[0].lat, lng: formatted[0].lng });
+          if (!streetNumber && formatted[0].number) {
+            setStreetNumber(formatted[0].number);
+          }
+        }
       } catch (err) {
         console.warn("[StoreModernDashboard] Erro geral ao buscar endereços:", err);
       } finally {
@@ -620,11 +628,16 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
         rawKm: 0,
         feePerKm: 0,
         baseFee: 0,
+        kmCost: 0,
+        baseKmFee: 0,
+        dynamicFee: 0,
+        isDynamicActive: false,
+        isManual: false,
       };
     }
 
-    const baseFee = Number(deliveryConfig?.base_fee ?? 5.3);
-    const baseKmFee = Number(deliveryConfig?.fee_per_km ?? 1.7);
+    const baseFee = Number(deliveryConfig?.base_fee ?? 5.3) || 5.3;
+    const baseKmFee = Number(deliveryConfig?.fee_per_km ?? 1.7) || 1.7;
     const dynamicEnabled = Boolean(deliveryConfig?.dynamic_pricing_enabled);
     const dynamicFee = (dynamicEnabled && Number(deliveryConfig?.dynamic_fee_per_km ?? 0) > 0)
       ? Number(deliveryConfig?.dynamic_fee_per_km)
@@ -636,13 +649,37 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
     const roundKmUp = Boolean(deliveryConfig?.round_km_up ?? false);
 
     const manualKm = manualDistanceEnabled && parseFloat(manualDistanceKm) > 0 ? parseFloat(manualDistanceKm) : null;
-    let rawKm = manualKm ?? estimatedDistanceKm;
-    if (rawKm <= 0 && deliveryCoordinates) {
-      rawKm = 2.5;
+
+    // Distância inteligente estimada de partida:
+    // 1. Manual se preenchido pelo lojista
+    // 2. Rota calculada via OSRM/Mapbox (se > 0)
+    // 3. Geodésica entre loja e coordenadas se disponíveis
+    // 4. Estimativa viária média de Primavera do Leste (2.5 km ou minKm)
+    let rawKm = 0;
+    if (manualKm != null && manualKm > 0) {
+      rawKm = manualKm;
+    } else if (estimatedDistanceKm > 0) {
+      rawKm = estimatedDistanceKm;
+    } else if (deliveryCoordinates && storeCoords) {
+      const R = 6371;
+      const dLat = ((deliveryCoordinates.lat - storeCoords.lat) * Math.PI) / 180;
+      const dLon = ((deliveryCoordinates.lng - storeCoords.lng) * Math.PI) / 180;
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos((storeCoords.lat * Math.PI) / 180) *
+          Math.cos((deliveryCoordinates.lat * Math.PI) / 180) *
+          Math.sin(dLon / 2) *
+          Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      rawKm = Number((R * c * 1.30).toFixed(1));
+    }
+
+    if (rawKm <= 0 && hasAddress) {
+      rawKm = minKm > 0 ? minKm : 2.5;
     }
 
     let effectiveKm = rawKm;
-    if (effectiveKm <= 0 && ((manualKm != null && manualKm > 0) || estimatedDistanceKm > 0)) {
+    if (effectiveKm <= 0) {
       effectiveKm = minKm > 0 ? minKm : 1.0;
     }
     if (roundKmUp && effectiveKm > 0) effectiveKm = Math.ceil(effectiveKm);
@@ -665,7 +702,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
       isDynamicActive: dynamicEnabled && dynamicFee > 0,
       isManual: manualKm != null && manualKm > 0,
     };
-  }, [deliveryConfig, estimatedDistanceKm, deliveryCoordinates, addressInput, manualDistanceEnabled, manualDistanceKm]);
+  }, [deliveryConfig, estimatedDistanceKm, deliveryCoordinates, storeCoords, addressInput, manualDistanceEnabled, manualDistanceKm]);
 
   // Geocodifica e calcula automaticamente quando o lojista termina de digitar o endereço
   const handleAddressBlur = async () => {
@@ -816,15 +853,12 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
 
     const pickupAddress = formatStorePickupAddress(restaurant, restaurant?.address);
 
-    // Passa a quilometragem viária real calculada para o backend (mínimo garantido para saída + km)
-    const rawDistanceToSend = manualKmVal ?? (finalDistance > 0 ? finalDistance : (fareDetails.rawKm > 0 ? fareDetails.rawKm : 2.5));
-    const distanceToSend = Math.max(rawDistanceToSend, minKm > 0 ? minKm : 1.0);
-
-    const roundKmUp = Boolean(deliveryConfig?.round_km_up ?? false);
+    // Configuração de precificação oficial do admin
     const minKm = Number(deliveryConfig?.min_km ?? 0);
     const maxKm = Number(deliveryConfig?.max_km ?? 0);
-    const baseFee = Number(deliveryConfig?.base_fee ?? 5.3);
-    const baseKmFee = Number(deliveryConfig?.fee_per_km ?? 1.7);
+    const roundKmUp = Boolean(deliveryConfig?.round_km_up ?? false);
+    const baseFee = Number(deliveryConfig?.base_fee ?? 5.3) || 5.3;
+    const baseKmFee = Number(deliveryConfig?.fee_per_km ?? 1.7) || 1.7;
     const dynamicEnabled = Boolean(deliveryConfig?.dynamic_pricing_enabled);
     const dynamicFee = (dynamicEnabled && Number(deliveryConfig?.dynamic_fee_per_km ?? 0) > 0)
       ? Number(deliveryConfig?.dynamic_fee_per_km)
@@ -832,12 +866,16 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
     // REGRA SÊNIOR: A taxa dinâmica SOMA com a taxa regular por km
     const feePerKm = baseKmFee + dynamicFee;
 
+    // Passa a quilometragem viária real calculada para o backend (mínimo garantido para saída + km)
+    const rawDistanceToSend = manualKmVal ?? (finalDistance > 0 ? finalDistance : (fareDetails.rawKm > 0 ? fareDetails.rawKm : (minKm > 0 ? minKm : 2.5)));
+    const distanceToSend = Math.max(rawDistanceToSend, minKm > 0 ? minKm : 1.0);
+
     let effectiveKm = distanceToSend;
     if (roundKmUp && effectiveKm > 0) effectiveKm = Math.ceil(effectiveKm);
     if (minKm > 0 && effectiveKm < minKm) effectiveKm = minKm;
     if (maxKm > 0 && effectiveKm > maxKm) effectiveKm = maxKm;
 
-    const finalCalculatedCost = fareDetails.totalCost ?? (baseFee + (effectiveKm * feePerKm));
+    const finalCalculatedCost = Number((baseFee + (effectiveKm * feePerKm)).toFixed(2));
 
     setIsSubmitting(true);
     try {

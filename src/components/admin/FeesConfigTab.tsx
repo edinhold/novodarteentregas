@@ -152,8 +152,8 @@ const FeesConfigTab = () => {
     isSavingRef.current = true;
 
     try {
-      const baseFeeVal = isNaN(parseFloat(form.base_fee)) ? 5.3 : Math.max(0, parseFloat(form.base_fee));
-      const feePerKmVal = isNaN(parseFloat(form.fee_per_km)) ? 1.7 : Math.max(0, parseFloat(form.fee_per_km));
+      const baseFeeVal = isNaN(parseFloat(form.base_fee)) || parseFloat(form.base_fee) <= 0 ? 5.3 : parseFloat(form.base_fee);
+      const feePerKmVal = isNaN(parseFloat(form.fee_per_km)) || parseFloat(form.fee_per_km) <= 0 ? 1.7 : parseFloat(form.fee_per_km);
       const earlyWithdrawalFeePercentVal = isNaN(parseFloat(form.early_withdrawal_fee_percent)) ? 10 : Math.max(0, parseFloat(form.early_withdrawal_fee_percent));
       const withdrawalFixedFeeVal = isNaN(parseFloat(form.withdrawal_fixed_fee)) ? 1.00 : Math.max(0, parseFloat(form.withdrawal_fixed_fee));
       const paymentDayVal = isNaN(parseInt(form.payment_day, 10)) ? 3 : parseInt(form.payment_day, 10);

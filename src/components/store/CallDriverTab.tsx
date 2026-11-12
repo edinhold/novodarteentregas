@@ -525,8 +525,8 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
 
   // Delivery config loaded for price calculations
   const configLoaded = !!configObj;
-  const baseFee = Number(configObj?.base_fee ?? 5.3);
-  const baseKmFee = Number(configObj?.fee_per_km ?? 1.7);
+  const baseFee = Number(configObj?.base_fee ?? 5.3) || 5.3;
+  const baseKmFee = Number(configObj?.fee_per_km ?? 1.7) || 1.7;
   const isDynamicPricing = !!configObj?.dynamic_pricing_enabled && Number(configObj?.dynamic_fee_per_km ?? 0) > 0;
   const dynamicKmFee = isDynamicPricing ? Number(configObj.dynamic_fee_per_km) : 0;
   // REGRA SÊNIOR: A taxa dinâmica SOMA com a taxa por km regular
@@ -535,6 +535,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
   const maxKm = Number(configObj?.max_km ?? 0);
   const roundKmUp = !!configObj?.round_km_up;
 
+  const hasDelivery = Boolean(callForm.delivery.trim().length >= 3);
   const fallbackCoords = resolveStoreCoordinates(restaurant);
   const storeLat = storeLatLng?.[0] ?? (restaurant?.latitude ? Number(restaurant.latitude) : fallbackCoords.lat);
   const storeLng = storeLatLng?.[1] ?? (restaurant?.longitude ? Number(restaurant.longitude) : fallbackCoords.lng);
@@ -542,7 +543,9 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
   // Distance logic: manual override > OSRM road > Haversine viário fallback calibrado (1.30)
   const autoDistanceKm = roadDistanceKm > 0
     ? roadDistanceKm
-    : (deliveryLatLng && storeLat && storeLng ? haversineRoadKm(storeLat, storeLng, deliveryLatLng[0], deliveryLatLng[1]) : 0);
+    : (deliveryLatLng && storeLat && storeLng
+        ? haversineRoadKm(storeLat, storeLng, deliveryLatLng[0], deliveryLatLng[1])
+        : (hasDelivery ? (minKm > 0 ? minKm : 2.5) : 0));
 
   const rawDistanceKm = manualDistanceEnabled && parseFloat(manualDistanceKm) > 0
     ? parseFloat(manualDistanceKm)
@@ -550,7 +553,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
 
   // Apply km rules — MUST match server-side deduct_credits_for_delivery exactly
   let effectiveKm = rawDistanceKm;
-  if (effectiveKm <= 0 && rawDistanceKm > 0) {
+  if (effectiveKm <= 0 && hasDelivery) {
     effectiveKm = minKm > 0 ? minKm : 1.0;
   }
   if (roundKmUp && effectiveKm > 0) effectiveKm = Math.ceil(effectiveKm);
@@ -559,8 +562,8 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
 
   // Garante que o cálculo cobre saída + km rodados sem exceção
   const distanceKm = rawDistanceKm;
-  const billableKm = effectiveKm > 0 ? effectiveKm : (minKm > 0 ? minKm : 1.0);
-  const deliveryCost = configLoaded ? (baseFee + feePerKm * billableKm) : null;
+  const billableKm = effectiveKm > 0 ? effectiveKm : (hasDelivery ? (minKm > 0 ? minKm : 1.0) : 0);
+  const deliveryCost = configLoaded && (distanceKm > 0 || hasDelivery) ? Number((baseFee + feePerKm * billableKm).toFixed(2)) : null;
 
   const distanceSource = manualDistanceEnabled && parseFloat(manualDistanceKm) > 0
     ? "manual"
@@ -1037,6 +1040,9 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
           }));
           setAddressSuggestions(mapped);
           setShowSuggestions(true);
+
+          // Auto-fixa as coordenadas de entrega na primeira sugestão encontrada caso o lojista ainda não tenha marcado no mapa
+          setDeliveryLatLng((prev) => prev ?? [suggestions[0].coordinates.latitude, suggestions[0].coordinates.longitude]);
         } else {
           setAddressSuggestions([]);
           setShowSuggestions(false);
@@ -1579,7 +1585,8 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
         }
       } catch (e) {}
 
-      toast.success(`Entregador chamado! Custo: R$ ${(deliveryCost ?? 0).toFixed(2)}`);
+      const finalCost = Number((baseFee + (feePerKm * safeDistance)).toFixed(2));
+      toast.success(`Entregador chamado! Custo: R$ ${finalCost.toFixed(2).replace(".", ",")}`);
 
       const pickupAddr = restaurant?.address || callForm.pickup;
       setCallForm({ pickup: pickupAddr, delivery: "", delivery_number: "", notes: "" });
@@ -2060,23 +2067,23 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
             </div>
           )}
 
-          {distanceKm > 0 && (
+          {(distanceKm > 0 || hasDelivery) && (
             <div className="flex items-center gap-2 p-3 rounded-lg bg-accent/50 border border-accent">
               <DollarSign className="w-5 h-5 text-primary" />
               <div className="flex-1">
-                <p className="text-sm font-semibold">Valor da corrida: <span className="text-primary font-bold">R$ {(deliveryCost ?? (baseFee + (feePerKm * effectiveKm))).toFixed(2).replace(".", ",")}</span></p>
+                <p className="text-sm font-semibold">Valor da corrida: <span className="text-primary font-bold">R$ {(deliveryCost ?? (baseFee + (feePerKm * billableKm))).toFixed(2).replace(".", ",")}</span></p>
                 <div className="text-xs text-muted-foreground space-y-0.5 mt-1">
                   <div className="flex items-center justify-between">
                     <span>Taxa fixa de saída:</span>
                     <strong className="text-foreground">R$ {(baseFee || 0).toFixed(2).replace(".", ",")}</strong>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span>KM rodado ({(distanceKm || 0).toFixed(1)} km × R$ {(feePerKm || 0).toFixed(2).replace(".", ",")}/km):</span>
-                    <strong className="text-foreground">+ R$ {((feePerKm || 0) * (effectiveKm || distanceKm || 0)).toFixed(2).replace(".", ",")}</strong>
+                    <span>KM rodado ({((distanceKm > 0 ? distanceKm : billableKm) || 0).toFixed(1)} km × R$ {(feePerKm || 0).toFixed(2).replace(".", ",")}/km):</span>
+                    <strong className="text-foreground">+ R$ {((feePerKm || 0) * (billableKm || 1.0)).toFixed(2).replace(".", ",")}</strong>
                   </div>
                   <div className="flex items-center justify-between border-t border-border/50 pt-1 font-bold text-xs text-primary">
                     <span>Total da corrida (Saída + KM):</span>
-                    <span>R$ {(deliveryCost ?? (baseFee + (feePerKm * (effectiveKm || distanceKm || 0)))).toFixed(2).replace(".", ",")}</span>
+                    <span>R$ {(deliveryCost ?? (baseFee + (feePerKm * billableKm))).toFixed(2).replace(".", ",")}</span>
                   </div>
                 </div>
                 {isDynamicPricing && (
@@ -2186,7 +2193,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
                 <Loader2 className="w-4 h-4 animate-spin mr-2" />
                 <span>Chamando entregador...</span>
               </>
-            ) : distanceKm > 0 && deliveryCost ? (
+            ) : (distanceKm > 0 || hasDelivery) && deliveryCost ? (
               `📲 Chamar Entregador (R$ ${deliveryCost.toFixed(2).replace(".", ",")})`
             ) : (
               "📲 Chamar Entregador"
