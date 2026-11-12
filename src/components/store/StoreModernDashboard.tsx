@@ -639,6 +639,9 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
     }
 
     let effectiveKm = rawKm;
+    if (effectiveKm <= 0 && ((manualKm != null && manualKm > 0) || estimatedDistanceKm > 0)) {
+      effectiveKm = minKm > 0 ? minKm : 1.0;
+    }
     if (roundKmUp && effectiveKm > 0) effectiveKm = Math.ceil(effectiveKm);
     if (minKm > 0 && effectiveKm < minKm) effectiveKm = minKm;
     if (maxKm > 0 && effectiveKm > maxKm) effectiveKm = maxKm;
@@ -805,8 +808,9 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
 
     const pickupAddress = formatStorePickupAddress(restaurant, restaurant?.address);
 
-    // Passa a quilometragem viária real calculada para o backend
-    const distanceToSend = manualKmVal ?? (finalDistance > 0 ? finalDistance : (fareDetails.rawKm > 0 ? fareDetails.rawKm : 2.5));
+    // Passa a quilometragem viária real calculada para o backend (mínimo garantido para saída + km)
+    const rawDistanceToSend = manualKmVal ?? (finalDistance > 0 ? finalDistance : (fareDetails.rawKm > 0 ? fareDetails.rawKm : 2.5));
+    const distanceToSend = Math.max(rawDistanceToSend, minKm > 0 ? minKm : 1.0);
 
     const roundKmUp = Boolean(deliveryConfig?.round_km_up ?? false);
     const minKm = Number(deliveryConfig?.min_km ?? 0);

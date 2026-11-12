@@ -550,12 +550,17 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
 
   // Apply km rules — MUST match server-side deduct_credits_for_delivery exactly
   let effectiveKm = rawDistanceKm;
+  if (effectiveKm <= 0 && rawDistanceKm > 0) {
+    effectiveKm = minKm > 0 ? minKm : 1.0;
+  }
   if (roundKmUp && effectiveKm > 0) effectiveKm = Math.ceil(effectiveKm);
   if (minKm > 0 && effectiveKm < minKm) effectiveKm = minKm;
   if (maxKm > 0 && effectiveKm > maxKm) effectiveKm = maxKm;
 
+  // Garante que o cálculo cobre saída + km rodados sem exceção
   const distanceKm = rawDistanceKm;
-  const deliveryCost = configLoaded ? (baseFee + feePerKm * effectiveKm) : null;
+  const billableKm = effectiveKm > 0 ? effectiveKm : (minKm > 0 ? minKm : 1.0);
+  const deliveryCost = configLoaded ? (baseFee + feePerKm * billableKm) : null;
 
   const distanceSource = manualDistanceEnabled && parseFloat(manualDistanceKm) > 0
     ? "manual"
@@ -1495,23 +1500,34 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
 
     setCalling(true);
     try {
+      const safeDistance = Math.max(finalDistance, minKm > 0 ? minKm : 1.0);
       const { data: requestId, error } = await supabase.rpc("deduct_credits_for_delivery", {
         p_pickup_address: callForm.pickup,
         p_delivery_address: finalDeliveryAddress,
         p_notes: callForm.notes || null,
         p_restaurant_id: restaurant?.id || null,
-        p_distance_km: finalDistance,
+        p_distance_km: safeDistance,
         p_preferred_driver_id: selectedDriverId || null,
       } as any);
 
       if (error) throw error;
 
-      // Garante persistência explícita das notas e dispara notificação aos motoristas
+      // Garante persistência explícita das notas, coordenadas de coleta e entrega, e dispara notificação aos motoristas
       if (requestId) {
-        if (callForm.notes?.trim()) {
+        const updatePayload: Record<string, any> = {};
+        if (callForm.notes?.trim()) updatePayload.notes = callForm.notes.trim();
+        if (finalLatLng && finalLatLng[0] && finalLatLng[1]) {
+          updatePayload.delivery_lat = finalLatLng[0];
+          updatePayload.delivery_lng = finalLatLng[1];
+        }
+        if (storeLat && storeLng) {
+          updatePayload.pickup_lat = storeLat;
+          updatePayload.pickup_lng = storeLng;
+        }
+        if (Object.keys(updatePayload).length > 0) {
           void supabase
             .from("delivery_requests")
-            .update({ notes: callForm.notes.trim() })
+            .update(updatePayload)
             .eq("id", requestId);
         }
         void notifyAvailableDrivers(String(requestId));

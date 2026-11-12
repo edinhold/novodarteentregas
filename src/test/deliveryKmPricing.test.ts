@@ -32,7 +32,11 @@ function calculateDeliveryFare(
   // Distância efetiva considera prioridade manual > automática
   const rawKm = manualDistanceKm != null && manualDistanceKm > 0 ? manualDistanceKm : distanceKm;
 
+  // GARANTIA SEM EXCEÇÃO: Se vier <= 0, aplica o mínimo configurado ou piso de 1.0 km
   let effectiveKm = rawKm;
+  if (effectiveKm <= 0) {
+    effectiveKm = config.min_km && config.min_km > 0 ? config.min_km : 1.0;
+  }
   if (config.round_km_up && effectiveKm > 0) {
     effectiveKm = Math.ceil(effectiveKm);
   }
@@ -160,6 +164,42 @@ describe("Cálculo de KM e Taxas da Corrida (Lojista chamando Motorista)", () =>
     expect(result.formulaBreakdown).toContain("Taxa de saída R$ 5.30");
     expect(result.formulaBreakdown).toContain("KM rodado (3.0 km × R$ 1.70/km = R$ 5.10)");
     expect(result.formulaBreakdown).toContain("Total R$ 10.40");
+  });
+
+  it("deve garantir que mesmo com km zerado ou nulo, o sistema cobre saída + km rodados sem exceção (piso mínimo 1.0 km)", () => {
+    const config: DeliveryConfig = {
+      base_fee: 5.3,
+      fee_per_km: 1.7,
+      round_km_up: false,
+    };
+
+    // Distância 0 informada acidentalmente ou por falha de GPS
+    const result = calculateDeliveryFare(0, config);
+
+    // Deve aplicar o piso mínimo de 1.0 km
+    expect(result.effectiveKm).toBe(1.0);
+    expect(result.baseFee).toBe(5.3);
+    expect(result.kmCost).toBe(1.70);
+    // Total deve ser 5.30 + 1.70 = 7.00 (NUNCA apenas 5.30)
+    expect(result.totalCost).toBe(7.00);
+    expect(result.totalCost).toBeGreaterThan(result.baseFee);
+  });
+
+  it("deve somar taxa de saída + km em corridas fracionadas curtas sem exceção", () => {
+    const config: DeliveryConfig = {
+      base_fee: 5.3,
+      fee_per_km: 1.7,
+      round_km_up: false,
+    };
+
+    const result = calculateDeliveryFare(1.5, config);
+
+    expect(result.effectiveKm).toBe(1.5);
+    expect(result.baseFee).toBe(5.3);
+    // 1.5 * 1.70 = 2.55
+    expect(result.kmCost).toBe(2.55);
+    // 5.30 + 2.55 = 7.85
+    expect(result.totalCost).toBe(7.85);
   });
 });
 
