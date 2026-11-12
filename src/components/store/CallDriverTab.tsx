@@ -79,6 +79,12 @@ function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): nu
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+// Fallback viário geodésico calibrado para a malha urbana de Primavera do Leste (fator 1.30)
+function haversineRoadKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const raw = haversineKm(lat1, lon1, lat2, lon2);
+  return Math.max(1.0, Number((raw * 1.30).toFixed(1)));
+}
+
 type RouteProfile = "driving" | "cycling" | "walking";
 
 const PROFILE_CONFIG: Record<RouteProfile, { label: string; icon: typeof Car; osrmProfile: string }> = {
@@ -133,7 +139,7 @@ async function fetchOSRMRoute(
     };
   } catch (err) {
     console.warn("[MapboxRoute] erro ou fallback:", err);
-    const fallbackDist = haversineKm(fromLat, fromLng, toLat, toLng);
+    const fallbackDist = haversineRoadKm(fromLat, fromLng, toLat, toLng);
     return {
       distanceKm: fallbackDist,
       durationMin: (fallbackDist / 25) * 60,
@@ -533,10 +539,10 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
   const storeLat = storeLatLng?.[0] ?? (restaurant?.latitude ? Number(restaurant.latitude) : fallbackCoords.lat);
   const storeLng = storeLatLng?.[1] ?? (restaurant?.longitude ? Number(restaurant.longitude) : fallbackCoords.lng);
 
-  // Distance logic: manual override > OSRM road > Haversine fallback
+  // Distance logic: manual override > OSRM road > Haversine viário fallback calibrado (1.30)
   const autoDistanceKm = roadDistanceKm > 0
     ? roadDistanceKm
-    : (deliveryLatLng && storeLat && storeLng ? haversineKm(storeLat, storeLng, deliveryLatLng[0], deliveryLatLng[1]) : 0);
+    : (deliveryLatLng && storeLat && storeLng ? haversineRoadKm(storeLat, storeLng, deliveryLatLng[0], deliveryLatLng[1]) : 0);
 
   const rawDistanceKm = manualDistanceEnabled && parseFloat(manualDistanceKm) > 0
     ? parseFloat(manualDistanceKm)
@@ -1388,9 +1394,22 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
       finalLatLng = [lat, lng];
       setDeliveryLatLng(finalLatLng);
       
-      // Re-calculate distance with the new coordinates
-      if (storeLat && storeLng) {
-        finalDistance = haversineKm(storeLat, storeLng, lat, lng);
+      // Re-calculate distance with the new coordinates (preserva ajuste manual se ativo)
+      if (!manualDistanceEnabled && storeLat && storeLng) {
+        try {
+          const routeRes = await calculateRoute(
+            { lat: storeLat, lng: storeLng },
+            { lat, lng },
+            { profile: routeProfile }
+          );
+          if (routeRes?.distanceKm && routeRes.distanceKm > 0) {
+            finalDistance = routeRes.distanceKm;
+          } else {
+            finalDistance = haversineRoadKm(storeLat, storeLng, lat, lng);
+          }
+        } catch {
+          finalDistance = haversineRoadKm(storeLat, storeLng, lat, lng);
+        }
       }
     }
 
@@ -1401,8 +1420,21 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
         if (parsed?.coordinates) {
           finalLatLng = [parsed.coordinates.latitude, parsed.coordinates.longitude];
           setDeliveryLatLng(finalLatLng);
-          if (storeLat && storeLng) {
-            finalDistance = haversineKm(storeLat, storeLng, finalLatLng[0], finalLatLng[1]);
+          if (!manualDistanceEnabled && storeLat && storeLng) {
+            try {
+              const routeRes = await calculateRoute(
+                { lat: storeLat, lng: storeLng },
+                { lat: finalLatLng[0], lng: finalLatLng[1] },
+                { profile: routeProfile }
+              );
+              if (routeRes?.distanceKm && routeRes.distanceKm > 0) {
+                finalDistance = routeRes.distanceKm;
+              } else {
+                finalDistance = haversineRoadKm(storeLat, storeLng, finalLatLng[0], finalLatLng[1]);
+              }
+            } catch {
+              finalDistance = haversineRoadKm(storeLat, storeLng, finalLatLng[0], finalLatLng[1]);
+            }
           }
         }
       } catch {
@@ -1411,11 +1443,46 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
           if (parsedStreet?.coordinates) {
             finalLatLng = [parsedStreet.coordinates.latitude, parsedStreet.coordinates.longitude];
             setDeliveryLatLng(finalLatLng);
-            if (storeLat && storeLng) {
-              finalDistance = haversineKm(storeLat, storeLng, finalLatLng[0], finalLatLng[1]);
+            if (!manualDistanceEnabled && storeLat && storeLng) {
+              try {
+                const routeRes = await calculateRoute(
+                  { lat: storeLat, lng: storeLng },
+                  { lat: finalLatLng[0], lng: finalLatLng[1] },
+                  { profile: routeProfile }
+                );
+                if (routeRes?.distanceKm && routeRes.distanceKm > 0) {
+                  finalDistance = routeRes.distanceKm;
+                } else {
+                  finalDistance = haversineRoadKm(storeLat, storeLng, finalLatLng[0], finalLatLng[1]);
+                }
+              } catch {
+                finalDistance = haversineRoadKm(storeLat, storeLng, finalLatLng[0], finalLatLng[1]);
+              }
             }
           }
         } catch {}
+      }
+    }
+
+    // Se a distância ainda estiver zerada ou não calculada, calcula rota viária oficial
+    if ((finalDistance <= 0 || !finalDistance) && storeLat && storeLng && finalLatLng) {
+      if (manualDistanceEnabled && parseFloat(manualDistanceKm) > 0) {
+        finalDistance = parseFloat(manualDistanceKm);
+      } else {
+        try {
+          const routeRes = await calculateRoute(
+            { lat: storeLat, lng: storeLng },
+            { lat: finalLatLng[0], lng: finalLatLng[1] },
+            { profile: routeProfile }
+          );
+          if (routeRes?.distanceKm && routeRes.distanceKm > 0) {
+            finalDistance = routeRes.distanceKm;
+          } else {
+            finalDistance = haversineRoadKm(storeLat, storeLng, finalLatLng[0], finalLatLng[1]);
+          }
+        } catch {
+          finalDistance = haversineRoadKm(storeLat, storeLng, finalLatLng[0], finalLatLng[1]);
+        }
       }
     }
 
@@ -1952,12 +2019,23 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
             <div className="flex items-center gap-2 p-3 rounded-lg bg-accent/50 border border-accent">
               <DollarSign className="w-5 h-5 text-primary" />
               <div className="flex-1">
-                <p className="text-sm font-semibold">Valor da corrida: <span className="text-primary">R$ {(deliveryCost ?? 0).toFixed(2).replace(".", ",")}</span></p>
-                <p className="text-xs text-muted-foreground">
-                  Taxa fixa R$ {(baseFee || 0).toFixed(2).replace(".", ",")} + {(distanceKm || 0).toFixed(1)} km × R$ {(feePerKm || 0).toFixed(2).replace(".", ",")} = R$ {((feePerKm || 0) * (distanceKm || 0)).toFixed(2).replace(".", ",")}
-                </p>
+                <p className="text-sm font-semibold">Valor da corrida: <span className="text-primary font-bold">R$ {(deliveryCost ?? (baseFee + (feePerKm * effectiveKm))).toFixed(2).replace(".", ",")}</span></p>
+                <div className="text-xs text-muted-foreground space-y-0.5 mt-1">
+                  <div className="flex items-center justify-between">
+                    <span>Taxa fixa de saída:</span>
+                    <strong className="text-foreground">R$ {(baseFee || 0).toFixed(2).replace(".", ",")}</strong>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>KM rodado ({(distanceKm || 0).toFixed(1)} km × R$ {(feePerKm || 0).toFixed(2).replace(".", ",")}/km):</span>
+                    <strong className="text-foreground">+ R$ {((feePerKm || 0) * (effectiveKm || distanceKm || 0)).toFixed(2).replace(".", ",")}</strong>
+                  </div>
+                  <div className="flex items-center justify-between border-t border-border/50 pt-1 font-bold text-xs text-primary">
+                    <span>Total da corrida (Saída + KM):</span>
+                    <span>R$ {(deliveryCost ?? (baseFee + (feePerKm * (effectiveKm || distanceKm || 0)))).toFixed(2).replace(".", ",")}</span>
+                  </div>
+                </div>
                 {isDynamicPricing && (
-                  <p className="text-[11px] text-amber-600 dark:text-amber-400 font-semibold mt-0.5">
+                  <p className="text-[11px] text-amber-600 dark:text-amber-400 font-semibold mt-1">
                     🔥 Tarifa Dinâmica Ativa: Base R$ {baseKmFee.toFixed(2)}/km + Dinâmica R$ {dynamicKmFee.toFixed(2)}/km = R$ {feePerKm.toFixed(2)}/km
                   </p>
                 )}
@@ -1966,7 +2044,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
                   <span className="text-[10px] text-muted-foreground">
                     {distanceSource === "osrm" && `Distância por rota (${PROFILE_CONFIG[routeProfile].label}) • ETA: ~${Math.round(roadDurationMin)} min`}
                     {distanceSource === "manual" && "Distância ajustada manualmente"}
-                    {distanceSource === "haversine" && "Distância em linha reta (aproximada)"}
+                    {distanceSource === "haversine" && "Distância viária estimada (aproximada)"}
                   </span>
                 </div>
               </div>

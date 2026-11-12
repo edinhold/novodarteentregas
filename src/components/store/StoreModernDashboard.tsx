@@ -253,6 +253,8 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
   const [searchingAddress, setSearchingAddress] = useState(false);
   const [deliveryCoordinates, setDeliveryCoordinates] = useState<{ lat: number; lng: number } | null>(null);
   const [estimatedDistanceKm, setEstimatedDistanceKm] = useState<number>(0);
+  const [manualDistanceEnabled, setManualDistanceEnabled] = useState(false);
+  const [manualDistanceKm, setManualDistanceKm] = useState("");
   const [loadingRoute, setLoadingRoute] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const suggestionsRef = useRef<HTMLDivElement>(null);
@@ -630,7 +632,8 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
     const maxKm = Number(deliveryConfig?.max_km ?? 0);
     const roundKmUp = Boolean(deliveryConfig?.round_km_up ?? false);
 
-    let rawKm = estimatedDistanceKm;
+    const manualKm = manualDistanceEnabled && parseFloat(manualDistanceKm) > 0 ? parseFloat(manualDistanceKm) : null;
+    let rawKm = manualKm ?? estimatedDistanceKm;
     if (rawKm <= 0 && deliveryCoordinates) {
       rawKm = 2.5;
     }
@@ -640,11 +643,13 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
     if (minKm > 0 && effectiveKm < minKm) effectiveKm = minKm;
     if (maxKm > 0 && effectiveKm > maxKm) effectiveKm = maxKm;
 
-    const totalCost = baseFee + (effectiveKm * feePerKm);
+    const kmCost = effectiveKm * feePerKm;
+    const totalCost = baseFee + kmCost;
 
     return {
       totalCost,
-      isCalculated: estimatedDistanceKm > 0,
+      kmCost,
+      isCalculated: (manualKm != null && manualKm > 0) || estimatedDistanceKm > 0,
       effectiveKm,
       rawKm,
       feePerKm,
@@ -652,8 +657,9 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
       baseKmFee,
       dynamicFee,
       isDynamicActive: dynamicEnabled && dynamicFee > 0,
+      isManual: manualKm != null && manualKm > 0,
     };
-  }, [deliveryConfig, estimatedDistanceKm, deliveryCoordinates, addressInput]);
+  }, [deliveryConfig, estimatedDistanceKm, deliveryCoordinates, addressInput, manualDistanceEnabled, manualDistanceKm]);
 
   // Geocodifica e calcula automaticamente quando o lojista termina de digitar o endereço
   const handleAddressBlur = async () => {
@@ -707,8 +713,9 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
       return;
     }
 
+    const manualKmVal = manualDistanceEnabled && parseFloat(manualDistanceKm) > 0 ? parseFloat(manualDistanceKm) : null;
     let finalCoordinates = deliveryCoordinates;
-    let finalDistance = estimatedDistanceKm;
+    let finalDistance = manualKmVal ?? estimatedDistanceKm;
 
     // Se o usuário digitou mas não selecionou sugestão, geocodifica agora com suporte a Mapbox + Nominatim
     if (!finalCoordinates) {
@@ -723,7 +730,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
           setDeliveryCoordinates(finalCoordinates);
 
           // Calcula a rota instantaneamente
-          if (storeCoords) {
+          if (storeCoords && manualKmVal == null) {
             try {
               const r = await calculateRoute(storeCoords, finalCoordinates, { profile: "driving" });
               if (r?.distanceKm && r.distanceKm > 0) {
@@ -741,7 +748,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
     }
 
     // Se as coordenadas de entrega existem mas a distância ainda não foi calculada (ou rota em andamento)
-    if (finalCoordinates && (finalDistance <= 0 || !finalDistance) && storeCoords) {
+    if (finalCoordinates && (finalDistance <= 0 || !finalDistance) && storeCoords && manualKmVal == null) {
       try {
         const r = await calculateRoute(storeCoords, finalCoordinates, { profile: "driving" });
         if (r?.distanceKm && r.distanceKm > 0) {
@@ -799,7 +806,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
     const pickupAddress = formatStorePickupAddress(restaurant, restaurant?.address);
 
     // Passa a quilometragem viária real calculada para o backend
-    const distanceToSend = finalDistance > 0 ? finalDistance : (fareDetails.rawKm > 0 ? fareDetails.rawKm : 2.5);
+    const distanceToSend = manualKmVal ?? (finalDistance > 0 ? finalDistance : (fareDetails.rawKm > 0 ? fareDetails.rawKm : 2.5));
 
     const roundKmUp = Boolean(deliveryConfig?.round_km_up ?? false);
     const minKm = Number(deliveryConfig?.min_km ?? 0);
@@ -861,6 +868,8 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
       setAdditionalNotes("");
       setDeliveryCoordinates(null);
       setEstimatedDistanceKm(0);
+      setManualDistanceEnabled(false);
+      setManualDistanceKm("");
 
       // Atualiza consultas
       queryClient.invalidateQueries({ queryKey: ["my-delivery-requests"] });
@@ -1378,11 +1387,69 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
                         <div className="text-right">
                           <span className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30">
                             <Route className="w-3.5 h-3.5" />
-                            {estimatedDistanceKm} km
+                            {fareDetails.effectiveKm.toFixed(1)} km
                           </span>
                           <span className="text-[10px] text-muted-foreground block mt-0.5">
-                            ~{Math.max(4, Math.round(estimatedDistanceKm * 2.5))} min de trajeto
+                            ~{Math.max(4, Math.round(fareDetails.effectiveKm * 2.5))} min de trajeto
                           </span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Detalhamento do Cálculo: Taxa de Saída + KM Rodado */}
+                    <div className="p-2.5 rounded-xl bg-background/60 border border-border/50 text-xs space-y-1.5">
+                      <div className="flex items-center justify-between text-muted-foreground">
+                        <span>Taxa de saída (partida):</span>
+                        <strong className="text-foreground">R$ {fareDetails.baseFee.toFixed(2).replace(".", ",")}</strong>
+                      </div>
+                      <div className="flex items-center justify-between text-muted-foreground">
+                        <span>KM rodado ({fareDetails.effectiveKm.toFixed(1)} km × R$ {fareDetails.feePerKm.toFixed(2).replace(".", ",")}/km):</span>
+                        <strong className="text-foreground">+ R$ {fareDetails.kmCost.toFixed(2).replace(".", ",")}</strong>
+                      </div>
+                      <div className="border-t border-border/50 pt-1 flex items-center justify-between font-bold text-xs text-[#EA580C]">
+                        <span>Total da Corrida (Saída + KM):</span>
+                        <span>R$ {fareDetails.totalCost.toFixed(2).replace(".", ",")}</span>
+                      </div>
+                    </div>
+
+                    {/* Ajuste Manual de Quilometragem */}
+                    <div className="pt-0.5">
+                      {!manualDistanceEnabled ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setManualDistanceEnabled(true);
+                            setManualDistanceKm((fareDetails.effectiveKm || 2.5).toFixed(1));
+                          }}
+                          className="text-[11px] text-[#EA580C] hover:underline font-semibold flex items-center gap-1 cursor-pointer"
+                        >
+                          <Route className="w-3 h-3" /> Ajustar km manualmente se necessário
+                        </button>
+                      ) : (
+                        <div className="flex items-center gap-2 p-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs">
+                          <label className="text-[11px] font-semibold text-amber-700 dark:text-amber-400 shrink-0">
+                            KM Manual:
+                          </label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            min="0.5"
+                            max="50"
+                            value={manualDistanceKm}
+                            onChange={(e) => setManualDistanceKm(e.target.value)}
+                            className="w-20 px-2 py-1 text-xs rounded-lg border border-border bg-background font-bold text-foreground"
+                          />
+                          <span className="text-[11px] text-muted-foreground">km</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setManualDistanceEnabled(false);
+                              setManualDistanceKm("");
+                            }}
+                            className="text-[10px] text-muted-foreground hover:text-foreground underline ml-auto cursor-pointer"
+                          >
+                            Voltar ao automático
+                          </button>
                         </div>
                       )}
                     </div>
@@ -1399,11 +1466,11 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
                       </div>
                     )}
 
-                    {/* Informações complementares de saldo (SEM taxa base para evitar confusão) */}
+                    {/* Informações complementares de saldo */}
                     <div className="pt-2 border-t border-border/40 flex items-center justify-between text-[11px] text-muted-foreground">
                       <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium">
                         <CheckCircle2 className="w-3.5 h-3.5" />
-                        Valor calculado por quilometragem e rota
+                        Cálculo oficial: taxa de saída + km rodado
                       </span>
 
                       {credits && (
