@@ -274,3 +274,4 @@ SET distance_km = 1.0,
 WHERE status = 'pending' AND group_id IS NULL AND (distance_km IS NULL OR distance_km <= 0 OR credit_cost < 7.00);
 
 NOTIFY pgrst, 'reload schema';
+
