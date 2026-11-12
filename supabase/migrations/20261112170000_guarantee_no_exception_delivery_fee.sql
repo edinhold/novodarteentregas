@@ -26,30 +26,44 @@ DECLARE
   v_max_km numeric;
   v_round_km_up boolean;
   v_delivery_cost numeric;
-  v_user_id uuid;
+  v_caller_id uuid;
+  v_store_owner_id uuid;
   v_current_credits numeric;
   v_request_id uuid;
   v_effective_km numeric;
   v_store_lat numeric;
   v_store_lng numeric;
 BEGIN
-  v_user_id := auth.uid();
-  IF v_user_id IS NULL THEN
+  v_caller_id := auth.uid();
+  IF v_caller_id IS NULL THEN
     RAISE EXCEPTION 'Não autenticado';
   END IF;
-  
-  -- Recuperar coordenadas da loja vinculada
+
+  -- Resolver o ID do dono da loja (permite admin impersonating ou store owner)
   IF p_restaurant_id IS NOT NULL THEN
-    SELECT latitude, longitude INTO v_store_lat, v_store_lng
-    FROM public.restaurants
-    WHERE id = p_restaurant_id;
+    SELECT owner_id, latitude, longitude INTO v_store_owner_id, v_store_lat, v_store_lng 
+    FROM public.restaurants WHERE id = p_restaurant_id;
   END IF;
 
-  -- Se coordenadas forem nulas ou fora de Primavera do Leste, busca do restaurante do usuário
+  IF v_store_owner_id IS NULL THEN
+    SELECT id, owner_id, latitude, longitude INTO p_restaurant_id, v_store_owner_id, v_store_lat, v_store_lng 
+    FROM public.restaurants WHERE owner_id = v_caller_id LIMIT 1;
+  END IF;
+
+  IF v_store_owner_id IS NULL THEN
+    v_store_owner_id := v_caller_id;
+  END IF;
+
+  -- Validação de permissão: dono da loja ou administrador
+  IF v_caller_id <> v_store_owner_id AND NOT public.has_role(v_caller_id, 'admin'::app_role) THEN
+    RAISE EXCEPTION 'Sem permissão para chamar entregador para esta loja';
+  END IF;
+
+  -- Fallback de coordenadas da loja se nulas ou fora de Primavera do Leste
   IF v_store_lat IS NULL OR v_store_lng IS NULL OR v_store_lat < -15.80 OR v_store_lat > -15.35 OR v_store_lng < -54.55 OR v_store_lng > -54.05 THEN
     SELECT latitude, longitude INTO v_store_lat, v_store_lng
     FROM public.restaurants
-    WHERE owner_id = v_user_id
+    WHERE owner_id = v_store_owner_id
     LIMIT 1;
   END IF;
 
@@ -123,10 +137,10 @@ BEGIN
   -- CÁLCULO OFICIAL: Taxa de saída + (KM rodado * Taxa por KM)
   v_delivery_cost := round(v_base_fee + (v_effective_fee_per_km * v_effective_km), 2);
 
-  -- Verificar créditos da loja
+  -- Verificar créditos da loja (resolvido por v_store_owner_id)
   SELECT balance INTO v_current_credits
   FROM public.store_credits
-  WHERE user_id = v_user_id;
+  WHERE user_id = v_store_owner_id;
 
   IF v_current_credits IS NULL OR v_current_credits < v_delivery_cost THEN
     RAISE EXCEPTION 'Créditos insuficientes (Necessário R$ %, Possui R$ %)', round(v_delivery_cost, 2), round(COALESCE(v_current_credits, 0), 2);
@@ -136,7 +150,7 @@ BEGIN
   UPDATE public.store_credits
   SET balance = balance - v_delivery_cost,
       updated_at = now()
-  WHERE user_id = v_user_id;
+  WHERE user_id = v_store_owner_id;
 
   -- Criar chamado de entrega com coordenadas reais e distance_km gravados
   INSERT INTO public.delivery_requests (
@@ -153,7 +167,7 @@ BEGIN
     status
   )
   VALUES (
-    v_user_id,
+    v_store_owner_id,
     p_restaurant_id,
     p_pickup_address,
     v_store_lat,

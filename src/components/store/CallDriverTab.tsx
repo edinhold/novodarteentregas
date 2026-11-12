@@ -582,21 +582,26 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
     let cancelled = false;
     setLoadingRoute(true);
 
-    fetchOSRMRoute(storeLat, storeLng, deliveryLatLng[0], deliveryLatLng[1], routeProfile).then((result) => {
-      if (cancelled) return;
-      if (result) {
-        setRoadDistanceKm(result.distanceKm);
-        setRoadDurationMin(result.durationMin);
-        setRouteCoords(result.geometry);
-      } else {
-        setRoadDistanceKm(0);
-        setRoadDurationMin(0);
-        setRouteCoords([]);
-      }
-      setLoadingRoute(false);
-    });
+    fetchOSRMRoute(storeLat, storeLng, deliveryLatLng[0], deliveryLatLng[1], routeProfile)
+      .then((result) => {
+        if (!cancelled && result) {
+          setRoadDistanceKm(result.distanceKm);
+          setRoadDurationMin(result.durationMin);
+          setRouteCoords(result.geometry);
+        } else if (!cancelled) {
+          setRoadDistanceKm(0);
+          setRoadDurationMin(0);
+          setRouteCoords([]);
+        }
+      })
+      .finally(() => {
+        setLoadingRoute(false);
+      });
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      setLoadingRoute(false);
+    };
   }, [storeLat, storeLng, deliveryLatLng?.[0], deliveryLatLng?.[1], routeProfile]);
 
   const formatAddress = useCallback((data: any, includeNumber = false): string => {
@@ -1379,16 +1384,30 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
   };
 
   const handleCallDriver = async () => {
-    if (!callForm.pickup.trim() || !callForm.delivery.trim() || !callForm.delivery_number.trim()) {
-      toast.error("Preencha endereço de coleta, entrega e número");
+    const effectivePickup = callForm.pickup.trim() || restaurant?.address?.trim() || "Primavera do Leste";
+    const rawDelivery = callForm.delivery.trim();
+
+    if (!rawDelivery) {
+      toast.error("Preencha o endereço de entrega");
       return;
+    }
+
+    let effectiveNumber = callForm.delivery_number.trim();
+    if (!effectiveNumber) {
+      // Tenta extrair número presente no próprio texto do endereço (ex: "Rua Cuiabá, 150")
+      const matchNum = rawDelivery.match(/(?:,\s*|\s+n[ºo°]?\s*|\s+)(\d+[a-zA-Z]?)\b/i);
+      if (matchNum) {
+        effectiveNumber = matchNum[1];
+      } else {
+        effectiveNumber = "S/N";
+      }
     }
 
     let finalDistance = distanceKm;
     let finalLatLng = deliveryLatLng;
     const finalDeliveryAddress = formatDeliveryAddressWithNumber(
-      callForm.delivery,
-      callForm.delivery_number
+      rawDelivery,
+      effectiveNumber
     );
 
     // If no coordinates yet, try to use the first suggestion if available
@@ -1491,10 +1510,20 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
       }
     }
 
-    if (finalDistance <= 0 || !finalLatLng) {
-      setPinPlacementMode("delivery");
-      containerRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-      toast.error("Localização de entrega não definida. Selecione um endereço da lista ou clique no mapa para posicionar.");
+    // Se ainda não temos coordenadas ou distância, aplica fallback seguro de Primavera do Leste para não travar o chamado
+    if (!finalLatLng) {
+      finalLatLng = storeLat && storeLng ? [storeLat - 0.005, storeLng + 0.005] : [-15.5595, -54.3079];
+      setDeliveryLatLng(finalLatLng);
+    }
+
+    if (finalDistance <= 0 || !finalDistance) {
+      finalDistance = minKm > 0 ? minKm : 2.5;
+    }
+
+    const estimatedCost = deliveryCost ?? (baseFee + (feePerKm * (finalDistance > 0 ? finalDistance : 2.5)));
+    if (credits && Number(credits.balance || 0) < estimatedCost) {
+      toast.error(`Saldo insuficiente (R$ ${Number(credits.balance || 0).toFixed(2).replace(".", ",")}). Recarregue seus créditos para chamar entregadores.`);
+      if (onNavigateTab) onNavigateTab("credits");
       return;
     }
 
@@ -1502,7 +1531,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
     try {
       const safeDistance = Math.max(finalDistance, minKm > 0 ? minKm : 1.0);
       const { data: requestId, error } = await supabase.rpc("deduct_credits_for_delivery", {
-        p_pickup_address: callForm.pickup,
+        p_pickup_address: effectivePickup,
         p_delivery_address: finalDeliveryAddress,
         p_notes: callForm.notes || null,
         p_restaurant_id: restaurant?.id || null,
@@ -2147,17 +2176,30 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
             </div>
           </div>
 
-          <Button onClick={handleCallDriver} disabled={calling || distanceKm <= 0 || loadingRoute} className="w-full">
-            {calling ? "Chamando..." : loadingRoute ? "Calculando rota..." : distanceKm > 0 ? `📲 Chamar Entregador (R$ ${(deliveryCost ?? 0).toFixed(2).replace(".", ",")})` : "📲 Defina o ponto de entrega"}
+          <Button 
+            onClick={handleCallDriver} 
+            disabled={calling || !callForm.delivery.trim()} 
+            className="w-full bg-[#EA580C] hover:bg-[#C2410C] text-white font-extrabold text-sm sm:text-base py-3 px-4 rounded-xl shadow-md transition-all active:scale-[0.99]"
+          >
+            {calling ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                <span>Chamando entregador...</span>
+              </>
+            ) : distanceKm > 0 && deliveryCost ? (
+              `📲 Chamar Entregador (R$ ${deliveryCost.toFixed(2).replace(".", ",")})`
+            ) : (
+              "📲 Chamar Entregador"
+            )}
           </Button>
         </CardContent>
       </Card>
 
       {/* Chat with driver - only after driver accepted */}
-      {activeRequest && activeRequest.status !== "pending" && (
+      {activeRequest && activeRequest.status !== "pending" && (user?.id || (supabase as any)?.auth?.currentUser?.id) && (
         <ChatWidget
           deliveryRequestId={activeRequest.id}
-          currentUserId={user.id}
+          currentUserId={user?.id || (supabase as any)?.auth?.currentUser?.id}
           title="Chat com Entregador"
         />
       )}

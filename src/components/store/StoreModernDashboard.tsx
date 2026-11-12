@@ -595,13 +595,16 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
       if (!isCancelled) {
         const estRoadKm = Number((R * c * 1.25).toFixed(1));
         setEstimatedDistanceKm(estRoadKm > 0 ? estRoadKm : 2.5);
-        setLoadingRoute(false);
       }
     };
 
-    calc();
+    calc().finally(() => {
+      setLoadingRoute(false);
+    });
+
     return () => {
       isCancelled = true;
+      setLoadingRoute(false);
     };
   }, [deliveryCoordinates, storeCoords]);
 
@@ -666,8 +669,8 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
 
   // Geocodifica e calcula automaticamente quando o lojista termina de digitar o endereço
   const handleAddressBlur = async () => {
+    // Não ativa loadingRoute aqui para evitar cancelar o evento de clique/submit do botão no navegador
     if (addressInput.trim().length >= 3 && !deliveryCoordinates) {
-      setLoadingRoute(true);
       try {
         const geo = await geocodeAddress(`${addressInput.trim()}, Primavera do Leste`).catch(() => null);
         if (geo?.coordinates) {
@@ -678,8 +681,6 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
         }
       } catch {
         // Fallback silencioso
-      } finally {
-        setLoadingRoute(false);
       }
     }
   };
@@ -713,6 +714,13 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
 
     if (!addressInput.trim()) {
       toast.error("Por favor, digite o endereço de entrega.");
+      return;
+    }
+
+    // Se o saldo for insuficiente, avisa de forma imediata e amigável em vez de travar o botão silenciosamente
+    if (credits && fareDetails.totalCost !== null && Number(credits.balance || 0) < fareDetails.totalCost) {
+      toast.error(`Saldo insuficiente na carteira (Possui R$ ${Number(credits.balance || 0).toFixed(2).replace(".", ",")}, necessário R$ ${fareDetails.totalCost.toFixed(2).replace(".", ",")}). Recarregue para chamar.`);
+      if (onNavigateTab) onNavigateTab("credits");
       return;
     }
 
@@ -1508,18 +1516,13 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
               {/* Botão de Envio (Laranja Largo com Cantos Arredondados) */}
               <button
                 type="submit"
-                disabled={isSubmitting || loadingRoute || !addressInput.trim() || (fareDetails.totalCost !== null && credits && Number(credits.balance || 0) < fareDetails.totalCost)}
+                disabled={isSubmitting || !addressInput.trim()}
                 className="w-full bg-[#EA580C] hover:bg-[#C2410C] text-white font-extrabold text-sm sm:text-base py-3.5 px-4 rounded-xl shadow-lg shadow-orange-500/25 transition-all duration-200 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 select-none cursor-pointer mt-1"
               >
                 {isSubmitting ? (
                   <>
                     <Loader2 className="w-5 h-5 animate-spin text-white" />
                     <span>Enviando chamado...</span>
-                  </>
-                ) : loadingRoute ? (
-                  <>
-                    <Loader2 className="w-5 h-5 animate-spin text-white" />
-                    <span>Calculando valor...</span>
                   </>
                 ) : addressInput.trim().length >= 3 && fareDetails.totalCost !== null ? (
                   <>
