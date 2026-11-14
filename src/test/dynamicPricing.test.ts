@@ -3,7 +3,7 @@ import { describe, it, expect } from "vitest";
 interface DeliveryConfig {
   base_fee: number;
   fee_per_km: number;
-  dynamic_pricing_enabled: boolean;
+  dynamic_pricing_enabled: boolean | string | number | null;
   dynamic_fee_per_km: number;
   min_km?: number;
   max_km?: number;
@@ -11,7 +11,7 @@ interface DeliveryConfig {
 }
 
 /**
- * Função de cálculo de corrida espelhando a lógica de deduct_credits_for_delivery,
+ * Função de cálculo de corrida espelhando a lógica blindada de deduct_credits_for_delivery,
  * StoreModernDashboard.tsx e CallDriverTab.tsx
  */
 function calculateDeliveryFare(
@@ -20,12 +20,16 @@ function calculateDeliveryFare(
 ) {
   const baseFee = Number(config.base_fee ?? 5.3);
   const baseKmFee = Number(config.fee_per_km ?? 1.7);
-  const dynamicEnabled = Boolean(config.dynamic_pricing_enabled);
-  const dynamicFee = (dynamicEnabled && Number(config.dynamic_fee_per_km ?? 0) > 0)
-    ? Number(config.dynamic_fee_per_km)
+  
+  // REGRA BLINDADA: Evita coerção errônea de Boolean("false") === true
+  const rawDynamicEnabled = config.dynamic_pricing_enabled;
+  const dynamicEnabled = rawDynamicEnabled === true || rawDynamicEnabled === "true" || rawDynamicEnabled === 1 || rawDynamicEnabled === "1" || rawDynamicEnabled === "t";
+  const rawDynamicFee = Number(config.dynamic_fee_per_km ?? 0);
+  const dynamicFee = (dynamicEnabled && !isNaN(rawDynamicFee) && rawDynamicFee > 0)
+    ? rawDynamicFee
     : 0;
 
-  // REGRA SÊNIOR: A taxa dinâmica SOMA com a taxa regular por km (baseKmFee + dynamicFee)
+  // REGRA SÊNIOR: A taxa dinâmica SOMA com a taxa regular por km apenas se estiver ATIVA
   const feePerKm = baseKmFee + dynamicFee;
 
   let effectiveKm = distanceKm;
@@ -53,11 +57,29 @@ function calculateDeliveryFare(
 }
 
 describe("Cálculo e Integração da Tarifa Dinâmica", () => {
-  it("deve calcular o valor padrão quando a tarifa dinâmica está DESATIVADA", () => {
+  it("deve calcular o valor padrão quando a tarifa dinâmica está DESATIVADA (boolean false)", () => {
     const config: DeliveryConfig = {
       base_fee: 5.3,
       fee_per_km: 1.7,
       dynamic_pricing_enabled: false,
+      dynamic_fee_per_km: 1.0, // Resíduo anterior mantido no input não pode ser cobrado
+      round_km_up: false,
+    };
+
+    const result = calculateDeliveryFare(3.0, config);
+
+    expect(result.isDynamicActive).toBe(false);
+    expect(result.dynamicFee).toBe(0);
+    expect(result.effectiveFeePerKm).toBe(1.7);
+    // 5.30 + (3.0 * 1.70) = 5.30 + 5.10 = 10.40
+    expect(result.totalCost).toBe(10.40);
+  });
+
+  it("deve ignorar resíduo de tarifa dinâmica quando dynamic_pricing_enabled é a string 'false'", () => {
+    const config: DeliveryConfig = {
+      base_fee: 5.3,
+      fee_per_km: 1.7,
+      dynamic_pricing_enabled: "false",
       dynamic_fee_per_km: 1.0,
       round_km_up: false,
     };
@@ -65,9 +87,32 @@ describe("Cálculo e Integração da Tarifa Dinâmica", () => {
     const result = calculateDeliveryFare(3.0, config);
 
     expect(result.isDynamicActive).toBe(false);
+    expect(result.dynamicFee).toBe(0);
     expect(result.effectiveFeePerKm).toBe(1.7);
-    // 5.30 + (3.0 * 1.70) = 5.30 + 5.10 = 10.40
     expect(result.totalCost).toBe(10.40);
+    expect(result.totalCost).not.toBe(13.40);
+  });
+
+  it("deve ignorar tarifa dinâmica quando dynamic_pricing_enabled é '0' ou 0", () => {
+    const configZeroNum: DeliveryConfig = {
+      base_fee: 5.3,
+      fee_per_km: 1.7,
+      dynamic_pricing_enabled: 0,
+      dynamic_fee_per_km: 2.0,
+      round_km_up: false,
+    };
+    expect(calculateDeliveryFare(3.0, configZeroNum).isDynamicActive).toBe(false);
+    expect(calculateDeliveryFare(3.0, configZeroNum).totalCost).toBe(10.40);
+
+    const configZeroStr: DeliveryConfig = {
+      base_fee: 5.3,
+      fee_per_km: 1.7,
+      dynamic_pricing_enabled: "0",
+      dynamic_fee_per_km: 2.0,
+      round_km_up: false,
+    };
+    expect(calculateDeliveryFare(3.0, configZeroStr).isDynamicActive).toBe(false);
+    expect(calculateDeliveryFare(3.0, configZeroStr).totalCost).toBe(10.40);
   });
 
   it("deve SOMAR o valor dinâmico com o valor de km configurado quando a tarifa dinâmica está ATIVA", () => {
@@ -89,6 +134,20 @@ describe("Cálculo e Integração da Tarifa Dinâmica", () => {
 
     // Garante que NÃO substituiu a taxa normal (não pode ser 5.30 + 3.0*1.0 = 8.30)
     expect(result.totalCost).not.toBe(8.30);
+  });
+
+  it("deve aceitar string 'true' como ativa", () => {
+    const config: DeliveryConfig = {
+      base_fee: 5.3,
+      fee_per_km: 1.7,
+      dynamic_pricing_enabled: "true",
+      dynamic_fee_per_km: 1.0,
+      round_km_up: false,
+    };
+
+    const result = calculateDeliveryFare(3.0, config);
+    expect(result.isDynamicActive).toBe(true);
+    expect(result.totalCost).toBe(13.40);
   });
 
   it("deve manter a taxa base se a tarifa dinâmica estiver ativa mas o valor dinâmico for 0 ou negativo", () => {
@@ -150,4 +209,3 @@ describe("Cálculo e Integração da Tarifa Dinâmica", () => {
     expect(maxResult.totalCost).toBe(25.0);
   });
 });
-

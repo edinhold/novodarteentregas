@@ -354,6 +354,25 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
     return Array.isArray(rawDeliveryConfig) ? rawDeliveryConfig[0] : rawDeliveryConfig;
   }, [rawDeliveryConfig]);
 
+  // Sincronização em tempo real caso o admin ligue/desligue a tarifa dinâmica ou altere taxas
+  useEffect(() => {
+    const channel = supabase
+      .channel("store-realtime-delivery-config")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "delivery_config" },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ["delivery-config"] });
+          queryClient.invalidateQueries({ queryKey: ["public-delivery-config"] });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [queryClient]);
+
   // Fecha sugestões ao clicar fora
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -638,9 +657,11 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
 
     const baseFee = Number(deliveryConfig?.base_fee ?? 5.3) || 5.3;
     const baseKmFee = Number(deliveryConfig?.fee_per_km ?? 1.7) || 1.7;
-    const dynamicEnabled = Boolean(deliveryConfig?.dynamic_pricing_enabled);
-    const dynamicFee = (dynamicEnabled && Number(deliveryConfig?.dynamic_fee_per_km ?? 0) > 0)
-      ? Number(deliveryConfig?.dynamic_fee_per_km)
+    const rawDynamicEnabled = deliveryConfig?.dynamic_pricing_enabled;
+    const dynamicEnabled = rawDynamicEnabled === true || rawDynamicEnabled === "true" || rawDynamicEnabled === 1 || rawDynamicEnabled === "1" || rawDynamicEnabled === "t";
+    const rawDynamicFee = Number(deliveryConfig?.dynamic_fee_per_km ?? 0);
+    const dynamicFee = (dynamicEnabled && !isNaN(rawDynamicFee) && rawDynamicFee > 0)
+      ? rawDynamicFee
       : 0;
     // REGRA SÊNIOR: A taxa dinâmica SOMA com a taxa regular por km (baseKmFee + dynamicFee)
     const feePerKm = baseKmFee + dynamicFee;
@@ -859,9 +880,11 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
     const roundKmUp = Boolean(deliveryConfig?.round_km_up ?? false);
     const baseFee = Number(deliveryConfig?.base_fee ?? 5.3) || 5.3;
     const baseKmFee = Number(deliveryConfig?.fee_per_km ?? 1.7) || 1.7;
-    const dynamicEnabled = Boolean(deliveryConfig?.dynamic_pricing_enabled);
-    const dynamicFee = (dynamicEnabled && Number(deliveryConfig?.dynamic_fee_per_km ?? 0) > 0)
-      ? Number(deliveryConfig?.dynamic_fee_per_km)
+    const rawDynamicEnabled = deliveryConfig?.dynamic_pricing_enabled;
+    const dynamicEnabled = rawDynamicEnabled === true || rawDynamicEnabled === "true" || rawDynamicEnabled === 1 || rawDynamicEnabled === "1" || rawDynamicEnabled === "t";
+    const rawDynamicFee = Number(deliveryConfig?.dynamic_fee_per_km ?? 0);
+    const dynamicFee = (dynamicEnabled && !isNaN(rawDynamicFee) && rawDynamicFee > 0)
+      ? rawDynamicFee
       : 0;
     // REGRA SÊNIOR: A taxa dinâmica SOMA com a taxa regular por km
     const feePerKm = baseKmFee + dynamicFee;

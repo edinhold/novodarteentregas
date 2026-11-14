@@ -523,12 +523,34 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
     return Array.isArray(deliveryConfig) ? deliveryConfig[0] : deliveryConfig;
   }, [deliveryConfig]);
 
+  // Sincronização em tempo real para refletir liga/desliga de taxa dinâmica instantaneamente
+  useEffect(() => {
+    const channel = supabase
+      .channel("calldriver-realtime-delivery-config")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "delivery_config" },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ["delivery-config"] });
+          queryClient.invalidateQueries({ queryKey: ["public-delivery-config"] });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [queryClient]);
+
   // Delivery config loaded for price calculations
   const configLoaded = !!configObj;
   const baseFee = Number(configObj?.base_fee ?? 5.3) || 5.3;
   const baseKmFee = Number(configObj?.fee_per_km ?? 1.7) || 1.7;
-  const isDynamicPricing = !!configObj?.dynamic_pricing_enabled && Number(configObj?.dynamic_fee_per_km ?? 0) > 0;
-  const dynamicKmFee = isDynamicPricing ? Number(configObj.dynamic_fee_per_km) : 0;
+  const rawDynamicEnabled = configObj?.dynamic_pricing_enabled;
+  const dynamicEnabled = rawDynamicEnabled === true || rawDynamicEnabled === "true" || rawDynamicEnabled === 1 || rawDynamicEnabled === "1" || rawDynamicEnabled === "t";
+  const rawDynamicKmFee = Number(configObj?.dynamic_fee_per_km ?? 0);
+  const dynamicKmFee = (dynamicEnabled && !isNaN(rawDynamicKmFee) && rawDynamicKmFee > 0) ? rawDynamicKmFee : 0;
+  const isDynamicPricing = dynamicEnabled && dynamicKmFee > 0;
   // REGRA SÊNIOR: A taxa dinâmica SOMA com a taxa por km regular
   const feePerKm = baseKmFee + dynamicKmFee;
   const minKm = Number(configObj?.min_km ?? 0);

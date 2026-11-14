@@ -21,9 +21,11 @@ function calculateDeliveryFare(
 ) {
   const baseFee = Number(config.base_fee ?? 5.3);
   const baseKmFee = Number(config.fee_per_km ?? 1.7);
-  const dynamicEnabled = Boolean(config.dynamic_pricing_enabled);
-  const dynamicFee = (dynamicEnabled && Number(config.dynamic_fee_per_km ?? 0) > 0)
-    ? Number(config.dynamic_fee_per_km)
+  const rawDynamicEnabled = config.dynamic_pricing_enabled;
+  const dynamicEnabled = rawDynamicEnabled === true || rawDynamicEnabled === "true" || rawDynamicEnabled === 1 || rawDynamicEnabled === "1" || rawDynamicEnabled === "t";
+  const rawDynamicFee = Number(config.dynamic_fee_per_km ?? 0);
+  const dynamicFee = (dynamicEnabled && !isNaN(rawDynamicFee) && rawDynamicFee > 0)
+    ? rawDynamicFee
     : 0;
 
   // REGRA SÊNIOR: A taxa dinâmica SOMA com a taxa regular por km (baseKmFee + dynamicFee)
