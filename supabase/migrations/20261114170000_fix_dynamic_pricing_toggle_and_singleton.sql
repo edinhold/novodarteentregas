@@ -676,3 +676,4 @@ EXCEPTION WHEN OTHERS THEN
 END $$;
 
 NOTIFY pgrst, 'reload schema';
+
