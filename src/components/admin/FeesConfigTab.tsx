@@ -38,7 +38,7 @@ const FeesConfigTab = () => {
     max_km: "0",
     round_km_up: false,
     dynamic_pricing_enabled: false,
-    dynamic_fee_per_km: "1.0",
+    dynamic_fee_per_km: "0",
   });
 
   const { data: rawConfig, isLoading: configLoading } = useQuery({
@@ -124,7 +124,7 @@ const FeesConfigTab = () => {
       const rawDynamicFee = Number((config as any).dynamic_fee_per_km ?? 0);
       const parsedDynamicFee = parsedDynamicEnabled && !isNaN(rawDynamicFee) && rawDynamicFee > 0
         ? String(rawDynamicFee)
-        : "1.0";
+        : "0";
 
       setForm({
         base_fee: String(config.base_fee ?? "5.3"),
@@ -155,7 +155,7 @@ const FeesConfigTab = () => {
   }, [form.dynamic_fee_per_km]);
 
   const totalEffectiveKmFee = useMemo(() => {
-    if (!form.dynamic_pricing_enabled) {
+    if (!form.dynamic_pricing_enabled || dynamicKmFee <= 0) {
       return regularKmFee;
     }
     return regularKmFee + dynamicKmFee;
@@ -169,14 +169,16 @@ const FeesConfigTab = () => {
   // Alternância instantânea da Tarifa Dinâmica no clique do Switch
   const handleToggleDynamicPricing = async (checked: boolean) => {
     const currentDynamicFee = parseFloat(form.dynamic_fee_per_km);
-    const validDynamicFee = (!isNaN(currentDynamicFee) && currentDynamicFee > 0) ? currentDynamicFee : 1.0;
+    // REGRA DE OURO: Sem valor padrão forçado! Se o admin não digitou, o adicional é 0.
+    const validDynamicFee = (!isNaN(currentDynamicFee) && currentDynamicFee > 0) ? currentDynamicFee : 0;
     const feeToPersist = checked ? validDynamicFee : 0;
+    const isActuallyEnabled = checked && feeToPersist > 0;
 
     // Atualiza estado local imediatamente para feedback visual ultra rápido
     setForm(prev => ({
       ...prev,
       dynamic_pricing_enabled: checked,
-      dynamic_fee_per_km: checked ? String(validDynamicFee) : "0",
+      dynamic_fee_per_km: checked ? (validDynamicFee > 0 ? String(validDynamicFee) : "0") : "0",
     }));
 
     try {
@@ -189,6 +191,12 @@ const FeesConfigTab = () => {
       const paymentDayVal = isNaN(parseInt(form.payment_day, 10)) ? 3 : parseInt(form.payment_day, 10);
       const appFeePerDeliveryVal = isNaN(parseFloat(form.app_fee_per_delivery)) ? 2 : Math.max(0, parseFloat(form.app_fee_per_delivery));
 
+      const directPayload: any = {
+        dynamic_pricing_enabled: isActuallyEnabled,
+        dynamic_fee_per_km: feeToPersist,
+        updated_at: new Date().toISOString(),
+      };
+
       let savedRecord: any = null;
 
       try {
@@ -198,7 +206,7 @@ const FeesConfigTab = () => {
           p_min_km: minKmVal,
           p_max_km: maxKmVal,
           p_round_km_up: form.round_km_up,
-          p_dynamic_pricing_enabled: checked,
+          p_dynamic_pricing_enabled: isActuallyEnabled,
           p_dynamic_fee_per_km: feeToPersist,
           p_early_withdrawal_fee_percent: earlyWithdrawalFeePercentVal,
           p_withdrawal_fixed_fee: withdrawalFixedFeeVal,
@@ -214,31 +222,29 @@ const FeesConfigTab = () => {
         console.warn("[FeesConfigTab] Erro ao salvar switch via RPC:", e);
       }
 
-      const directPayload: any = {
-        dynamic_pricing_enabled: checked,
-        dynamic_fee_per_km: feeToPersist,
-        updated_at: new Date().toISOString(),
-      };
-
-      if (config?.id) {
-        await supabase.from("delivery_config").update(directPayload).eq("id", config.id);
-      } else {
-        await supabase.from("delivery_config").update(directPayload).neq("id", "00000000-0000-0000-0000-000000000000");
+      if (!savedRecord) {
+        if (config?.id) {
+          const { data } = await supabase
+            .from("delivery_config")
+            .update(directPayload)
+            .eq("id", config.id)
+            .select()
+            .maybeSingle();
+          if (data) savedRecord = data;
+        } else {
+          const { data } = await supabase
+            .from("delivery_config")
+            .update(directPayload)
+            .neq("id", "00000000-0000-0000-0000-000000000000")
+            .select()
+            .maybeSingle();
+          if (data) savedRecord = data;
+        }
       }
 
-      if (savedRecord) {
-        queryClient.setQueryData(["admin-delivery-config"], savedRecord);
-        queryClient.setQueryData(["delivery-config"], savedRecord);
-      } else {
-        queryClient.setQueryData(["admin-delivery-config"], (prev: any) => ({
-          ...(prev || {}),
-          ...directPayload,
-        }));
-        queryClient.setQueryData(["delivery-config"], (prev: any) => ({
-          ...(prev || {}),
-          ...directPayload,
-        }));
-      }
+      const recordToCache = savedRecord || { ...(config || {}), ...directPayload };
+      queryClient.setQueryData(["admin-delivery-config"], recordToCache);
+      queryClient.setQueryData(["delivery-config"], recordToCache);
 
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["admin-delivery-config"] }),
@@ -248,9 +254,13 @@ const FeesConfigTab = () => {
       ]);
 
       if (checked) {
-        toast.success(`🔥 Tarifa dinâmica ATIVADA! (+ R$ ${validDynamicFee.toFixed(2)}/km)`);
+        if (validDynamicFee > 0) {
+          toast.success(`🔥 Tarifa dinâmica ATIVADA! (+ R$ ${validDynamicFee.toFixed(2)}/km)`);
+        } else {
+          toast.info("🔥 Tarifa dinâmica ligada! Digite abaixo o valor adicional por km que deseja cobrar.");
+        }
       } else {
-        toast.success("✅ Tarifa dinâmica DESATIVADA! Corridas cobrando valor normal.");
+        toast.success("✅ Tarifa dinâmica DESATIVADA! Nenhuma taxa extra será cobrada.");
       }
     } catch (err: any) {
       console.error("[FeesConfigTab] Erro ao alternar tarifa dinâmica:", err);
@@ -277,10 +287,13 @@ const FeesConfigTab = () => {
       const withdrawalFixedFeeVal = isNaN(parseFloat(form.withdrawal_fixed_fee)) ? 1.00 : Math.max(0, parseFloat(form.withdrawal_fixed_fee));
       const paymentDayVal = isNaN(parseInt(form.payment_day, 10)) ? 3 : parseInt(form.payment_day, 10);
       const appFeePerDeliveryVal = isNaN(parseFloat(form.app_fee_per_delivery)) ? 2 : Math.max(0, parseFloat(form.app_fee_per_delivery));
-      // GARANTIA: Se dynamic_pricing_enabled estiver desativada, a taxa adicional é estritamente 0
-      const dynamicFeePerKmVal = (!form.dynamic_pricing_enabled || isNaN(parseFloat(form.dynamic_fee_per_km)))
-        ? 0
-        : Math.max(0, parseFloat(form.dynamic_fee_per_km));
+      
+      // GARANTIA TOTAL: A taxa dinâmica só tem valor se estiver ATIVADA e com valor MAIOR que 0
+      const parsedDynFee = parseFloat(form.dynamic_fee_per_km);
+      const dynamicFeePerKmVal = (form.dynamic_pricing_enabled && !isNaN(parsedDynFee) && parsedDynFee > 0)
+        ? parsedDynFee
+        : 0;
+      const dynamicPricingEnabledVal = form.dynamic_pricing_enabled && dynamicFeePerKmVal > 0;
 
       let savedRecord: any = null;
 
@@ -292,8 +305,8 @@ const FeesConfigTab = () => {
           p_min_km: minKmVal,
           p_max_km: maxKmVal,
           p_round_km_up: form.round_km_up,
-          p_dynamic_pricing_enabled: form.dynamic_pricing_enabled,
-          p_dynamic_fee_per_km: form.dynamic_pricing_enabled ? dynamicFeePerKmVal : 0,
+          p_dynamic_pricing_enabled: dynamicPricingEnabledVal,
+          p_dynamic_fee_per_km: dynamicFeePerKmVal,
           p_early_withdrawal_fee_percent: earlyWithdrawalFeePercentVal,
           p_withdrawal_fixed_fee: withdrawalFixedFeeVal,
           p_payment_day: paymentDayVal,
@@ -322,7 +335,7 @@ const FeesConfigTab = () => {
           min_km: minKmVal,
           max_km: maxKmVal,
           round_km_up: form.round_km_up,
-          dynamic_pricing_enabled: form.dynamic_pricing_enabled,
+          dynamic_pricing_enabled: dynamicPricingEnabledVal,
           dynamic_fee_per_km: dynamicFeePerKmVal,
           updated_at: new Date().toISOString(),
         };
@@ -443,8 +456,11 @@ const FeesConfigTab = () => {
                   min="0" 
                   value={form.dynamic_fee_per_km} 
                   onChange={(e) => setForm(f => ({ ...f, dynamic_fee_per_km: e.target.value }))} 
-                  placeholder="Ex: 1.00"
+                  placeholder="0.00 (digite o valor a cobrar)"
                 />
+                <p className="text-[11px] text-muted-foreground">
+                  A taxa dinâmica só terá acréscimo quando você preencher um valor maior que R$ 0,00.
+                </p>
               </div>
 
               {/* Box de cálculo em tempo real */}
@@ -455,7 +471,7 @@ const FeesConfigTab = () => {
                 </div>
                 <div className="flex justify-between text-amber-600 dark:text-amber-400 font-medium">
                   <span>+ Adicional Dinâmico:</span>
-                  <strong>+ R$ {dynamicKmFee.toFixed(2)}/km</strong>
+                  <strong>{dynamicKmFee > 0 ? `+ R$ ${dynamicKmFee.toFixed(2)}/km` : "R$ 0,00 (Nenhum valor configurado)"}</strong>
                 </div>
                 <div className="border-t border-amber-500/30 pt-1.5 flex justify-between font-bold text-sm text-amber-700 dark:text-amber-300">
                   <span>= Taxa Total Cobrada por KM:</span>
@@ -463,7 +479,10 @@ const FeesConfigTab = () => {
                 </div>
                 <div className="text-[11px] text-muted-foreground flex items-center gap-1 pt-1">
                   <CheckCircle2 className="w-3.5 h-3.5 text-amber-600" />
-                  As lojas e motoristas pagarão/receberão com base em R$ {totalEffectiveKmFee.toFixed(2)}/km
+                  {dynamicKmFee > 0
+                    ? `As lojas e motoristas pagarão/receberão com base em R$ ${totalEffectiveKmFee.toFixed(2)}/km`
+                    : "Sem valor configurado. Nenhuma taxa extra será cobrada das lojas ou repassada aos motoristas."
+                  }
                 </div>
               </div>
             </div>

@@ -208,4 +208,44 @@ describe("Cálculo e Integração da Tarifa Dinâmica", () => {
     // 5.0 + (8.0 * 2.5) = 25.0
     expect(maxResult.totalCost).toBe(25.0);
   });
+
+  it("não deve cobrar acréscimo se o admin ligar a tarifa dinâmica mas não colocar nenhum valor (valor 0)", () => {
+    // Cenário: admin ligou a chave, mas não digitou o valor que será cobrado (ficou 0)
+    const configSemValor: DeliveryConfig = {
+      base_fee: 5.4,
+      fee_per_km: 1.7,
+      dynamic_pricing_enabled: true,
+      dynamic_fee_per_km: 0,
+      round_km_up: false,
+    };
+
+    const result = calculateDeliveryFare(3.0, configSemValor);
+
+    expect(result.isDynamicActive).toBe(false);
+    expect(result.dynamicFee).toBe(0);
+    expect(result.effectiveFeePerKm).toBe(1.7);
+    // 5.40 + (3.0 * 1.70) = 5.40 + 5.10 = 10.50
+    expect(result.totalCost).toBe(10.50);
+  });
+
+  it("quando a tarifa dinâmica estiver desativada não pode cobrar nada de acréscimo em nenhuma hipótese", () => {
+    // Cenário: admin desativou a tarifa dinâmica (false). Não pode cobrar nada extra.
+    const configDesativada: DeliveryConfig = {
+      base_fee: 5.4,
+      fee_per_km: 1.7,
+      dynamic_pricing_enabled: false,
+      dynamic_fee_per_km: 1.5, // Resíduo anterior deixado na tela
+      round_km_up: false,
+    };
+
+    const result = calculateDeliveryFare(5.0, configDesativada);
+
+    expect(result.isDynamicActive).toBe(false);
+    expect(result.dynamicFee).toBe(0);
+    expect(result.effectiveFeePerKm).toBe(1.7);
+    // 5.40 + (5.0 * 1.70) = 5.40 + 8.50 = 13.90 (sem acréscimo dinâmico)
+    expect(result.totalCost).toBe(13.90);
+    // Não pode cobrar os 1.5 a mais (não pode ser 5.40 + 5.0 * 3.20 = 21.40)
+    expect(result.totalCost).not.toBe(21.40);
+  });
 });
