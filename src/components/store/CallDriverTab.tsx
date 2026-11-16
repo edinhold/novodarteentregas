@@ -2280,7 +2280,8 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
                 const isFinished = ["delivered", "cancelled"].includes(r.status);
                 const canCancel = !isFinished;
                 const isPendingUnaccepted = r.status === "pending" || !r.driver_id;
-                const deliveryVal = Number(r.driver_fee ?? r.credit_cost ?? 0);
+                // Para o lojista, o valor real da corrida é o custo cobrado da loja (credit_cost)
+                const deliveryVal = Number(r.credit_cost || (r as any).delivery_price || r.driver_fee || 0);
 
                 return (
                   <div key={r.id} className="p-3.5 sm:p-4 rounded-xl bg-card hover:bg-muted/40 transition-colors border border-border/70 shadow-sm space-y-3">

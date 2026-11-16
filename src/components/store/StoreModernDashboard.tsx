@@ -1767,7 +1767,8 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
                   const isAccepted = req.status === "accepted";
                   const isTransit = req.status === "picked_up";
                   const isCancelled = req.status === "cancelled";
-                  const deliveryVal = Number(req.credit_cost ?? req.driver_fee ?? 0);
+                  // Para o lojista, o valor real da corrida é o custo cobrado da loja (credit_cost)
+                  const deliveryVal = Number(req.credit_cost || (req as any).delivery_price || req.driver_fee || 0);
 
                   return (
                     <div
@@ -2004,11 +2005,11 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
                     <p className="text-xs text-foreground">{selectedOrderDetails.notes}</p>
                   </div>
                 )}
-                {(selectedOrderDetails.credit_cost || selectedOrderDetails.driver_fee) && (
+                {(selectedOrderDetails.credit_cost || (selectedOrderDetails as any).delivery_price || selectedOrderDetails.driver_fee) && (
                   <div className="flex items-center justify-between pt-1.5 border-t border-border/40">
                     <span className="text-[11px] font-semibold text-zinc-400">Valor da Corrida</span>
                     <span className="text-sm font-black text-[#EA580C]">
-                      R$ {Number(selectedOrderDetails.credit_cost || selectedOrderDetails.driver_fee || 0).toFixed(2).replace(".", ",")}
+                      R$ {Number(selectedOrderDetails.credit_cost || (selectedOrderDetails as any).delivery_price || selectedOrderDetails.driver_fee || 0).toFixed(2).replace(".", ",")}
                     </span>
                   </div>
                 )}

@@ -219,7 +219,8 @@ export const AssignedDriverCard = ({ activeRequest, onCancelRequest }: AssignedD
   if (!activeRequest) return null;
 
   const isPending = activeRequest.status === "pending" || !activeRequest.driver_id;
-  const deliveryValue = Number(activeRequest.driver_fee ?? activeRequest.credit_cost ?? 0);
+  // Para o lojista, o valor real da corrida é o custo cobrado da loja (credit_cost / taxa total do lojista)
+  const deliveryValue = Number(activeRequest.credit_cost || (activeRequest as any).delivery_price || activeRequest.driver_fee || 0);
 
   // 1. ESTADO: AGUARDANDO MOTORISTA (Aguardando motorista aceitar a entrega)
   if (isPending) {

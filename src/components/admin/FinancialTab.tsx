@@ -863,7 +863,7 @@ export const FinancialTab = () => {
     // 4. Valor Bruto das Corridas (apenas entregas concluídas)
     const deliveredRides = filteredDeliveries.filter((r) => r.status === "delivered");
     const valorBrutoCorridas = deliveredRides.reduce(
-      (sum, r) => sum + Number(r.driver_fee || r.credit_cost || 0),
+      (sum, r) => sum + Number(r.credit_cost || r.driver_fee || 0),
       0
     );
 
@@ -991,7 +991,7 @@ export const FinancialTab = () => {
     const deliveredCount = myDeliveries.filter((r) => r.status === "delivered").length;
     const usedInDeliveries = myDeliveries
       .filter((r) => r.status === "delivered")
-      .reduce((sum, r) => sum + Number(r.driver_fee || r.credit_cost || 0), 0);
+      .reduce((sum, r) => sum + Number(r.credit_cost || r.driver_fee || 0), 0);
 
     return {
       owner: ownerObj,
