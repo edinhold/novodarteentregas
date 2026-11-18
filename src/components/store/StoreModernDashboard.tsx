@@ -597,11 +597,10 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
           { profile: "driving" }
         );
         if (!isCancelled && routeData) {
-          const distKm = Number(
-            routeData.distanceKm > 0
-              ? routeData.distanceKm
-              : (routeData.distanceMeters / 1000).toFixed(1)
-          );
+          const rawDist = routeData.distanceKm > 0
+            ? routeData.distanceKm
+            : (routeData.distanceMeters / 1000);
+          const distKm = Number(rawDist.toFixed(1));
           setEstimatedDistanceKm(distKm > 0 ? distKm : 1.0);
           setLoadingRoute(false);
           return;
@@ -622,7 +621,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
           Math.sin(dLon / 2);
       const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
       if (!isCancelled) {
-        const estRoadKm = Number((R * c * 1.25).toFixed(1));
+        const estRoadKm = Number((R * c * 1.30).toFixed(1));
         setEstimatedDistanceKm(estRoadKm > 0 ? estRoadKm : 2.5);
       }
     };
@@ -657,7 +656,9 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
       };
     }
 
-    const baseFee = deliveryConfig?.base_fee != null && !isNaN(Number(deliveryConfig.base_fee)) ? Number(deliveryConfig.base_fee) : 5.3;
+    const baseFee = deliveryConfig?.base_fee != null && !isNaN(Number(deliveryConfig.base_fee)) && Number(deliveryConfig.base_fee) > 0
+      ? Number(deliveryConfig.base_fee)
+      : 5.4;
     const baseKmFee = deliveryConfig?.fee_per_km != null && !isNaN(Number(deliveryConfig.fee_per_km)) ? Number(deliveryConfig.fee_per_km) : 1.7;
     const rawDynamicEnabled = deliveryConfig?.dynamic_pricing_enabled;
     const dynamicEnabled = rawDynamicEnabled === true || rawDynamicEnabled === "true" || rawDynamicEnabled === 1 || rawDynamicEnabled === "1" || rawDynamicEnabled === "t";
@@ -680,9 +681,9 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
     // 4. Estimativa viária média de Primavera do Leste (2.5 km ou minKm)
     let rawKm = 0;
     if (manualKm != null && manualKm > 0) {
-      rawKm = manualKm;
+      rawKm = Number(manualKm.toFixed(1));
     } else if (estimatedDistanceKm > 0) {
-      rawKm = estimatedDistanceKm;
+      rawKm = Number(estimatedDistanceKm.toFixed(1));
     } else if (deliveryCoordinates && storeCoords) {
       const R = 6371;
       const dLat = ((deliveryCoordinates.lat - storeCoords.lat) * Math.PI) / 180;
@@ -705,7 +706,11 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
     if (effectiveKm <= 0) {
       effectiveKm = minKm > 0 ? minKm : 1.0;
     }
-    if (roundKmUp && effectiveKm > 0) effectiveKm = Math.ceil(effectiveKm);
+    if (roundKmUp && effectiveKm > 0) {
+      effectiveKm = Math.ceil(effectiveKm);
+    } else if (effectiveKm > 0) {
+      effectiveKm = Number(effectiveKm.toFixed(1));
+    }
     if (minKm > 0 && effectiveKm < minKm) effectiveKm = minKm;
     if (maxKm > 0 && effectiveKm > maxKm) effectiveKm = maxKm;
 
@@ -807,8 +812,8 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
             try {
               const r = await calculateRoute(storeCoords, finalCoordinates, { profile: "driving" });
               if (r?.distanceKm && r.distanceKm > 0) {
-                finalDistance = r.distanceKm;
-                setEstimatedDistanceKm(r.distanceKm);
+                finalDistance = Number(r.distanceKm.toFixed(1));
+                setEstimatedDistanceKm(finalDistance);
               }
             } catch {
               // Mantém distância fallback
@@ -825,8 +830,8 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
       try {
         const r = await calculateRoute(storeCoords, finalCoordinates, { profile: "driving" });
         if (r?.distanceKm && r.distanceKm > 0) {
-          finalDistance = r.distanceKm;
-          setEstimatedDistanceKm(r.distanceKm);
+          finalDistance = Number(r.distanceKm.toFixed(1));
+          setEstimatedDistanceKm(finalDistance);
         }
       } catch {
         // Fallback viário geodésico calibrado
@@ -882,7 +887,9 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
     const minKm = Number(deliveryConfig?.min_km ?? 0);
     const maxKm = Number(deliveryConfig?.max_km ?? 0);
     const roundKmUp = Boolean(deliveryConfig?.round_km_up ?? false);
-    const baseFee = deliveryConfig?.base_fee != null && !isNaN(Number(deliveryConfig.base_fee)) ? Number(deliveryConfig.base_fee) : 5.3;
+    const baseFee = deliveryConfig?.base_fee != null && !isNaN(Number(deliveryConfig.base_fee)) && Number(deliveryConfig.base_fee) > 0
+      ? Number(deliveryConfig.base_fee)
+      : 5.4;
     const baseKmFee = deliveryConfig?.fee_per_km != null && !isNaN(Number(deliveryConfig.fee_per_km)) ? Number(deliveryConfig.fee_per_km) : 1.7;
     const rawDynamicEnabled = deliveryConfig?.dynamic_pricing_enabled;
     const dynamicEnabled = rawDynamicEnabled === true || rawDynamicEnabled === "true" || rawDynamicEnabled === 1 || rawDynamicEnabled === "1" || rawDynamicEnabled === "t";
@@ -894,11 +901,15 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
     const feePerKm = baseKmFee + dynamicFee;
 
     // Passa a quilometragem viária real calculada para o backend (mínimo garantido para saída + km)
-    const rawDistanceToSend = manualKmVal ?? (finalDistance > 0 ? finalDistance : (fareDetails.rawKm > 0 ? fareDetails.rawKm : (minKm > 0 ? minKm : 2.5)));
+    const rawDistanceToSend = manualKmVal ?? (finalDistance > 0 ? Number(finalDistance.toFixed(1)) : (fareDetails.rawKm > 0 ? fareDetails.rawKm : (minKm > 0 ? minKm : 2.5)));
     const distanceToSend = Math.max(rawDistanceToSend, minKm > 0 ? minKm : 1.0);
 
     let effectiveKm = distanceToSend;
-    if (roundKmUp && effectiveKm > 0) effectiveKm = Math.ceil(effectiveKm);
+    if (roundKmUp && effectiveKm > 0) {
+      effectiveKm = Math.ceil(effectiveKm);
+    } else if (effectiveKm > 0) {
+      effectiveKm = Number(effectiveKm.toFixed(1));
+    }
     if (minKm > 0 && effectiveKm < minKm) effectiveKm = minKm;
     if (maxKm > 0 && effectiveKm > maxKm) effectiveKm = maxKm;
 
@@ -911,7 +922,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
         p_delivery_address: fullAddress,
         p_notes: compiledNotes || null,
         p_restaurant_id: restaurant?.id || null,
-        p_distance_km: distanceToSend,
+        p_distance_km: effectiveKm,
         p_preferred_driver_id: null,
       } as any);
 

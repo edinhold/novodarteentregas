@@ -133,7 +133,7 @@ async function fetchOSRMRoute(
       { profile }
     );
     return {
-      distanceKm: res.distanceKm,
+      distanceKm: Number(res.distanceKm.toFixed(1)),
       durationMin: res.durationMin,
       geometry: res.geometry,
     };
@@ -544,7 +544,9 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
 
   // Delivery config loaded for price calculations
   const configLoaded = !!configObj;
-  const baseFee = configObj?.base_fee != null && !isNaN(Number(configObj.base_fee)) ? Number(configObj.base_fee) : 5.3;
+  const baseFee = configObj?.base_fee != null && !isNaN(Number(configObj.base_fee)) && Number(configObj.base_fee) > 0
+    ? Number(configObj.base_fee)
+    : 5.4;
   const baseKmFee = configObj?.fee_per_km != null && !isNaN(Number(configObj.fee_per_km)) ? Number(configObj.fee_per_km) : 1.7;
   const rawDynamicEnabled = configObj?.dynamic_pricing_enabled;
   const dynamicEnabled = rawDynamicEnabled === true || rawDynamicEnabled === "true" || rawDynamicEnabled === 1 || rawDynamicEnabled === "1" || rawDynamicEnabled === "t";
@@ -564,13 +566,13 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
 
   // Distance logic: manual override > OSRM road > Haversine viário fallback calibrado (1.30)
   const autoDistanceKm = roadDistanceKm > 0
-    ? roadDistanceKm
+    ? Number(roadDistanceKm.toFixed(1))
     : (deliveryLatLng && storeLat && storeLng
         ? haversineRoadKm(storeLat, storeLng, deliveryLatLng[0], deliveryLatLng[1])
         : (hasDelivery ? (minKm > 0 ? minKm : 2.5) : 0));
 
   const rawDistanceKm = manualDistanceEnabled && parseFloat(manualDistanceKm) > 0
-    ? parseFloat(manualDistanceKm)
+    ? Number(parseFloat(manualDistanceKm).toFixed(1))
     : autoDistanceKm;
 
   // Apply km rules — MUST match server-side deduct_credits_for_delivery exactly
@@ -578,14 +580,19 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
   if (effectiveKm <= 0 && hasDelivery) {
     effectiveKm = minKm > 0 ? minKm : 1.0;
   }
-  if (roundKmUp && effectiveKm > 0) effectiveKm = Math.ceil(effectiveKm);
+  if (roundKmUp && effectiveKm > 0) {
+    effectiveKm = Math.ceil(effectiveKm);
+  } else if (effectiveKm > 0) {
+    effectiveKm = Number(effectiveKm.toFixed(1));
+  }
   if (minKm > 0 && effectiveKm < minKm) effectiveKm = minKm;
   if (maxKm > 0 && effectiveKm > maxKm) effectiveKm = maxKm;
 
   // Garante que o cálculo cobre saída + km rodados sem exceção
   const distanceKm = rawDistanceKm;
   const billableKm = effectiveKm > 0 ? effectiveKm : (hasDelivery ? (minKm > 0 ? minKm : 1.0) : 0);
-  const deliveryCost = configLoaded && (distanceKm > 0 || hasDelivery) ? Number((baseFee + feePerKm * billableKm).toFixed(2)) : null;
+  const kmCost = Number((feePerKm * billableKm).toFixed(2));
+  const deliveryCost = configLoaded && (distanceKm > 0 || hasDelivery) ? Number((baseFee + kmCost).toFixed(2)) : null;
 
   const distanceSource = manualDistanceEnabled && parseFloat(manualDistanceKm) > 0
     ? "manual"
@@ -1567,7 +1574,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
 
     setCalling(true);
     try {
-      const safeDistance = Math.max(finalDistance, minKm > 0 ? minKm : 1.0);
+      const safeDistance = billableKm > 0 ? billableKm : Math.max(Number(finalDistance.toFixed(1)), minKm > 0 ? minKm : 1.0);
       const { data: requestId, error } = await supabase.rpc("deduct_credits_for_delivery", {
         p_pickup_address: effectivePickup,
         p_delivery_address: finalDeliveryAddress,
@@ -2110,12 +2117,12 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
                     <strong className="text-foreground">R$ {(baseFee || 0).toFixed(2).replace(".", ",")}</strong>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span>KM rodado ({((distanceKm > 0 ? distanceKm : billableKm) || 0).toFixed(1)} km × R$ {(feePerKm || 0).toFixed(2).replace(".", ",")}/km):</span>
-                    <strong className="text-foreground">+ R$ {((feePerKm || 0) * (billableKm || 1.0)).toFixed(2).replace(".", ",")}</strong>
+                    <span>KM rodado ({(billableKm || 0).toFixed(1)} km × R$ {(feePerKm || 0).toFixed(2).replace(".", ",")}/km):</span>
+                    <strong className="text-foreground">+ R$ {(kmCost || 0).toFixed(2).replace(".", ",")}</strong>
                   </div>
                   <div className="flex items-center justify-between border-t border-border/50 pt-1 font-bold text-xs text-primary">
                     <span>Total da corrida (Saída + KM):</span>
-                    <span>R$ {(deliveryCost ?? (baseFee + (feePerKm * billableKm))).toFixed(2).replace(".", ",")}</span>
+                    <span>R$ {(deliveryCost ?? Number((baseFee + (kmCost || 0)).toFixed(2))).toFixed(2).replace(".", ",")}</span>
                   </div>
                 </div>
                 {isDynamicPricing && (

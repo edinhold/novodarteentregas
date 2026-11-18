@@ -52,7 +52,11 @@ function calculateRideFare(
   if (effectiveKm <= 0 && hasDeliveryAddress) {
     effectiveKm = minKm > 0 ? minKm : 1.0;
   }
-  if (roundKmUp && effectiveKm > 0) effectiveKm = Math.ceil(effectiveKm);
+  if (roundKmUp && effectiveKm > 0) {
+    effectiveKm = Math.ceil(effectiveKm);
+  } else if (effectiveKm > 0) {
+    effectiveKm = Number(effectiveKm.toFixed(1));
+  }
   if (minKm > 0 && effectiveKm < minKm) effectiveKm = minKm;
   if (maxKm > 0 && effectiveKm > maxKm) effectiveKm = maxKm;
 
@@ -223,6 +227,28 @@ describe("Verificação de Geocodificação e Cálculo de Corridas Conforme Conf
       expect(result.baseFee).toBe(0.00);
       // 0.00 + (5.0 * 2.00) = 10.00
       expect(result.totalCost).toBe(10.00);
+    });
+
+    it("garantia sênior: corrida de 4.3 km ou mais calcula exatamente saída (5.40) + km rodado (4.3 * 1.70 = 7.31) = 12.71", () => {
+      const adminConfig: DeliveryConfig = {
+        base_fee: 5.40,
+        fee_per_km: 1.70,
+        round_km_up: false,
+        dynamic_pricing_enabled: false,
+      };
+
+      const result = calculateRideFare(4.3, adminConfig);
+      expect(result.effectiveKm).toBe(4.3);
+      expect(result.baseFee).toBe(5.40);
+      expect(result.kmCost).toBe(7.31);
+      expect(result.totalCost).toBe(12.71);
+
+      // Corrida de 6.2 km (ex: Buritis ao Centro)
+      const result62 = calculateRideFare(6.2, adminConfig);
+      expect(result62.effectiveKm).toBe(6.2);
+      // 5.40 + (6.2 * 1.70 = 10.54) = 15.94
+      expect(result62.kmCost).toBe(10.54);
+      expect(result62.totalCost).toBe(15.94);
     });
   });
 });

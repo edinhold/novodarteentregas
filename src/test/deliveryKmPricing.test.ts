@@ -41,6 +41,8 @@ function calculateDeliveryFare(
   }
   if (config.round_km_up && effectiveKm > 0) {
     effectiveKm = Math.ceil(effectiveKm);
+  } else if (effectiveKm > 0) {
+    effectiveKm = Number(effectiveKm.toFixed(1));
   }
   if (config.min_km && config.min_km > 0 && effectiveKm < config.min_km) {
     effectiveKm = config.min_km;
@@ -242,6 +244,37 @@ describe("Cálculo de KM e Taxas da Corrida (Lojista chamando Motorista)", () =>
     expect(result.effectiveFeePerKm).toBe(1.70);
     expect(result.kmCost).toBe(5.10);
     expect(result.totalCost).toBe(10.40);
+  });
+
+  it("garantia sênior: corrida de 4.3 km calcula exatamente saída (5.40) + km rodado (4.3 * 1.70 = 7.31) = 12.71", () => {
+    const adminConfig: DeliveryConfig = {
+      base_fee: 5.4,
+      fee_per_km: 1.7,
+      min_km: 0,
+      max_km: 0,
+      round_km_up: false,
+      dynamic_pricing_enabled: false,
+      dynamic_fee_per_km: 0,
+    };
+
+    // Cenário 1: 4.3 km exatos
+    const resultExact = calculateDeliveryFare(4.3, adminConfig);
+    expect(resultExact.effectiveKm).toBe(4.3);
+    expect(resultExact.baseFee).toBe(5.4);
+    expect(resultExact.kmCost).toBe(7.31);
+    expect(resultExact.totalCost).toBe(12.71);
+
+    // Cenário 2: Rota GPS com pequenas frações (ex: 4.34 km da Mapbox) deve normalizar para 4.3 km
+    const resultFraction = calculateDeliveryFare(4.34, adminConfig);
+    expect(resultFraction.effectiveKm).toBe(4.3);
+    expect(resultFraction.kmCost).toBe(7.31);
+    expect(resultFraction.totalCost).toBe(12.71);
+
+    // Cenário 3: Corrida de 5.0 km
+    const result5Km = calculateDeliveryFare(5.0, adminConfig);
+    expect(result5Km.effectiveKm).toBe(5.0);
+    expect(result5Km.kmCost).toBe(8.50);
+    expect(result5Km.totalCost).toBe(13.90);
   });
 });
 
