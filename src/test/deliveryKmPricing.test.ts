@@ -276,5 +276,40 @@ describe("Cálculo de KM e Taxas da Corrida (Lojista chamando Motorista)", () =>
     expect(result5Km.kmCost).toBe(8.50);
     expect(result5Km.totalCost).toBe(13.90);
   });
+
+  it("garantia rigorosa: TODAS as distâncias cumprem estritamente a configuração saída + km rodado", () => {
+    const adminConfig: DeliveryConfig = {
+      base_fee: 5.40,
+      fee_per_km: 1.70,
+      min_km: 0,
+      max_km: 0,
+      round_km_up: false,
+      dynamic_pricing_enabled: false,
+    };
+
+    const testDistances = [
+      { km: 0.5, expectedKmCost: 0.85, expectedTotal: 6.25 },   // 5.40 + (0.5 * 1.70 = 0.85) = 6.25
+      { km: 1.0, expectedKmCost: 1.70, expectedTotal: 7.10 },   // 5.40 + (1.0 * 1.70 = 1.70) = 7.10
+      { km: 1.5, expectedKmCost: 2.55, expectedTotal: 7.95 },   // 5.40 + (1.5 * 1.70 = 2.55) = 7.95
+      { km: 2.0, expectedKmCost: 3.40, expectedTotal: 8.80 },   // 5.40 + (2.0 * 1.70 = 3.40) = 8.80
+      { km: 2.5, expectedKmCost: 4.25, expectedTotal: 9.65 },   // 5.40 + (2.5 * 1.70 = 4.25) = 9.65
+      { km: 3.0, expectedKmCost: 5.10, expectedTotal: 10.50 },  // 5.40 + (3.0 * 1.70 = 5.10) = 10.50
+      { km: 3.7, expectedKmCost: 6.29, expectedTotal: 11.69 },  // 5.40 + (3.7 * 1.70 = 6.29) = 11.69
+      { km: 4.0, expectedKmCost: 6.80, expectedTotal: 12.20 },  // 5.40 + (4.0 * 1.70 = 6.80) = 12.20
+      { km: 4.3, expectedKmCost: 7.31, expectedTotal: 12.71 },  // 5.40 + (4.3 * 1.70 = 7.31) = 12.71
+      { km: 5.0, expectedKmCost: 8.50, expectedTotal: 13.90 },  // 5.40 + (5.0 * 1.70 = 8.50) = 13.90
+      { km: 6.2, expectedKmCost: 10.54, expectedTotal: 15.94 }, // 5.40 + (6.2 * 1.70 = 10.54) = 15.94
+      { km: 8.0, expectedKmCost: 13.60, expectedTotal: 19.00 }, // 5.40 + (8.0 * 1.70 = 13.60) = 19.00
+      { km: 10.0, expectedKmCost: 17.00, expectedTotal: 22.40 },// 5.40 + (10.0 * 1.70 = 17.00) = 22.40
+    ];
+
+    for (const item of testDistances) {
+      const res = calculateDeliveryFare(item.km, adminConfig);
+      expect(res.baseFee).toBe(5.40);
+      expect(res.effectiveKm).toBe(item.km);
+      expect(res.kmCost).toBe(item.expectedKmCost);
+      expect(res.totalCost).toBe(item.expectedTotal);
+    }
+  });
 });
 
