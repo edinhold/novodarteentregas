@@ -342,7 +342,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
       } catch (e) {
         console.warn("[StoreModernDashboard] Erro RPC get_public_delivery_config:", e);
       }
-      const { data: tableData } = await supabase.from("delivery_config").select("*").limit(1).maybeSingle();
+      const { data: tableData } = await supabase.from("delivery_config").select("*").order("updated_at", { ascending: false }).limit(1).maybeSingle();
       return Array.isArray(tableData) ? tableData[0] : tableData;
     },
     staleTime: 1000 * 15, // 15s para atualizar taxas com rapidez caso o admin altere
@@ -390,6 +390,8 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
     if (!query || query.length < 3) {
       setAddressSuggestions([]);
       setShowSuggestions(false);
+      setDeliveryCoordinates(null);
+      setEstimatedDistanceKm(0);
       return;
     }
 
@@ -484,7 +486,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
 
         // Auto-fixa as coordenadas de entrega na primeira sugestão encontrada caso o lojista ainda não tenha marcado no mapa
         if (formatted.length > 0) {
-          setDeliveryCoordinates((prev) => prev ?? { lat: formatted[0].lat, lng: formatted[0].lng });
+          setDeliveryCoordinates({ lat: formatted[0].lat, lng: formatted[0].lng });
           if (!streetNumber && formatted[0].number) {
             setStreetNumber(formatted[0].number);
           }
@@ -655,8 +657,8 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
       };
     }
 
-    const baseFee = Number(deliveryConfig?.base_fee ?? 5.3) || 5.3;
-    const baseKmFee = Number(deliveryConfig?.fee_per_km ?? 1.7) || 1.7;
+    const baseFee = deliveryConfig?.base_fee != null && !isNaN(Number(deliveryConfig.base_fee)) ? Number(deliveryConfig.base_fee) : 5.3;
+    const baseKmFee = deliveryConfig?.fee_per_km != null && !isNaN(Number(deliveryConfig.fee_per_km)) ? Number(deliveryConfig.fee_per_km) : 1.7;
     const rawDynamicEnabled = deliveryConfig?.dynamic_pricing_enabled;
     const dynamicEnabled = rawDynamicEnabled === true || rawDynamicEnabled === "true" || rawDynamicEnabled === 1 || rawDynamicEnabled === "1" || rawDynamicEnabled === "t";
     const rawDynamicFee = Number(deliveryConfig?.dynamic_fee_per_km ?? 0);
@@ -707,8 +709,8 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
     if (minKm > 0 && effectiveKm < minKm) effectiveKm = minKm;
     if (maxKm > 0 && effectiveKm > maxKm) effectiveKm = maxKm;
 
-    const kmCost = effectiveKm * feePerKm;
-    const totalCost = baseFee + kmCost;
+    const kmCost = Number((effectiveKm * feePerKm).toFixed(2));
+    const totalCost = Number((baseFee + kmCost).toFixed(2));
 
     return {
       totalCost,
@@ -728,9 +730,10 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
   // Geocodifica e calcula automaticamente quando o lojista termina de digitar o endereço
   const handleAddressBlur = async () => {
     // Não ativa loadingRoute aqui para evitar cancelar o evento de clique/submit do botão no navegador
-    if (addressInput.trim().length >= 3 && !deliveryCoordinates) {
+    if (addressInput.trim().length >= 3) {
       try {
-        const geo = await geocodeAddress(`${addressInput.trim()}, Primavera do Leste`).catch(() => null);
+        const searchAddr = `${addressInput.trim()}${streetNumber.trim() ? `, ${streetNumber.trim()}` : ""}, Primavera do Leste`;
+        const geo = await geocodeAddress(searchAddr, { houseNumber: streetNumber.trim() || undefined }).catch(() => null);
         if (geo?.coordinates) {
           setDeliveryCoordinates({
             lat: geo.coordinates.latitude,
@@ -786,11 +789,12 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
     let finalCoordinates = deliveryCoordinates;
     let finalDistance = manualKmVal ?? estimatedDistanceKm;
 
-    // Se o usuário digitou mas não selecionou sugestão, geocodifica agora com suporte a Mapbox + Nominatim
-    if (!finalCoordinates) {
+    // Se o usuário digitou mas não selecionou sugestão ou distância ainda não calculada, geocodifica agora
+    if (!finalCoordinates || finalDistance <= 0) {
       try {
         setIsSubmitting(true);
-        const geo = await geocodeAddress(`${addressInput}, Primavera do Leste`);
+        const searchTarget = `${addressInput.trim()}${streetNumber.trim() ? `, ${streetNumber.trim()}` : ""}, Primavera do Leste`;
+        const geo = await geocodeAddress(searchTarget, { houseNumber: streetNumber.trim() || undefined });
         if (geo?.coordinates) {
           finalCoordinates = {
             lat: geo.coordinates.latitude,
@@ -878,8 +882,8 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
     const minKm = Number(deliveryConfig?.min_km ?? 0);
     const maxKm = Number(deliveryConfig?.max_km ?? 0);
     const roundKmUp = Boolean(deliveryConfig?.round_km_up ?? false);
-    const baseFee = Number(deliveryConfig?.base_fee ?? 5.3) || 5.3;
-    const baseKmFee = Number(deliveryConfig?.fee_per_km ?? 1.7) || 1.7;
+    const baseFee = deliveryConfig?.base_fee != null && !isNaN(Number(deliveryConfig.base_fee)) ? Number(deliveryConfig.base_fee) : 5.3;
+    const baseKmFee = deliveryConfig?.fee_per_km != null && !isNaN(Number(deliveryConfig.fee_per_km)) ? Number(deliveryConfig.fee_per_km) : 1.7;
     const rawDynamicEnabled = deliveryConfig?.dynamic_pricing_enabled;
     const dynamicEnabled = rawDynamicEnabled === true || rawDynamicEnabled === "true" || rawDynamicEnabled === 1 || rawDynamicEnabled === "1" || rawDynamicEnabled === "t";
     const rawDynamicFee = Number(deliveryConfig?.dynamic_fee_per_km ?? 0);
@@ -1351,6 +1355,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
                     type="text"
                     value={streetNumber}
                     onChange={(e) => setStreetNumber(e.target.value)}
+                    onBlur={handleAddressBlur}
                     placeholder="123"
                     className={`w-full px-3 py-2.5 rounded-xl border text-xs sm:text-sm transition outline-none ${
                       isDark

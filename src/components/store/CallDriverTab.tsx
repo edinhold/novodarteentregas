@@ -511,7 +511,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
       } catch (e) {
         console.warn("[CallDriverTab] Erro RPC get_public_delivery_config:", e);
       }
-      const { data: tableData } = await supabase.from("delivery_config").select("*").limit(1).maybeSingle();
+      const { data: tableData } = await supabase.from("delivery_config").select("*").order("updated_at", { ascending: false }).limit(1).maybeSingle();
       return Array.isArray(tableData) ? tableData[0] : tableData;
     },
     staleTime: 1000 * 15,
@@ -544,8 +544,8 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
 
   // Delivery config loaded for price calculations
   const configLoaded = !!configObj;
-  const baseFee = Number(configObj?.base_fee ?? 5.3) || 5.3;
-  const baseKmFee = Number(configObj?.fee_per_km ?? 1.7) || 1.7;
+  const baseFee = configObj?.base_fee != null && !isNaN(Number(configObj.base_fee)) ? Number(configObj.base_fee) : 5.3;
+  const baseKmFee = configObj?.fee_per_km != null && !isNaN(Number(configObj.fee_per_km)) ? Number(configObj.fee_per_km) : 1.7;
   const rawDynamicEnabled = configObj?.dynamic_pricing_enabled;
   const dynamicEnabled = rawDynamicEnabled === true || rawDynamicEnabled === "true" || rawDynamicEnabled === 1 || rawDynamicEnabled === "1" || rawDynamicEnabled === "t";
   const rawDynamicKmFee = Number(configObj?.dynamic_fee_per_km ?? 0);
@@ -1042,6 +1042,10 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
     if (address.trim().length < 3) {
       setAddressSuggestions([]);
       setShowSuggestions(false);
+      setDeliveryLatLng(null);
+      setRoadDistanceKm(0);
+      setRoadDurationMin(0);
+      setRouteCoords([]);
       return;
     }
 
@@ -1063,8 +1067,8 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
           setAddressSuggestions(mapped);
           setShowSuggestions(true);
 
-          // Auto-fixa as coordenadas de entrega na primeira sugestão encontrada caso o lojista ainda não tenha marcado no mapa
-          setDeliveryLatLng((prev) => prev ?? [suggestions[0].coordinates.latitude, suggestions[0].coordinates.longitude]);
+          // Atualiza as coordenadas de entrega na primeira sugestão encontrada
+          setDeliveryLatLng([suggestions[0].coordinates.latitude, suggestions[0].coordinates.longitude]);
         } else {
           setAddressSuggestions([]);
           setShowSuggestions(false);
@@ -1353,7 +1357,13 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
     setCallForm(f => ({ ...f, delivery: value }));
     setManualDistanceEnabled(false);
     geocodeDeliveryAddress(value);
-    if (value.trim().length < 5) {
+    if (value.trim().length < 3) {
+      setShowSuggestions(false);
+      setDeliveryLatLng(null);
+      setRoadDistanceKm(0);
+      setRoadDurationMin(0);
+      setRouteCoords([]);
+    } else if (value.trim().length < 5) {
       setShowSuggestions(false);
     }
   };
@@ -1607,7 +1617,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
         }
       } catch (e) {}
 
-      const finalCost = Number((baseFee + (feePerKm * safeDistance)).toFixed(2));
+      const finalCost = deliveryCost ?? Number((baseFee + (feePerKm * billableKm)).toFixed(2));
       toast.success(`Entregador chamado! Custo: R$ ${finalCost.toFixed(2).replace(".", ",")}`);
 
       const pickupAddr = restaurant?.address || callForm.pickup;
