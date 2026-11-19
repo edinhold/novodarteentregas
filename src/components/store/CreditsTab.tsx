@@ -20,7 +20,20 @@ const CreditsTab = ({ credits }: CreditsTabProps) => {
   const { data: config } = useQuery({
     queryKey: ["delivery-config"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("delivery_config").select("*").limit(1).maybeSingle();
+      try {
+        const { data, error } = await (supabase as any).rpc("get_public_delivery_config");
+        if (!error && data) {
+          return Array.isArray(data) ? data[0] : data;
+        }
+      } catch (e) {
+        console.warn("[CreditsTab] Erro RPC get_public_delivery_config:", e);
+      }
+      const { data, error } = await supabase
+        .from("delivery_config")
+        .select("*")
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
       if (error) throw error;
       return data;
     },

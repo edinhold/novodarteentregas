@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { DriverPhoto } from "@/components/DriverPhoto";
 import { normalizeWhatsAppNumber, formatPhoneNumber } from "@/lib/phoneUtils";
+import { resolveStoreDeliveryCost, type DeliveryPricingConfig } from "@/utils/deliveryPricing";
 import {
   Truck,
   Phone,
@@ -40,6 +41,7 @@ export interface ActiveDeliveryRequest {
   created_at?: string;
   credit_cost?: number;
   driver_fee?: number;
+  distance_km?: number;
 }
 
 interface DeliveryDriverRpcRow {
@@ -70,6 +72,7 @@ interface EdgeFunctionDriverResponse {
 
 interface AssignedDriverCardProps {
   activeRequest: ActiveDeliveryRequest | null;
+  deliveryConfig?: DeliveryPricingConfig | null;
   onCancelRequest?: (
     requestId: string,
     driverName?: string | null,
@@ -78,10 +81,35 @@ interface AssignedDriverCardProps {
   ) => void;
 }
 
-export const AssignedDriverCard = ({ activeRequest, onCancelRequest }: AssignedDriverCardProps) => {
+export const AssignedDriverCard = ({ activeRequest, deliveryConfig, onCancelRequest }: AssignedDriverCardProps) => {
   const assignedDriverId = activeRequest?.driver_id || null;
   const requestId = activeRequest?.id || null;
   const requestStatus = activeRequest?.status || "";
+
+  const { data: queriedConfig } = useQuery({
+    queryKey: ["delivery-config"],
+    queryFn: async () => {
+      try {
+        const { data, error } = await (supabase as any).rpc("get_public_delivery_config");
+        if (!error && data) {
+          return Array.isArray(data) ? data[0] : data;
+        }
+      } catch {
+        // fallback silencioso
+      }
+      const { data: tableData } = await supabase
+        .from("delivery_config")
+        .select("*")
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      return Array.isArray(tableData) ? tableData[0] : tableData;
+    },
+    enabled: !deliveryConfig,
+    staleTime: 1000 * 15,
+  });
+
+  const effectiveConfig = deliveryConfig ?? queriedConfig;
 
   // Motorista vinculado em qualquer status ativo diferente de pending/delivered/cancelled
   const isAcceptedOrTransit =
@@ -219,8 +247,8 @@ export const AssignedDriverCard = ({ activeRequest, onCancelRequest }: AssignedD
   if (!activeRequest) return null;
 
   const isPending = activeRequest.status === "pending" || !activeRequest.driver_id;
-  // Para o lojista, o valor real da corrida é o custo cobrado da loja (credit_cost / taxa total do lojista)
-  const deliveryValue = Number(activeRequest.credit_cost || (activeRequest as any).delivery_price || activeRequest.driver_fee || 0);
+  // Para o lojista, o valor real da corrida é o custo cobrado na carteira da loja (Saída + KM rodado)
+  const deliveryValue = resolveStoreDeliveryCost(activeRequest, effectiveConfig);
 
   // 1. ESTADO: AGUARDANDO MOTORISTA (Aguardando motorista aceitar a entrega)
   if (isPending) {

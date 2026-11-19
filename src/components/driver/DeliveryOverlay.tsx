@@ -27,7 +27,7 @@ const DeliveryOverlay = ({ delivery, state, secondsLeft = 0, permissionWarning, 
   const visible = !!delivery || state === "loading" || state === "error";
 
   const { data: config } = useQuery({
-    queryKey: ["delivery-config"],
+    queryKey: ["delivery-config-app-fee"],
     queryFn: async () => {
       const { data } = await supabase.from("delivery_config").select("app_fee_per_delivery").limit(1).maybeSingle();
       return data;

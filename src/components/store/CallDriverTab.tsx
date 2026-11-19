@@ -24,6 +24,7 @@ import { useDriverLocations } from "@/hooks/useDriverLocations";
 import L from "leaflet";
 import { MAP_LAYERS, resolveStoreCoordinates, isWithinPrimaveraBounds } from "@/config/maps";
 import { getBestLocation, isValidCoordinate } from "@/utils/geolocation";
+import { calculateDeliveryFare, getEffectiveDeliveryRates, resolveStoreDeliveryCost } from "@/utils/deliveryPricing";
 import {
   searchAddressSuggestions,
   geocodeAddress as geocodeAddressMapbox,
@@ -544,20 +545,14 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
 
   // Delivery config loaded for price calculations
   const configLoaded = !!configObj;
-  const baseFee = configObj?.base_fee != null && !isNaN(Number(configObj.base_fee)) && Number(configObj.base_fee) > 0
-    ? Number(configObj.base_fee)
-    : 5.4;
-  const baseKmFee = configObj?.fee_per_km != null && !isNaN(Number(configObj.fee_per_km)) ? Number(configObj.fee_per_km) : 1.7;
-  const rawDynamicEnabled = configObj?.dynamic_pricing_enabled;
-  const dynamicEnabled = rawDynamicEnabled === true || rawDynamicEnabled === "true" || rawDynamicEnabled === 1 || rawDynamicEnabled === "1" || rawDynamicEnabled === "t";
-  const rawDynamicKmFee = Number(configObj?.dynamic_fee_per_km ?? 0);
-  const dynamicKmFee = (dynamicEnabled && !isNaN(rawDynamicKmFee) && rawDynamicKmFee > 0) ? rawDynamicKmFee : 0;
-  const isDynamicPricing = dynamicEnabled && dynamicKmFee > 0;
-  // REGRA SÊNIOR: A taxa dinâmica SOMA com a taxa por km regular
-  const feePerKm = baseKmFee + dynamicKmFee;
-  const minKm = Number(configObj?.min_km ?? 0);
-  const maxKm = Number(configObj?.max_km ?? 0);
-  const roundKmUp = !!configObj?.round_km_up;
+  const {
+    baseFee,
+    baseKmFee,
+    dynamicFee: dynamicKmFee,
+    feePerKm,
+    minKm,
+    isDynamicActive: isDynamicPricing,
+  } = getEffectiveDeliveryRates(configObj);
 
   const hasDelivery = Boolean(callForm.delivery.trim().length >= 3);
   const fallbackCoords = resolveStoreCoordinates(restaurant);
@@ -571,28 +566,16 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
         ? haversineRoadKm(storeLat, storeLng, deliveryLatLng[0], deliveryLatLng[1])
         : (hasDelivery ? (minKm > 0 ? minKm : 2.5) : 0));
 
-  const rawDistanceKm = manualDistanceEnabled && parseFloat(manualDistanceKm) > 0
+  const manualKmVal = manualDistanceEnabled && parseFloat(manualDistanceKm) > 0
     ? Number(parseFloat(manualDistanceKm).toFixed(1))
-    : autoDistanceKm;
+    : null;
+  const rawDistanceKm = manualKmVal ?? autoDistanceKm;
 
-  // Apply km rules — MUST match server-side deduct_credits_for_delivery exactly
-  let effectiveKm = rawDistanceKm;
-  if (effectiveKm <= 0 && hasDelivery) {
-    effectiveKm = minKm > 0 ? minKm : 1.0;
-  }
-  if (roundKmUp && effectiveKm > 0) {
-    effectiveKm = Math.ceil(effectiveKm);
-  } else if (effectiveKm > 0) {
-    effectiveKm = Number(effectiveKm.toFixed(1));
-  }
-  if (minKm > 0 && effectiveKm < minKm) effectiveKm = minKm;
-  if (maxKm > 0 && effectiveKm > maxKm) effectiveKm = maxKm;
-
-  // Garante que o cálculo cobre saída + km rodados sem exceção
+  const calculatedFare = calculateDeliveryFare(rawDistanceKm, configObj, manualKmVal, hasDelivery || rawDistanceKm > 0);
   const distanceKm = rawDistanceKm;
-  const billableKm = effectiveKm > 0 ? effectiveKm : (hasDelivery ? (minKm > 0 ? minKm : 1.0) : 0);
-  const kmCost = Number((feePerKm * billableKm).toFixed(2));
-  const deliveryCost = configLoaded && (distanceKm > 0 || hasDelivery) ? Number((baseFee + kmCost).toFixed(2)) : null;
+  const billableKm = calculatedFare.effectiveKm;
+  const kmCost = calculatedFare.kmCost;
+  const deliveryCost = configLoaded && (distanceKm > 0 || hasDelivery) ? calculatedFare.totalCost : null;
 
   const distanceSource = manualDistanceEnabled && parseFloat(manualDistanceKm) > 0
     ? "manual"
@@ -1599,7 +1582,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
           updatePayload.pickup_lng = storeLng;
         }
         if (Object.keys(updatePayload).length > 0) {
-          void supabase
+          await supabase
             .from("delivery_requests")
             .update(updatePayload)
             .eq("id", requestId);
@@ -1657,6 +1640,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
       {activeRequest && (
         <AssignedDriverCard
           activeRequest={activeRequest}
+          deliveryConfig={configObj}
           onCancelRequest={handleCancelRequest}
         />
       )}
@@ -2297,8 +2281,8 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
                 const isFinished = ["delivered", "cancelled"].includes(r.status);
                 const canCancel = !isFinished;
                 const isPendingUnaccepted = r.status === "pending" || !r.driver_id;
-                // Para o lojista, o valor real da corrida é o custo cobrado da loja (credit_cost)
-                const deliveryVal = Number(r.credit_cost || (r as any).delivery_price || r.driver_fee || 0);
+                // Para o lojista, o valor real da corrida é o custo cobrado na carteira da loja (Saída + KM rodado)
+                const deliveryVal = resolveStoreDeliveryCost(r, configObj);
 
                 return (
                   <div key={r.id} className="p-3.5 sm:p-4 rounded-xl bg-card hover:bg-muted/40 transition-colors border border-border/70 shadow-sm space-y-3">

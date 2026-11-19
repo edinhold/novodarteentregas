@@ -36,6 +36,7 @@ import {
 import { searchAddressSuggestions, geocodeAddress, calculateRoute, detectLocationCategory } from "@/services/mapbox";
 import { DEFAULT_CENTER, resolveStoreCoordinates, formatStorePickupAddress, isWithinPrimaveraBounds } from "@/config/maps";
 import { isValidCoordinate } from "@/utils/geolocation";
+import { calculateDeliveryFare, getEffectiveDeliveryRates, resolveStoreDeliveryCost } from "@/utils/deliveryPricing";
 import { notifyAvailableDrivers } from "@/lib/push";
 import { useDriverLocations } from "@/hooks/useDriverLocations";
 import StoreMiniTrackingMap from "./StoreMiniTrackingMap";
@@ -641,37 +642,10 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
   const fareDetails = useMemo(() => {
     const hasAddress = Boolean(addressInput.trim().length >= 3);
     if (!hasAddress) {
-      return {
-        totalCost: null,
-        isCalculated: false,
-        effectiveKm: 0,
-        rawKm: 0,
-        feePerKm: 0,
-        baseFee: 0,
-        kmCost: 0,
-        baseKmFee: 0,
-        dynamicFee: 0,
-        isDynamicActive: false,
-        isManual: false,
-      };
+      return calculateDeliveryFare(0, deliveryConfig, null, false);
     }
 
-    const baseFee = deliveryConfig?.base_fee != null && !isNaN(Number(deliveryConfig.base_fee)) && Number(deliveryConfig.base_fee) > 0
-      ? Number(deliveryConfig.base_fee)
-      : 5.4;
-    const baseKmFee = deliveryConfig?.fee_per_km != null && !isNaN(Number(deliveryConfig.fee_per_km)) ? Number(deliveryConfig.fee_per_km) : 1.7;
-    const rawDynamicEnabled = deliveryConfig?.dynamic_pricing_enabled;
-    const dynamicEnabled = rawDynamicEnabled === true || rawDynamicEnabled === "true" || rawDynamicEnabled === 1 || rawDynamicEnabled === "1" || rawDynamicEnabled === "t";
-    const rawDynamicFee = Number(deliveryConfig?.dynamic_fee_per_km ?? 0);
-    const dynamicFee = (dynamicEnabled && !isNaN(rawDynamicFee) && rawDynamicFee > 0)
-      ? rawDynamicFee
-      : 0;
-    // REGRA SÊNIOR: A taxa dinâmica SOMA com a taxa regular por km (baseKmFee + dynamicFee)
-    const feePerKm = baseKmFee + dynamicFee;
-    const minKm = Number(deliveryConfig?.min_km ?? 0);
-    const maxKm = Number(deliveryConfig?.max_km ?? 0);
-    const roundKmUp = Boolean(deliveryConfig?.round_km_up ?? false);
-
+    const { minKm } = getEffectiveDeliveryRates(deliveryConfig);
     const manualKm = manualDistanceEnabled && parseFloat(manualDistanceKm) > 0 ? parseFloat(manualDistanceKm) : null;
 
     // Distância inteligente estimada de partida:
@@ -702,33 +676,10 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
       rawKm = minKm > 0 ? minKm : 2.5;
     }
 
-    let effectiveKm = rawKm;
-    if (effectiveKm <= 0) {
-      effectiveKm = minKm > 0 ? minKm : 1.0;
-    }
-    if (roundKmUp && effectiveKm > 0) {
-      effectiveKm = Math.ceil(effectiveKm);
-    } else if (effectiveKm > 0) {
-      effectiveKm = Number(effectiveKm.toFixed(1));
-    }
-    if (minKm > 0 && effectiveKm < minKm) effectiveKm = minKm;
-    if (maxKm > 0 && effectiveKm > maxKm) effectiveKm = maxKm;
-
-    const kmCost = Number((effectiveKm * feePerKm).toFixed(2));
-    const totalCost = Number((baseFee + kmCost).toFixed(2));
-
+    const calc = calculateDeliveryFare(rawKm, deliveryConfig, manualKm, true);
     return {
-      totalCost,
-      kmCost,
+      ...calc,
       isCalculated: (manualKm != null && manualKm > 0) || estimatedDistanceKm > 0,
-      effectiveKm,
-      rawKm,
-      feePerKm,
-      baseFee,
-      baseKmFee,
-      dynamicFee,
-      isDynamicActive: dynamicEnabled && dynamicFee > 0,
-      isManual: manualKm != null && manualKm > 0,
     };
   }, [deliveryConfig, estimatedDistanceKm, deliveryCoordinates, storeCoords, addressInput, manualDistanceEnabled, manualDistanceKm]);
 
@@ -884,36 +835,12 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
     const pickupAddress = formatStorePickupAddress(restaurant, restaurant?.address);
 
     // Configuração de precificação oficial do admin
-    const minKm = Number(deliveryConfig?.min_km ?? 0);
-    const maxKm = Number(deliveryConfig?.max_km ?? 0);
-    const roundKmUp = Boolean(deliveryConfig?.round_km_up ?? false);
-    const baseFee = deliveryConfig?.base_fee != null && !isNaN(Number(deliveryConfig.base_fee)) && Number(deliveryConfig.base_fee) > 0
-      ? Number(deliveryConfig.base_fee)
-      : 5.4;
-    const baseKmFee = deliveryConfig?.fee_per_km != null && !isNaN(Number(deliveryConfig.fee_per_km)) ? Number(deliveryConfig.fee_per_km) : 1.7;
-    const rawDynamicEnabled = deliveryConfig?.dynamic_pricing_enabled;
-    const dynamicEnabled = rawDynamicEnabled === true || rawDynamicEnabled === "true" || rawDynamicEnabled === 1 || rawDynamicEnabled === "1" || rawDynamicEnabled === "t";
-    const rawDynamicFee = Number(deliveryConfig?.dynamic_fee_per_km ?? 0);
-    const dynamicFee = (dynamicEnabled && !isNaN(rawDynamicFee) && rawDynamicFee > 0)
-      ? rawDynamicFee
-      : 0;
-    // REGRA SÊNIOR: A taxa dinâmica SOMA com a taxa regular por km
-    const feePerKm = baseKmFee + dynamicFee;
-
-    // Passa a quilometragem viária real calculada para o backend (mínimo garantido para saída + km)
+    const { minKm } = getEffectiveDeliveryRates(deliveryConfig);
     const rawDistanceToSend = manualKmVal ?? (finalDistance > 0 ? Number(finalDistance.toFixed(1)) : (fareDetails.rawKm > 0 ? fareDetails.rawKm : (minKm > 0 ? minKm : 2.5)));
     const distanceToSend = Math.max(rawDistanceToSend, minKm > 0 ? minKm : 1.0);
-
-    let effectiveKm = distanceToSend;
-    if (roundKmUp && effectiveKm > 0) {
-      effectiveKm = Math.ceil(effectiveKm);
-    } else if (effectiveKm > 0) {
-      effectiveKm = Number(effectiveKm.toFixed(1));
-    }
-    if (minKm > 0 && effectiveKm < minKm) effectiveKm = minKm;
-    if (maxKm > 0 && effectiveKm > maxKm) effectiveKm = maxKm;
-
-    const finalCalculatedCost = Number((baseFee + (effectiveKm * feePerKm)).toFixed(2));
+    const calculatedFare = calculateDeliveryFare(distanceToSend, deliveryConfig, manualKmVal, true);
+    const effectiveKm = calculatedFare.effectiveKm;
+    const finalCalculatedCost = Number(calculatedFare.totalCost ?? 0);
 
     setIsSubmitting(true);
     try {
@@ -930,7 +857,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
 
       // Grava imediatamente as coordenadas precisas de coleta e entrega e as observações completas na entrega criada
       if (requestId) {
-        void supabase
+        await supabase
           .from("delivery_requests")
           .update({
             pickup_address: pickupAddress,
@@ -1783,8 +1710,8 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
                   const isAccepted = req.status === "accepted";
                   const isTransit = req.status === "picked_up";
                   const isCancelled = req.status === "cancelled";
-                  // Para o lojista, o valor real da corrida é o custo cobrado da loja (credit_cost)
-                  const deliveryVal = Number(req.credit_cost || (req as any).delivery_price || req.driver_fee || 0);
+                  // Para o lojista, o valor real da corrida é o custo cobrado na carteira da loja (Saída + KM rodado)
+                  const deliveryVal = resolveStoreDeliveryCost(req, deliveryConfig);
 
                   return (
                     <div
@@ -2021,11 +1948,11 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
                     <p className="text-xs text-foreground">{selectedOrderDetails.notes}</p>
                   </div>
                 )}
-                {(selectedOrderDetails.credit_cost || (selectedOrderDetails as any).delivery_price || selectedOrderDetails.driver_fee) && (
+                {resolveStoreDeliveryCost(selectedOrderDetails, deliveryConfig) > 0 && (
                   <div className="flex items-center justify-between pt-1.5 border-t border-border/40">
                     <span className="text-[11px] font-semibold text-zinc-400">Valor da Corrida</span>
                     <span className="text-sm font-black text-[#EA580C]">
-                      R$ {Number(selectedOrderDetails.credit_cost || (selectedOrderDetails as any).delivery_price || selectedOrderDetails.driver_fee || 0).toFixed(2).replace(".", ",")}
+                      R$ {resolveStoreDeliveryCost(selectedOrderDetails, deliveryConfig).toFixed(2).replace(".", ",")}
                     </span>
                   </div>
                 )}
@@ -2036,6 +1963,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
                 <div className="pt-1">
                   <AssignedDriverCard
                     activeRequest={selectedOrderDetails}
+                    deliveryConfig={deliveryConfig}
                     onCancelRequest={(reqId, dName, isAcc, dDetails) => {
                       setSelectedOrderDetails(null);
                       onOpenCancelModal(reqId, dName, isAcc, dDetails);

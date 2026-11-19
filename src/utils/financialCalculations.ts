@@ -242,7 +242,8 @@ export const calculateFinancials = ({
     }
   });
 
-  const appFeePercent = Number(deliveryConfig?.app_fee_per_delivery || 10);
+  const rawAppFee = deliveryConfig?.app_fee_per_delivery;
+  const appFeePercent = rawAppFee != null && !isNaN(Number(rawAppFee)) ? Number(rawAppFee) : 2;
 
   // Totals accumulators
   let totalRecharges = 0;

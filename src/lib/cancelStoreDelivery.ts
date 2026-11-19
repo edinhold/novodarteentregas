@@ -45,7 +45,7 @@ export async function executeStoreDeliveryCancellation(
       // 2. Direct Fallback: Fetch request details
       const { data: request, error: fetchError } = await supabase
         .from("delivery_requests")
-        .select("id, status, credit_cost, group_id, store_owner_id, restaurant_id")
+        .select("id, status, credit_cost, driver_fee, group_id, store_owner_id, restaurant_id")
         .eq("id", requestId)
         .maybeSingle();
 
