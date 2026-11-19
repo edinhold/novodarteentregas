@@ -251,16 +251,18 @@ const DriverPanel = () => {
   });
 
   // Perfil efetivo com fallback instantâneo que impede o travamento da tela
-  const effectiveDriverProfile = driverProfile || getCachedDriverProfile(user?.id) || (user ? {
-    id: user.id,
-    user_id: user.id,
-    full_name: user.user_metadata?.full_name || "Motorista Parceiro",
-    phone: user.phone || "",
-    vehicle_type: "moto",
-    approval_status: "approved",
-    is_active: true,
-    is_online: false,
-  } : null);
+  const effectiveDriverProfile = useMemo(() => (
+    driverProfile || getCachedDriverProfile(user?.id) || (user ? {
+      id: user.id,
+      user_id: user.id,
+      full_name: user.user_metadata?.full_name || "Motorista Parceiro",
+      phone: user.phone || "",
+      vehicle_type: "moto",
+      approval_status: "approved",
+      is_active: true,
+      is_online: false,
+    } : null)
+  ), [driverProfile, user]);
 
   // Single instance of GPS tracking for the whole panel
   const trackingData = useGPSTracking({

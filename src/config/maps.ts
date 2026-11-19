@@ -235,7 +235,7 @@ export function formatStorePickupAddress(
     return `${storeName} - Primavera do Leste - MT`;
   }
 
-  let cleanAddr = rawAddr
+  const cleanAddr = rawAddr
     .replace(/,?\s*-?\s*Primavera do Leste(\s*-?\s*MT)?(\s*-?\s*Brasil)?/gi, "")
     .replace(/,\s*,/g, ",")
     .replace(/[,\s]+$/, "")
