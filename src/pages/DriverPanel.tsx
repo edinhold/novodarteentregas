@@ -25,6 +25,7 @@ import { cancelDeliveryNotification } from "@/lib/push";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
 import { showSafeNotification } from "@/lib/safeNotification";
 import { safeFormatTime, safeFormatDateTime, isFutureDate } from "@/lib/utils";
+import { calculateDriverAvailableBalance } from "@/utils/driverWalletBalance";
 
 import ChatWidget from "@/components/ChatWidget";
 import AdminSupportPanel from "@/components/AdminSupportPanel";
@@ -415,7 +416,7 @@ const DriverPanel = () => {
         .select("*")
         .eq("driver_user_id", user!.id)
         .order("created_at", { ascending: false })
-        .limit(10);
+        .limit(200);
       if (error) throw error;
       return data;
     },
@@ -914,12 +915,7 @@ const DriverPanel = () => {
   };
 
   const requestWithdrawal = async () => {
-    const totalPending = earnings
-      .filter((e: any) =>
-        (e.status === "pending" || (!hasActiveWithdrawalRequest && e.status === "requested")) &&
-        isThisMonth(new Date(e.created_at))
-      )
-      .reduce((sum: number, e: any) => sum + Number(e.amount), 0);
+    const totalPending = calculateDriverAvailableBalance(earnings, withdrawals);
 
     if (totalPending <= 0) {
       toast.error("Sem saldo disponível para saque no mês atual");
@@ -1019,14 +1015,11 @@ const DriverPanel = () => {
     .reduce((sum: number, e: any) => sum + Number(e.amount), 0);
 
   const weekdayNames = ["Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado"];
-  const hasActiveWithdrawalRequest = withdrawals.some((w: any) => w.status === "pending");
-  // Saldo Disponível considera estritamente os ganhos do mês atual (valores antigos não acumulam mais)
-  const pendingBalance = earnings
-    .filter((e: any) =>
-      (e.status === "pending" || (!hasActiveWithdrawalRequest && e.status === "requested")) &&
-      isThisMonth(new Date(e.created_at))
-    )
-    .reduce((sum: number, e: any) => sum + Number(e.amount), 0);
+  // Saldo Disponível mostra apenas o que o motorista tem para receber (sem somar valores já pagos/solicitados)
+  const pendingBalance = useMemo(
+    () => calculateDriverAvailableBalance(earnings, withdrawals),
+    [earnings, withdrawals]
+  );
 
   // Lista filtrada para o Histórico de Ganhos das Corridas
   const filteredEarnings = earnings.filter((e: any) => {

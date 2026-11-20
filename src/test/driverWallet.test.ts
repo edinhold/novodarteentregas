@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { calculateDriverAvailableBalance } from "@/utils/driverWalletBalance";
 
 describe("Blindagem da Carteira dos Motoristas e Integridade de Saldos", () => {
   const mockAppFeePercent = 10;
@@ -355,6 +356,49 @@ describe("Blindagem da Carteira dos Motoristas e Integridade de Saldos", () => {
 
       expect(totalPendingCurrentMonth).toBe(0);
       expect(totalPendingCurrentMonth <= 0).toBe(true);
+    });
+
+    it("não deve somar ganhos já recebidos/aprovados no Saldo Disponível (exibe apenas o que falta receber)", () => {
+      const refNow = new Date("2026-11-19T22:00:00-03:00");
+      const sameMonth = "2026-11-18T14:00:00-03:00";
+
+      // Caso 1: Saque anterior já foi aprovado ('approved'), mas earnings antigos ficaram com status 'requested'
+      const earningsAfterApproved = [
+        { amount: 50.0, status: "requested", created_at: sameMonth },
+        { amount: 30.0, status: "paid", created_at: sameMonth },
+        { amount: 25.5, status: "pending", created_at: sameMonth },
+      ];
+      const withdrawalsAfterApproved = [
+        { amount: 80.0, status: "approved", created_at: sameMonth },
+      ];
+
+      // Deve mostrar APENAS R$ 25,50 (o que falta receber), nunca 50 + 25,50 = 75,50!
+      expect(
+        calculateDriverAvailableBalance(earningsAfterApproved, withdrawalsAfterApproved, refNow)
+      ).toBe(25.5);
+
+      // Caso 2: Todos os ganhos do mês já foram pagos (0 pendente)
+      const allPaidEarnings = [
+        { amount: 100.0, status: "requested", created_at: sameMonth },
+      ];
+      const approvedWithdrawals = [
+        { amount: 100.0, status: "approved", created_at: sameMonth },
+      ];
+      expect(
+        calculateDriverAvailableBalance(allPaidEarnings, approvedWithdrawals, refNow)
+      ).toBe(0);
+
+      // Caso 3: Mesmo se earnings ainda estiverem 'pending', abate saques já aprovados/pendentes no mês
+      const unmigratedEarnings = [
+        { amount: 60.0, status: "pending", created_at: sameMonth },
+        { amount: 40.0, status: "pending", created_at: sameMonth },
+      ];
+      const partialApprovedWithdrawal = [
+        { amount: 60.0, status: "approved", created_at: sameMonth },
+      ];
+      expect(
+        calculateDriverAvailableBalance(unmigratedEarnings, partialApprovedWithdrawal, refNow)
+      ).toBe(40);
     });
   });
 });
