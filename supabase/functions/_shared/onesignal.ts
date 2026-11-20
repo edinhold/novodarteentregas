@@ -4,7 +4,7 @@ export function applyAndroidChannel(payload: Record<string, unknown>) {
   const channel = (
     Deno.env.get("ONESIGNAL_ANDROID_CHANNEL_ID") ||
     Deno.env.get("VITE_ONESIGNAL_ANDROID_CHANNEL_ID") ||
-    ""
+    "427c58c3-215f-491b-8fbe-8a5c8f94ebe2"
   ).trim();
 
   if (!channel || channel === "284688c6-d7ac-4e12-bce7-f38594dcf06c") return;

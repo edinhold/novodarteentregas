@@ -121,7 +121,7 @@ function applyAndroidChannel(payload: Record<string, any>) {
   const channel =
     getEnvVar("ONESIGNAL_ANDROID_CHANNEL_ID") ||
     getEnvVar("VITE_ONESIGNAL_ANDROID_CHANNEL_ID") ||
-    "";
+    "427c58c3-215f-491b-8fbe-8a5c8f94ebe2";
 
   const trimmed = channel ? channel.trim() : "";
   if (!trimmed || trimmed === "284688c6-d7ac-4e12-bce7-f38594dcf06c") return;

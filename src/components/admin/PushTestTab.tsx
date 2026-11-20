@@ -111,7 +111,7 @@ async function fetchDiagnosticsFallback() {
       app_id_masked: "Servidor Supabase",
       app_id_present: true,
       api_key_present: true,
-      android_channel_id: (import.meta.env.VITE_ONESIGNAL_ANDROID_CHANNEL_ID || "").trim() || "Padrão (Default)",
+      android_channel_id: (import.meta.env.VITE_ONESIGNAL_ANDROID_CHANNEL_ID || "").trim() || "427c58c3-215f-491b-8fbe-8a5c8f94ebe2",
       online_window_minutes: ONLINE_WINDOW_MINUTES,
     },
     drivers: list,
@@ -285,7 +285,7 @@ async function sendPushTestDirectFallback(body: Record<string, unknown>) {
     ttl: 120,
   };
 
-  const channelEnv = (import.meta.env.VITE_ONESIGNAL_ANDROID_CHANNEL_ID || "").trim();
+  const channelEnv = (import.meta.env.VITE_ONESIGNAL_ANDROID_CHANNEL_ID || "427c58c3-215f-491b-8fbe-8a5c8f94ebe2").trim();
   if (channelEnv) {
     if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(channelEnv)) {
       payload.android_channel_id = channelEnv;
