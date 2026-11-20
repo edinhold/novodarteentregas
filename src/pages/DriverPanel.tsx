@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase, createFreshChannel } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
