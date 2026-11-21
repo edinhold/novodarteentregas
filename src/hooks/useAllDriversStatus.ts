@@ -10,6 +10,10 @@ export interface DriverWithLocation {
   user_id: string;
   full_name: string;
   driver_code: string;
+  phone: string | null;
+  photo_url: string | null;
+  vehicle_plate: string | null;
+  vehicle_type: string | null;
   is_active: boolean;
   latitude: number | null;
   longitude: number | null;
@@ -49,12 +53,19 @@ export const useAllDriversStatus = () => {
   return useQuery({
     queryKey: ["all_drivers_status"],
     queryFn: async () => {
-      // 1. Fetch all drivers
+      // 1. Fetch all drivers with credentials
       const { data: drivers, error: driversError } = await supabase
         .from("drivers")
-        .select("id, user_id, full_name, driver_code, is_active");
+        .select("id, user_id, full_name, driver_code, phone, photo_url, vehicle_plate, vehicle_type, is_active");
       
       if (driversError) throw driversError;
+
+      // 1b. Fetch profiles fallback for phone / avatar_url
+      const userIds = (drivers || []).map((d: any) => d.user_id).filter(Boolean);
+      const { data: profiles } = userIds.length > 0
+        ? await supabase.from("profiles").select("id, full_name, phone, avatar_url").in("id", userIds)
+        : { data: [] as any[] };
+      const profileMap = new Map((profiles || []).map((p: any) => [p.id, p]));
 
       // 2. Fetch all latest locations
       const { data: locations, error: locationsError } = await supabase
@@ -79,6 +90,7 @@ export const useAllDriversStatus = () => {
       const combined: DriverWithLocation[] = drivers.map(driver => {
         const location = locationMap.get(driver.user_id);
         const activeDelivery = deliveryMap.get(driver.user_id);
+        const profile = profileMap.get(driver.user_id);
 
         let status: DriverStatus = "inactive";
         if (driver.is_active) {
@@ -88,8 +100,12 @@ export const useAllDriversStatus = () => {
         return {
           id: driver.id,
           user_id: driver.user_id,
-          full_name: driver.full_name || "Motorista sem nome",
+          full_name: driver.full_name || profile?.full_name || "Motorista sem nome",
           driver_code: driver.driver_code || "---",
+          phone: driver.phone || profile?.phone || null,
+          photo_url: driver.photo_url || profile?.avatar_url || null,
+          vehicle_plate: driver.vehicle_plate || null,
+          vehicle_type: driver.vehicle_type || null,
           is_active: driver.is_active,
           latitude: location?.latitude || null,
           longitude: location?.longitude || null,
