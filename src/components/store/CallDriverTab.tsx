@@ -4,7 +4,7 @@ import AssignedDriverCard from "@/components/store/AssignedDriverCard";
 import MapErrorBoundary from "@/components/MapErrorBoundary";
 import { DriverPhoto } from "@/components/DriverPhoto";
 import { normalizeWhatsAppNumber, formatPhoneNumber } from "@/lib/phoneUtils";
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,10 +21,11 @@ import { isToday } from "date-fns";
 import ReportLocationButton from "@/components/ReportLocationButton";
 import ChatWidget from "@/components/ChatWidget";
 import { useDriverLocations } from "@/hooks/useDriverLocations";
-import L from "leaflet";
-import { MAP_LAYERS, resolveStoreCoordinates, isWithinPrimaveraBounds } from "@/config/maps";
+import { resolveStoreCoordinates, isWithinPrimaveraBounds } from "@/config/maps";
 import { getBestLocation, isValidCoordinate } from "@/utils/geolocation";
 import { calculateDeliveryFare, getEffectiveDeliveryRates, resolveStoreDeliveryCost } from "@/utils/deliveryPricing";
+import { latLngArrayToLiteralPath } from "@/utils/googleMapsLoader";
+import GoogleMapView from "@/components/maps/GoogleMapView";
 import {
   searchAddressSuggestions,
   geocodeAddress as geocodeAddressMapbox,
@@ -32,44 +33,6 @@ import {
   calculateRoute,
   MapboxParsedAddress,
 } from "@/services/mapbox";
-
-import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
-import markerIcon from "leaflet/dist/images/marker-icon.png";
-import markerShadow from "leaflet/dist/images/marker-shadow.png";
-
-delete (L.Icon.Default.prototype as any)._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: markerIcon2x,
-  iconUrl: markerIcon,
-  shadowUrl: markerShadow,
-});
-
-const storeIcon = new L.Icon({
-  iconUrl: "data:image/svg+xml," + encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="%23e53935" stroke="white" stroke-width="1.5"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3" fill="white"/></svg>`
-  ),
-  iconSize: [32, 32],
-  iconAnchor: [16, 32],
-  popupAnchor: [0, -32],
-});
-
-const deliveryIcon = new L.Icon({
-  iconUrl: "data:image/svg+xml," + encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="%2322c55e" stroke="white" stroke-width="1.5"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3" fill="white"/></svg>`
-  ),
-  iconSize: [32, 32],
-  iconAnchor: [16, 32],
-  popupAnchor: [0, -32],
-});
-
-const driverMapIcon = new L.Icon({
-  iconUrl: "data:image/svg+xml," + encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="%233b82f6" stroke="white" stroke-width="2"><circle cx="12" cy="12" r="8"/><path d="M12 6v6l3 3" stroke="white" stroke-width="2" fill="none"/></svg>`
-  ),
-  iconSize: [28, 28],
-  iconAnchor: [14, 14],
-  popupAnchor: [0, -14],
-});
 
 // Haversine as fallback only
 function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -491,14 +454,8 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
   const [manualDistanceEnabled, setManualDistanceEnabled] = useState(false);
   const [manualDistanceKm, setManualDistanceKm] = useState("");
 
-  const mapRef = useRef<L.Map | null>(null);
-  const tileLayerRef = useRef<L.TileLayer | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [mapType, setMapType] = useState<keyof typeof MAP_LAYERS>("google");
-  const storeMarkerRef = useRef<L.Marker | null>(null);
-  const deliveryMarkerRef = useRef<L.Marker | null>(null);
-  const routeLineRef = useRef<L.Polyline | null>(null);
-  const driverMarkersRef = useRef<L.Marker[]>([]);
+  const [mapType, setMapType] = useState<"roadmap" | "satellite">("roadmap");
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { data: deliveryConfig } = useQuery({
@@ -1094,12 +1051,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
     setAddressSuggestions([]);
     setShowSuggestions(false);
     setManualDistanceEnabled(false);
-
-    if (mapRef.current && storeLat && storeLng) {
-      const bounds = L.latLngBounds([[storeLat, storeLng], [lat, lng]]);
-      mapRef.current.fitBounds(bounds, { padding: [40, 40] });
-    }
-  }, [storeLat, storeLng, callForm.delivery_number]);
+  }, []);
 
   // Close suggestions on click outside
   useEffect(() => {
@@ -1112,176 +1064,6 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Initialize map safely
-  useEffect(() => {
-    if (!containerRef.current || mapRef.current) return;
-    if ((containerRef.current as any)._leaflet_id) return;
-
-    try {
-      const center: [number, number] = storeLat && storeLng
-        ? [storeLat, storeLng]
-        : [-15.5454, -54.2958];
-
-      const map = L.map(containerRef.current, {
-        doubleClickZoom: false,
-      }).setView(center, 14);
-      mapRef.current = map;
-      
-      tileLayerRef.current = L.tileLayer(MAP_LAYERS[mapType].url, {
-        attribution: MAP_LAYERS[mapType].attribution,
-        maxZoom: String(mapType).includes("satellite") || String(mapType).includes("google") ? 20 : 19,
-      }).addTo(map);
-
-      map.on("click", async (e: L.LeafletMouseEvent) => {
-        const { lat, lng } = e.latlng;
-        if (!isValidCoordinate(lat, lng)) return;
-
-        if (pinPlacementModeRef.current === "store") {
-          await updateStoreLocationFromCoords(lat, lng);
-        } else {
-          await updateDeliveryLocationFromCoords(lat, lng);
-        }
-      });
-    } catch (err) {
-      console.error("[CallDriverTab] Map init error:", err);
-    }
-
-    return () => {
-      try {
-        if (mapRef.current) {
-          mapRef.current.remove();
-          mapRef.current = null;
-        }
-        tileLayerRef.current = null;
-        if (containerRef.current) {
-          delete (containerRef.current as any)._leaflet_id;
-        }
-      } catch (err) {
-        console.error("[CallDriverTab] Map cleanup error:", err);
-      }
-    };
-  }, [storeLat, storeLng, mapType, formatAddress, updateStoreLocationFromCoords, updateDeliveryLocationFromCoords]);
-
-  // Update tile layer if mapType changed
-  useEffect(() => {
-    const map = mapRef.current;
-    if (tileLayerRef.current && map) {
-      const currentUrl = MAP_LAYERS[mapType].url;
-      if ((tileLayerRef.current as any)._url !== currentUrl) {
-        map.removeLayer(tileLayerRef.current);
-        tileLayerRef.current = L.tileLayer(currentUrl, {
-          attribution: MAP_LAYERS[mapType].attribution,
-          maxZoom: String(mapType).includes("satellite") || String(mapType).includes("google") ? 20 : 19,
-        }).addTo(map);
-      }
-    }
-  }, [mapType]);
-
-  // Update store marker (arrastável para fixação manual exata)
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !isValidCoordinate(storeLat, storeLng)) return;
-
-    try {
-      if (storeMarkerRef.current) {
-        try {
-          map.removeLayer(storeMarkerRef.current);
-        } catch {}
-      }
-
-      storeMarkerRef.current = L.marker([storeLat, storeLng], {
-        icon: storeIcon,
-        draggable: true,
-      })
-        .addTo(map)
-        .bindPopup(`<b>🏪 ${restaurant?.name || "Sua Loja"}</b><br><small>Arraste para fixar a localização exata da sua loja</small>`);
-
-      storeMarkerRef.current.on("dragend", async () => {
-        try {
-          const pos = storeMarkerRef.current?.getLatLng();
-          if (pos && isValidCoordinate(pos.lat, pos.lng)) {
-            await updateStoreLocationFromCoords(pos.lat, pos.lng);
-          }
-        } catch (err) {
-          console.error("Store marker drag error:", err);
-        }
-      });
-
-      // Only set view if not manual dragging or searching
-      if (!deliveryLatLng && !searchingAddress) {
-        map.setView([storeLat, storeLng], map.getZoom());
-      }
-    } catch (err) {
-      console.warn("[CallDriverTab] Erro ao atualizar marcador da loja:", err);
-    }
-  }, [storeLat, storeLng, restaurant?.name, updateStoreLocationFromCoords]);
-
-  // Update delivery marker + route line
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-
-    try {
-      if (deliveryMarkerRef.current) {
-        try {
-          map.removeLayer(deliveryMarkerRef.current);
-        } catch {}
-        deliveryMarkerRef.current = null;
-      }
-      if (routeLineRef.current) {
-        try {
-          map.removeLayer(routeLineRef.current);
-        } catch {}
-        routeLineRef.current = null;
-      }
-
-      if (deliveryLatLng && isValidCoordinate(deliveryLatLng[0], deliveryLatLng[1])) {
-        deliveryMarkerRef.current = L.marker(deliveryLatLng, { icon: deliveryIcon, draggable: true })
-          .addTo(map)
-          .bindPopup("<b>📍 Ponto de Entrega</b><br><small>Arraste para ajustar o destino</small>")
-          .openPopup();
-
-        // Reverse geocode on drag end
-        deliveryMarkerRef.current.on("dragend", async () => {
-          try {
-            const pos = deliveryMarkerRef.current?.getLatLng();
-            if (pos && isValidCoordinate(pos.lat, pos.lng)) {
-              await updateDeliveryLocationFromCoords(pos.lat, pos.lng);
-            }
-          } catch (err) {
-            console.error("Marker drag geocode error:", err);
-          }
-        });
-
-        if (isValidCoordinate(storeLat, storeLng)) {
-          const lineCoords = routeCoords.length > 0
-            ? routeCoords
-            : [[storeLat, storeLng] as [number, number], deliveryLatLng];
-
-          const profileColors: Record<RouteProfile, string> = {
-            driving: "hsl(var(--primary))",
-            cycling: "#22c55e",
-            walking: "#f59e0b",
-          };
-
-          routeLineRef.current = L.polyline(lineCoords, {
-            color: routeCoords.length > 0 ? profileColors[routeProfile] : "#94a3b8",
-            weight: routeCoords.length > 0 ? 5 : 3,
-            dashArray: routeCoords.length > 0 ? undefined : "8 4",
-            opacity: 0.85,
-          }).addTo(map);
-
-          const bounds = routeLineRef.current.getBounds();
-          if (bounds.isValid()) {
-            map.fitBounds(bounds, { padding: [40, 40] });
-          }
-        }
-      }
-    } catch (err) {
-      console.warn("[CallDriverTab] Erro no efeito de rota de entrega:", err);
-    }
-  }, [deliveryLatLng, storeLat, storeLng, routeCoords, routeProfile, updateDeliveryLocationFromCoords]);
-
   // Driver markers + nearest
   const [nearestDriverInfo, setNearestDriverInfo] = useState<{
     distanceKm: number;
@@ -1290,35 +1072,48 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
   } | null>(null);
   const proximityAlertRef = useRef(false);
 
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-
-    try {
-      driverMarkersRef.current.forEach((m) => {
-        try {
-          map.removeLayer(m);
-        } catch {}
+  const driverExtraMarkers = useMemo(() => {
+    const markers: Array<{ id: string; lat: number; lng: number; title: string; color: string; infoHtml: string }> = [];
+    (Array.isArray(driverLocations) ? driverLocations : []).forEach((d: any, idx: number) => {
+      if (!d) return;
+      const lat = Number(d.latitude);
+      const lng = Number(d.longitude);
+      if (!isValidCoordinate(lat, lng)) return;
+      const speedKmh = d.speed ? Math.round(d.speed * 3.6) : 0;
+      markers.push({
+        id: String(d.driver_id || d.user_id || idx),
+        lat,
+        lng,
+        title: "Entregador",
+        color: "#3b82f6",
+        infoHtml: `<div style="color:#111;font-size:12px;"><b>🚴 Entregador</b><br/>${speedKmh > 0 ? `${speedKmh} km/h` : "Parado"}</div>`,
       });
-      driverMarkersRef.current = [];
+    });
+    return markers;
+  }, [driverLocations]);
 
+  const googleRoutePath = useMemo(() => {
+    if (routeCoords.length > 0) {
+      return latLngArrayToLiteralPath(routeCoords);
+    }
+    if (deliveryLatLng && isValidCoordinate(storeLat, storeLng) && isValidCoordinate(deliveryLatLng[0], deliveryLatLng[1])) {
+      return [
+        { lat: storeLat, lng: storeLng },
+        { lat: deliveryLatLng[0], lng: deliveryLatLng[1] },
+      ];
+    }
+    return [];
+  }, [routeCoords, deliveryLatLng, storeLat, storeLng]);
+
+  useEffect(() => {
+    try {
       let nearest: typeof nearestDriverInfo = null;
-
       (Array.isArray(driverLocations) ? driverLocations : []).forEach((d: any) => {
         if (!d) return;
         const lat = Number(d.latitude);
         const lng = Number(d.longitude);
         if (!isValidCoordinate(lat, lng)) return;
-
         const speedKmh = d.speed ? Math.round(d.speed * 3.6) : 0;
-        try {
-          const marker = L.marker([lat, lng], { icon: driverMapIcon })
-            .addTo(map)
-            .bindPopup(`<b>🚴 Entregador</b><br/>${speedKmh > 0 ? `${speedKmh} km/h` : "Parado"}`);
-          driverMarkersRef.current.push(marker);
-        } catch (err) {
-          console.warn("[CallDriverTab] Erro ao criar marcador do motorista:", err);
-        }
 
         if (isValidCoordinate(storeLat, storeLng)) {
           const dist = haversineKm(storeLat, storeLng, lat, lng);
@@ -1380,13 +1175,6 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
       if (parsed?.coordinates) {
         setDeliveryLatLng([parsed.coordinates.latitude, parsed.coordinates.longitude]);
         setManualDistanceEnabled(false);
-        if (mapRef.current && storeLat && storeLng) {
-          const bounds = L.latLngBounds([
-            [storeLat, storeLng],
-            [parsed.coordinates.latitude, parsed.coordinates.longitude],
-          ]);
-          mapRef.current.fitBounds(bounds, { padding: [40, 40] });
-        }
         return;
       }
     } catch {
@@ -1398,13 +1186,6 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
       if (parsedStreet?.coordinates) {
         setDeliveryLatLng([parsedStreet.coordinates.latitude, parsedStreet.coordinates.longitude]);
         setManualDistanceEnabled(false);
-        if (mapRef.current && storeLat && storeLng) {
-          const bounds = L.latLngBounds([
-            [storeLat, storeLng],
-            [parsedStreet.coordinates.latitude, parsedStreet.coordinates.longitude],
-          ]);
-          mapRef.current.fitBounds(bounds, { padding: [40, 40] });
-        }
       }
     } catch (e) {
       console.warn("Geocodificação de rua fallback falhou:", e);
@@ -1727,15 +1508,11 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
             <Button
               variant="outline"
               size="sm"
-              onClick={() => {
-                const types: (keyof typeof MAP_LAYERS)[] = ["google", "streets", "satellite"];
-                const next = types[(types.indexOf(mapType) + 1) % types.length];
-                setMapType(next);
-              }}
+              onClick={() => setMapType((m) => (m === "roadmap" ? "satellite" : "roadmap"))}
               className="gap-1 text-xs h-7"
             >
               <Layers className="w-3 h-3" />
-              {mapType === "google" ? "Google" : mapType === "streets" ? "OSM" : "Satélite"}
+              {mapType === "roadmap" ? "Satélite" : "Ruas"}
             </Button>
           </div>
         </CardHeader>
@@ -1790,7 +1567,60 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
             </div>
           </div>
 
-          <div ref={containerRef} style={{ width: "100%", height: 320, borderRadius: 8 }} className="border border-border" />
+          <div ref={containerRef} style={{ width: "100%", height: 320, borderRadius: 8 }} className="border border-border overflow-hidden">
+            <GoogleMapView
+              origin={
+                isValidCoordinate(storeLat, storeLng)
+                  ? {
+                      lat: storeLat,
+                      lng: storeLng,
+                      name: restaurant?.name || "Sua Loja",
+                      draggable: true,
+                      onDragEnd: (lat, lng) => void updateStoreLocationFromCoords(lat, lng),
+                    }
+                  : null
+              }
+              stops={
+                deliveryLatLng && isValidCoordinate(deliveryLatLng[0], deliveryLatLng[1])
+                  ? [
+                      {
+                        id: "call-driver-delivery",
+                        lat: deliveryLatLng[0],
+                        lng: deliveryLatLng[1],
+                        label: callForm.delivery || "Ponto de Entrega",
+                        draggable: true,
+                        onDragEnd: (lat, lng) => void updateDeliveryLocationFromCoords(lat, lng),
+                      },
+                    ]
+                  : []
+              }
+              extraMarkers={driverExtraMarkers}
+              routePath={googleRoutePath}
+              routeColor={
+                routeCoords.length > 0
+                  ? routeProfile === "cycling"
+                    ? "#22c55e"
+                    : routeProfile === "walking"
+                    ? "#f59e0b"
+                    : "#EA580C"
+                  : "#94a3b8"
+              }
+              routeWeight={routeCoords.length > 0 ? 5 : 3}
+              routeDashed={routeCoords.length === 0}
+              mapType={mapType === "satellite" ? "hybrid" : "roadmap"}
+              autoFitBounds={true}
+              fitPadding={40}
+              onMapClick={(lat, lng) => {
+                if (!isValidCoordinate(lat, lng)) return;
+                if (pinPlacementModeRef.current === "store") {
+                  void updateStoreLocationFromCoords(lat, lng);
+                } else {
+                  void updateDeliveryLocationFromCoords(lat, lng);
+                }
+              }}
+              className="w-full h-full"
+            />
+          </div>
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
             <div className="flex flex-wrap gap-3">
               <span className="flex items-center gap-1 font-medium text-red-600 dark:text-red-400">

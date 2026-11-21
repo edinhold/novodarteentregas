@@ -1,10 +1,9 @@
-import React, { useEffect, useRef, useState } from "react";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
-import { DEFAULT_CENTER, MAP_LAYERS } from "@/config/maps";
+import React, { useEffect, useState } from "react";
 import { calculateRoute } from "@/services/mapbox";
 import { isValidCoordinate } from "@/utils/geolocation";
-import { Maximize2, Crosshair, Navigation } from "lucide-react";
+import { latLngArrayToLiteralPath, type LatLngLiteral } from "@/utils/googleMapsLoader";
+import GoogleMapView from "@/components/maps/GoogleMapView";
+import { Maximize2, Crosshair } from "lucide-react";
 
 interface StoreMiniTrackingMapProps {
   pickupLocation?: { lat: number; lng: number; name?: string; address?: string } | null;
@@ -15,58 +14,6 @@ interface StoreMiniTrackingMapProps {
   statusText?: string;
 }
 
-// Ícone personalizado de motocicleta em círculo laranja com sombra e halo pulsante
-const createMotorcycleIcon = () => {
-  return L.divIcon({
-    className: "store-motorcycle-nav-icon",
-    html: `
-      <div style="width: 38px; height: 38px; position: relative; display: flex; align-items: center; justify-content: center;">
-        <div style="position: absolute; inset: -4px; background: rgba(234, 88, 12, 0.3); border-radius: 9999px; animation: ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;"></div>
-        <div style="width: 32px; height: 32px; background: #EA580C; border: 2.5px solid #ffffff; border-radius: 9999px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 14px rgba(0,0,0,0.45); z-index: 10;">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="18.5" cy="17.5" r="3.5"/>
-            <circle cx="5.5" cy="17.5" r="3.5"/>
-            <circle cx="15" cy="5" r="1"/>
-            <path d="M12 17.5V14l-3-3 4-3 2 3h2"/>
-          </svg>
-        </div>
-      </div>
-    `,
-    iconSize: [38, 38],
-    iconAnchor: [19, 19],
-  });
-};
-
-// Ícone do destino da entrega (pino azul com centro branco)
-const deliveryTargetIcon = L.divIcon({
-  className: "store-delivery-target-icon",
-  html: `
-    <div style="width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; position: relative;">
-      <div style="position: absolute; width: 28px; height: 28px; background: rgba(37, 99, 235, 0.25); border-radius: 9999px;"></div>
-      <div style="width: 20px; height: 20px; background: #2563EB; border: 2.5px solid #ffffff; border-radius: 9999px; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 10px rgba(0,0,0,0.4);">
-        <div style="width: 6px; height: 6px; background: #ffffff; border-radius: 9999px;"></div>
-      </div>
-    </div>
-  `,
-  iconSize: [28, 28],
-  iconAnchor: [14, 14],
-});
-
-// Ícone da loja (ponto de coleta - verde esmeralda)
-const storePickupIcon = L.divIcon({
-  className: "store-pickup-marker-icon",
-  html: `
-    <div style="width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; position: relative;">
-      <div style="position: absolute; width: 28px; height: 28px; background: rgba(16, 185, 129, 0.25); border-radius: 9999px;"></div>
-      <div style="width: 20px; height: 20px; background: #10B981; border: 2.5px solid #ffffff; border-radius: 9999px; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 10px rgba(0,0,0,0.4);">
-        <div style="width: 6px; height: 6px; background: #ffffff; border-radius: 9999px;"></div>
-      </div>
-    </div>
-  `,
-  iconSize: [28, 28],
-  iconAnchor: [14, 14],
-});
-
 export const StoreMiniTrackingMap: React.FC<StoreMiniTrackingMapProps> = ({
   pickupLocation,
   deliveryLocation,
@@ -75,247 +22,123 @@ export const StoreMiniTrackingMap: React.FC<StoreMiniTrackingMapProps> = ({
   onExpand,
   statusText,
 }) => {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<L.Map | null>(null);
-  const routeLineRef = useRef<L.Polyline | null>(null);
-  const driverMarkerRef = useRef<L.Marker | null>(null);
-  const deliveryMarkerRef = useRef<L.Marker | null>(null);
-  const pickupMarkerRef = useRef<L.Marker | null>(null);
   const [routeDistance, setRouteDistance] = useState<string | null>(null);
-  const [mapInitFailed, setMapInitFailed] = useState(false);
+  const [routePath, setRoutePath] = useState<LatLngLiteral[]>([]);
+  const [routeDashed, setRouteDashed] = useState(false);
+  const [recenterTrigger, setRecenterTrigger] = useState(0);
 
-  // Inicializa o mapa Leaflet
+  const hasPickup = isValidCoordinate(pickupLocation?.lat, pickupLocation?.lng);
+  const hasDelivery = isValidCoordinate(deliveryLocation?.lat, deliveryLocation?.lng);
+  const hasDriver = isValidCoordinate(driverPosition?.lat, driverPosition?.lng);
+
+  // Calcula a rota exclusivamente via Mapbox Directions API e converte para { lat, lng }[]
   useEffect(() => {
-    if (!containerRef.current) return;
-    if ((containerRef.current as any)._leaflet_id) return;
-
-    try {
-      const pLat = pickupLocation?.lat;
-      const pLng = pickupLocation?.lng;
-      const initialCenter: [number, number] =
-        isValidCoordinate(pLat, pLng)
-          ? [pLat!, pLng!]
-          : [DEFAULT_CENTER.lat, DEFAULT_CENTER.lng];
-
-      const map = L.map(containerRef.current, {
-        center: initialCenter,
-        zoom: 14,
-        zoomControl: false,
-        attributionControl: false,
-      });
-
-      L.tileLayer(MAP_LAYERS.streets.url, {
-        maxZoom: 19,
-        subdomains: ["a", "b", "c"],
-      }).addTo(map);
-
-      mapRef.current = map;
-      setMapInitFailed(false);
-    } catch (err) {
-      console.warn("[StoreMiniTrackingMap] Erro ao inicializar Leaflet:", err);
-      setMapInitFailed(true);
+    if (!hasPickup || !hasDelivery) {
+      setRoutePath([]);
+      setRouteDistance(null);
+      setRouteDashed(false);
+      return;
     }
 
-    return () => {
+    let isCancelled = false;
+    const pLat = pickupLocation!.lat;
+    const pLng = pickupLocation!.lng;
+    const destLat = deliveryLocation!.lat;
+    const destLng = deliveryLocation!.lng;
+
+    const drawRoute = async () => {
       try {
-        if (mapRef.current) {
-          mapRef.current.remove();
-          mapRef.current = null;
-        }
-      } catch (e) {
-        console.warn("[StoreMiniTrackingMap] Erro ao desmontar Leaflet:", e);
-      }
-      if (containerRef.current) {
-        delete (containerRef.current as any)._leaflet_id;
-      }
-    };
-  }, []);
+        const routeData = await calculateRoute(
+          { lat: pLat, lng: pLng },
+          { lat: destLat, lng: destLng },
+          { profile: "driving" }
+        );
 
-  // Atualiza marcadores e traçado da rota
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
+        if (isCancelled) return;
 
-    try {
-      // 1. Ponto de Coleta (Loja)
-      const pLat = isValidCoordinate(pickupLocation?.lat, pickupLocation?.lng)
-        ? pickupLocation!.lat
-        : DEFAULT_CENTER.lat;
-      const pLng = isValidCoordinate(pickupLocation?.lat, pickupLocation?.lng)
-        ? pickupLocation!.lng
-        : DEFAULT_CENTER.lng;
-
-      if (!pickupMarkerRef.current) {
-        pickupMarkerRef.current = L.marker([pLat, pLng], { icon: storePickupIcon }).addTo(map);
-      } else {
-        pickupMarkerRef.current.setLatLng([pLat, pLng]);
-      }
-
-      // 2. Ponto de Entrega (Destino)
-      const hasDelivery = isValidCoordinate(deliveryLocation?.lat, deliveryLocation?.lng);
-      if (hasDelivery) {
-        const dLat = deliveryLocation!.lat;
-        const dLng = deliveryLocation!.lng;
-        if (!deliveryMarkerRef.current) {
-          deliveryMarkerRef.current = L.marker([dLat, dLng], {
-            icon: deliveryTargetIcon,
-          }).addTo(map);
+        if (routeData?.geometry && routeData.geometry.length > 0) {
+          setRoutePath(latLngArrayToLiteralPath(routeData.geometry));
+          setRouteDashed(false);
         } else {
-          deliveryMarkerRef.current.setLatLng([dLat, dLng]);
-        }
-      } else if (deliveryMarkerRef.current) {
-        try {
-          map.removeLayer(deliveryMarkerRef.current);
-        } catch {}
-        deliveryMarkerRef.current = null;
-      }
-
-      // 3. Posição do Motorista (Moto)
-      const hasDriver = isValidCoordinate(driverPosition?.lat, driverPosition?.lng);
-      const mLat = hasDriver
-        ? driverPosition!.lat
-        : hasDelivery
-        ? (pLat + deliveryLocation!.lat) / 2
-        : pLat;
-      const mLng = hasDriver
-        ? driverPosition!.lng
-        : hasDelivery
-        ? (pLng + deliveryLocation!.lng) / 2
-        : pLng;
-
-      if (isValidCoordinate(mLat, mLng)) {
-        if (!driverMarkerRef.current) {
-          driverMarkerRef.current = L.marker([mLat, mLng], { icon: createMotorcycleIcon() }).addTo(map);
-        } else {
-          driverMarkerRef.current.setLatLng([mLat, mLng]);
-        }
-      }
-
-      // 4. Cálculo e desenho de rota (Mapbox / OSRM)
-      let isCancelled = false;
-      const drawRoute = async () => {
-        if (!hasDelivery) {
-          if (routeLineRef.current) {
-            try {
-              map.removeLayer(routeLineRef.current);
-            } catch {}
-            routeLineRef.current = null;
-          }
-          return;
-        }
-
-        const destLat = deliveryLocation!.lat;
-        const destLng = deliveryLocation!.lng;
-
-        try {
-          const routeData = await calculateRoute(
+          setRoutePath([
             { lat: pLat, lng: pLng },
             { lat: destLat, lng: destLng },
-            { profile: "driving" }
-          );
-
-          if (isCancelled || !mapRef.current) return;
-
-          const geom = routeData?.geometry && routeData.geometry.length > 0
-            ? routeData.geometry
-            : ([
-                [pLat, pLng],
-                [destLat, destLng],
-              ] as [number, number][]);
-
-          const distText = routeData?.distanceKm
-            ? `${routeData.distanceKm} km`
-            : routeData?.distanceMeters
-            ? `${(routeData.distanceMeters / 1000).toFixed(1)} km`
-            : null;
-          if (distText) setRouteDistance(distText);
-
-          if (!routeLineRef.current) {
-            routeLineRef.current = L.polyline(geom, {
-              color: "#2563EB",
-              weight: 4.5,
-              opacity: 0.9,
-              lineJoin: "round",
-            }).addTo(map);
-          } else {
-            routeLineRef.current.setLatLngs(geom);
-          }
-
-          // Ajusta zoom para enquadrar perfeitamente rota e marcadores
-          const validPoints: [number, number][] = [
-            [pLat, pLng],
-            [destLat, destLng],
-          ];
-          if (isValidCoordinate(mLat, mLng)) {
-            validPoints.push([mLat, mLng]);
-          }
-          const bounds = L.latLngBounds(validPoints);
-          if (bounds.isValid()) {
-            map.fitBounds(bounds, { padding: [25, 25], maxZoom: 16 });
-          }
-        } catch (err) {
-          console.warn("[StoreMiniTrackingMap] Erro ao traçar rota:", err);
-          if (isCancelled || !mapRef.current) return;
-          const directLine: [number, number][] = [
-            [pLat, pLng],
-            [destLat, destLng],
-          ];
-          if (!routeLineRef.current) {
-            routeLineRef.current = L.polyline(directLine, {
-              color: "#2563EB",
-              weight: 3.5,
-              dashArray: "6, 8",
-              opacity: 0.8,
-            }).addTo(map);
-          } else {
-            routeLineRef.current.setLatLngs(directLine);
-          }
-          const bounds = L.latLngBounds(directLine);
-          if (bounds.isValid()) {
-            map.fitBounds(bounds, { padding: [25, 25], maxZoom: 16 });
-          }
+          ]);
+          setRouteDashed(true);
         }
-      };
 
-      drawRoute();
+        const distText = routeData?.distanceKm
+          ? `${routeData.distanceKm} km`
+          : routeData?.distanceMeters
+          ? `${(routeData.distanceMeters / 1000).toFixed(1)} km`
+          : null;
+        if (distText) setRouteDistance(distText);
+      } catch (err) {
+        console.warn("[StoreMiniTrackingMap] Erro ao traçar rota:", err);
+        if (isCancelled) return;
+        setRoutePath([
+          { lat: pLat, lng: pLng },
+          { lat: destLat, lng: destLng },
+        ]);
+        setRouteDashed(true);
+      }
+    };
 
-      return () => {
-        isCancelled = true;
-      };
-    } catch (err) {
-      console.warn("[StoreMiniTrackingMap] Erro ao processar marcadores do mapa:", err);
-    }
-  }, [pickupLocation, deliveryLocation, driverPosition]);
+    drawRoute();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [hasPickup, hasDelivery, pickupLocation?.lat, pickupLocation?.lng, deliveryLocation?.lat, deliveryLocation?.lng]);
 
   const handleRecenter = () => {
-    try {
-      const map = mapRef.current;
-      if (!map) return;
-      if (isValidCoordinate(driverPosition?.lat, driverPosition?.lng)) {
-        map.flyTo([driverPosition!.lat, driverPosition!.lng], 15, { animate: true, duration: 0.6 });
-      } else if (isValidCoordinate(pickupLocation?.lat, pickupLocation?.lng)) {
-        map.flyTo([pickupLocation!.lat, pickupLocation!.lng], 15, { animate: true, duration: 0.6 });
-      }
-    } catch (err) {
-      console.warn("[StoreMiniTrackingMap] Erro ao recentralizar mapa:", err);
-    }
+    setRecenterTrigger((prev) => prev + 1);
   };
 
   return (
     <div
       className={`relative rounded-2xl overflow-hidden border border-border/80 shadow-md bg-card select-none group transition-all ${className}`}
     >
-      {/* Contêiner Leaflet */}
-      <div ref={containerRef} className="w-full h-full min-h-[160px] z-0" />
-
-      {/* Fallback caso a renderização nativa de WebGL/Leaflet falhe */}
-      {mapInitFailed && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center p-4 bg-muted/90 text-muted-foreground text-center z-1">
-          <Navigation className="w-7 h-7 text-[#EA580C] mb-1.5 animate-pulse" />
-          <span className="text-xs font-bold text-foreground">Acompanhamento de Rota</span>
-          <span className="text-[11px] text-muted-foreground">Inicializando geolocalização...</span>
-        </div>
-      )}
+      <GoogleMapView
+        origin={
+          hasPickup
+            ? {
+                lat: pickupLocation!.lat,
+                lng: pickupLocation!.lng,
+                name: pickupLocation?.name || "Loja / Coleta",
+              }
+            : null
+        }
+        stops={
+          hasDelivery
+            ? [
+                {
+                  id: "delivery-target",
+                  lat: deliveryLocation!.lat,
+                  lng: deliveryLocation!.lng,
+                  label: deliveryLocation?.address || "Destino da Entrega",
+                },
+              ]
+            : []
+        }
+        driverPosition={
+          hasDriver
+            ? {
+                lat: driverPosition!.lat,
+                lng: driverPosition!.lng,
+                label: "Entregador a caminho",
+              }
+            : null
+        }
+        routePath={routePath}
+        routeColor="#2563EB"
+        routeWeight={4}
+        routeDashed={routeDashed}
+        autoFitBounds={true}
+        fitPadding={28}
+        recenterTrigger={recenterTrigger}
+        className="w-full h-full min-h-[160px]"
+      />
 
       {/* Badge Superior com status e distância */}
       <div className="absolute top-2 left-2 z-10 flex items-center gap-1.5 pointer-events-none">

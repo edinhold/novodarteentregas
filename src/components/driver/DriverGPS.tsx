@@ -1,43 +1,27 @@
-import { useEffect, useRef, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useEffect, useMemo, useState } from "react";
 import ReportLocationButton from "@/components/ReportLocationButton";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Navigation, MapPin, Locate, ExternalLink, Loader2, Signal, SignalZero, Shield, Pause, Crosshair, Layers, RotateCcw } from "lucide-react";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
-import { DEFAULT_CENTER, MAP_LAYERS, GOOGLE_MAPS_API_KEY, resolveStoreCoordinates, isWithinPrimaveraBounds, formatStorePickupAddress } from "@/config/maps";
+import {
+  Navigation,
+  ExternalLink,
+  Signal,
+  SignalZero,
+  Shield,
+  Crosshair,
+  Layers,
+  RotateCcw,
+} from "lucide-react";
+import {
+  resolveStoreCoordinates,
+  isWithinPrimaveraBounds,
+  formatStorePickupAddress,
+} from "@/config/maps";
+import { calculateRoute } from "@/services/mapbox";
+import { latLngArrayToLiteralPath, type LatLngLiteral } from "@/utils/googleMapsLoader";
+import GoogleMapView from "@/components/maps/GoogleMapView";
 import { useAuth } from "@/contexts/AuthContext";
-import { useGPSTracking } from "@/hooks/useGPSTracking";
 import { resumeAudioContext } from "@/lib/notificationSound";
-
-import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
-import markerIcon from "leaflet/dist/images/marker-icon.png";
-import markerShadow from "leaflet/dist/images/marker-shadow.png";
-
-delete (L.Icon.Default.prototype as any)._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: markerIcon2x,
-  iconUrl: markerIcon,
-  shadowUrl: markerShadow,
-});
-
-const driverIcon = new L.Icon({
-  iconUrl: "data:image/svg+xml," + encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="%233b82f6" stroke="white" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>`
-  ),
-  iconSize: [24, 24],
-  iconAnchor: [12, 12],
-});
-
-const destIcon = new L.Icon({
-  iconUrl: "data:image/svg+xml," + encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="%23e53935" stroke="white" stroke-width="1.5"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3" fill="white"/></svg>`
-  ),
-  iconSize: [32, 32],
-  iconAnchor: [16, 32],
-  popupAnchor: [0, -32],
-});
 
 const qualityConfig = {
   excellent: { color: "text-green-600", label: "Excelente", icon: "🟢" },
@@ -50,7 +34,6 @@ interface DriverGPSProps {
   activeRequest?: any;
   pendingRequests?: any[];
   onAcceptRequest?: (id: string) => void;
-  // Tracking data passed from parent
   trackingData: {
     position: { lat: number; lng: number } | null;
     accuracy: number;
@@ -68,39 +51,38 @@ interface DriverGPSProps {
   };
 }
 
-const DriverGPS = ({ activeRequest, pendingRequests = [], onAcceptRequest, trackingData }: DriverGPSProps) => {
+const DriverGPS = ({
+  activeRequest,
+  pendingRequests = [],
+  onAcceptRequest,
+  trackingData,
+}: DriverGPSProps) => {
   const { user } = useAuth();
   const {
     position: driverPosition,
     accuracy,
-    heading,
-    speed,
-    watching,
     gpsQuality,
-    sampleCount,
     isStationary,
-    totalDistance,
     permissionStatus,
-    errorStatus,
+    watching,
+    heading,
     startTracking,
-    stopTracking,
   } = trackingData;
 
   const [autoFollow, setAutoFollow] = useState(true);
-  const [mapType, setMapType] = useState<keyof typeof MAP_LAYERS>("streets");
+  const [mapMode, setMapMode] = useState<"roadmap" | "satellite">("roadmap");
+  const [routePath, setRoutePath] = useState<LatLngLiteral[]>([]);
+  const [recenterTrigger, setRecenterTrigger] = useState(0);
 
-  const mapRef = useRef<L.Map | null>(null);
-  const tileLayerRef = useRef<L.TileLayer | null>(null);
-  const mapContainerRef = useRef<HTMLDivElement>(null);
-  const driverMarkerRef = useRef<L.Marker | null>(null);
-  const accuracyCircleRef = useRef<L.Circle | null>(null);
-  const destMarkerRef = useRef<L.Marker | null>(null);
-  const routeLineRef = useRef<L.Polyline | null>(null);
-
-  const openNavigation = (address: string, app: "google" | "waze", coords?: { lat: number; lng: number } | null) => {
-    const formattedAddress = address && !address.includes("Primavera do Leste")
-      ? `${address}, Primavera do Leste - MT, Brasil`
-      : address || "Primavera do Leste - MT, Brasil";
+  const openNavigation = (
+    address: string,
+    app: "google" | "waze",
+    coords?: { lat: number; lng: number } | null
+  ) => {
+    const formattedAddress =
+      address && !address.includes("Primavera do Leste")
+        ? `${address}, Primavera do Leste - MT, Brasil`
+        : address || "Primavera do Leste - MT, Brasil";
 
     if (app === "waze") {
       if (coords && coords.lat && coords.lng) {
@@ -109,216 +91,173 @@ const DriverGPS = ({ activeRequest, pendingRequests = [], onAcceptRequest, track
         window.open(`https://waze.com/ul?q=${encodeURIComponent(formattedAddress)}&navigate=yes`, "_blank");
       }
     } else {
-      const originParam = driverPosition ? `&origin=${driverPosition.lat},${driverPosition.lng}` : "";
       if (coords && coords.lat && coords.lng) {
-        window.open(`https://www.google.com/maps/dir/?api=1${originParam}&destination=${coords.lat},${coords.lng}&travelmode=driving`, "_blank");
+        window.open(
+          `https://www.google.com/maps/dir/?api=1&destination=${coords.lat},${coords.lng}&travelmode=driving`,
+          "_blank"
+        );
       } else {
-        const prefix = driverPosition ? `${driverPosition.lat},${driverPosition.lng}/` : "";
-        window.open(`https://www.google.com/maps/dir/${prefix}${encodeURIComponent(formattedAddress)}`, "_blank");
+        window.open(
+          `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(formattedAddress)}&travelmode=driving`,
+          "_blank"
+        );
       }
     }
   };
 
   const isPickupPhase = activeRequest?.status === "accepted";
-  const resolvedPickupCoords = activeRequest
-    ? resolveStoreCoordinates(activeRequest.restaurants, activeRequest.pickup_lat, activeRequest.pickup_lng)
-    : null;
 
-  const activeDestCoords = isPickupPhase
-    ? resolvedPickupCoords
-    : (activeRequest?.delivery_lat && activeRequest?.delivery_lng && isWithinPrimaveraBounds(Number(activeRequest.delivery_lat), Number(activeRequest.delivery_lng)))
-      ? { lat: Number(activeRequest.delivery_lat), lng: Number(activeRequest.delivery_lng) }
-      : null;
+  const activeDestCoords = useMemo(() => {
+    if (!activeRequest) return null;
+    if (isPickupPhase) {
+      return resolveStoreCoordinates(
+        activeRequest.restaurants,
+        activeRequest.pickup_lat,
+        activeRequest.pickup_lng
+      );
+    }
+    if (isWithinPrimaveraBounds(activeRequest.delivery_lat, activeRequest.delivery_lng)) {
+      return {
+        lat: Number(activeRequest.delivery_lat),
+        lng: Number(activeRequest.delivery_lng),
+      };
+    }
+    return null;
+  }, [activeRequest, isPickupPhase]);
 
-  const currentDestination = activeRequest
-    ? isPickupPhase
-      ? formatStorePickupAddress(activeRequest.restaurants, activeRequest.pickup_address)
-      : (activeRequest.delivery_address || "Endereço de entrega")
-    : null;
-
-  const currentDestinationLabel = activeRequest
-    ? isPickupPhase ? "📦 Coleta (Loja)" : "🏠 Entrega (Cliente)"
-    : null;
-
-  const requestMarkers = pendingRequests.map((r: any) => {
-    const coords = resolveStoreCoordinates(r.restaurants, r.pickup_lat, r.pickup_lng);
-    return {
-      id: r.id,
-      lat: coords.lat,
-      lng: coords.lng,
-      name: r.restaurants?.name || "Chamado de Entrega",
-    };
-  });
-
-  const showMap = true; // Always show map frame
-  const qc = qualityConfig[gpsQuality];
-
-  // Initialize and update map
+  // Calcula rota viária usando exclusivamente Mapbox Directions API
   useEffect(() => {
-    if (!mapContainerRef.current) return;
-
-    if (!mapRef.current) {
-      if ((mapContainerRef.current as any)._leaflet_id) return;
-      try {
-        const center: [number, number] = driverPosition
-          ? [driverPosition.lat, driverPosition.lng]
-          : requestMarkers.length > 0
-            ? [requestMarkers[0].lat, requestMarkers[0].lng]
-            : [DEFAULT_CENTER.lat, DEFAULT_CENTER.lng];
-
-        const map = L.map(mapContainerRef.current).setView(center, 15);
-        tileLayerRef.current = L.tileLayer(MAP_LAYERS[mapType].url, {
-          attribution: MAP_LAYERS[mapType].attribution,
-          maxZoom: mapType.includes("satellite") || mapType.includes("google") ? 20 : 19,
-        }).addTo(map);
-        map.on("dragstart", () => setAutoFollow(false));
-        mapRef.current = map;
-      } catch (err) {
-        console.error("[DriverGPS] Map init error:", err);
-        return;
-      }
+    if (!driverPosition || !activeDestCoords) {
+      setRoutePath([]);
+      return;
     }
 
-    const map = mapRef.current;
+    let cancelled = false;
+    calculateRoute(driverPosition, activeDestCoords, { profile: "driving" })
+      .then((res) => {
+        if (cancelled) return;
+        if (res?.geometry && res.geometry.length > 0) {
+          setRoutePath(latLngArrayToLiteralPath(res.geometry));
+        } else {
+          setRoutePath([driverPosition, activeDestCoords]);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRoutePath([driverPosition, activeDestCoords]);
+        }
+      });
 
-    // Update tile layer if mapType changed
-    if (tileLayerRef.current && map) {
-      const currentUrl = MAP_LAYERS[mapType].url;
-      if ((tileLayerRef.current as any)._url !== currentUrl) {
-        map.removeLayer(tileLayerRef.current);
-        tileLayerRef.current = L.tileLayer(currentUrl, {
-          attribution: MAP_LAYERS[mapType].attribution,
-          maxZoom: mapType.includes("satellite") || mapType.includes("google") ? 20 : 19,
-        }).addTo(map);
-      }
-    }
-
-    if (driverPosition) {
-      if (driverMarkerRef.current) {
-        driverMarkerRef.current.setLatLng([driverPosition.lat, driverPosition.lng]);
-      } else {
-        driverMarkerRef.current = L.marker([driverPosition.lat, driverPosition.lng], { icon: driverIcon })
-          .addTo(map)
-          .bindPopup("Você está aqui");
-      }
-      if (accuracyCircleRef.current) {
-        accuracyCircleRef.current.setLatLng([driverPosition.lat, driverPosition.lng]).setRadius(accuracy);
-      } else {
-        accuracyCircleRef.current = L.circle([driverPosition.lat, driverPosition.lng], {
-          radius: accuracy, fillColor: "#3b82f6", fillOpacity: 0.1, color: "#3b82f6", opacity: 0.3,
-        }).addTo(map);
-      }
-
-      // Auto-follow: center on driver
-      if (autoFollow) {
-        map.setView([driverPosition.lat, driverPosition.lng], map.getZoom());
-      }
-    }
-
-    // Update destination marker for active request
-    if (destMarkerRef.current) {
-      map.removeLayer(destMarkerRef.current);
-      destMarkerRef.current = null;
-    }
-    if (routeLineRef.current) {
-      map.removeLayer(routeLineRef.current);
-      routeLineRef.current = null;
-    }
-
-    // Destination marker for active request (resolves store exact coords for pickup, and delivery coords for dropoff)
-    if (activeDestCoords && activeDestCoords.lat && activeDestCoords.lng) {
-      const destLat = activeDestCoords.lat;
-      const destLng = activeDestCoords.lng;
-      const label = isPickupPhase ? "📦 Coleta (Loja)" : "🏠 Entrega (Cliente)";
-      const nameOrAddress = isPickupPhase
-        ? (activeRequest?.restaurants?.name || activeRequest?.pickup_address || "Loja")
-        : (activeRequest?.delivery_address || "Cliente");
-
-      destMarkerRef.current = L.marker([destLat, destLng], { icon: destIcon })
-        .addTo(map)
-        .bindPopup(`<b>${label}</b><br/>${nameOrAddress}`);
-
-      if (driverPosition) {
-        routeLineRef.current = L.polyline(
-          [[driverPosition.lat, driverPosition.lng], [destLat, destLng]],
-          { color: "#e53935", weight: 3, dashArray: "8 4", opacity: 0.7 }
-        ).addTo(map);
-      }
-    }
-
-    // Pending request markers
-    map.eachLayer((layer) => {
-      if (layer instanceof L.Marker && layer !== driverMarkerRef.current && layer !== destMarkerRef.current) {
-        map.removeLayer(layer);
-      }
-    });
-    requestMarkers.forEach((m) => {
-      L.marker([m.lat, m.lng]).addTo(map)
-        .bindPopup(m.name)
-        .on("click", () => onAcceptRequest?.(m.id));
-    });
-  }, [driverPosition, accuracy, requestMarkers.length, showMap, autoFollow, activeRequest?.id, activeRequest?.status, mapType, activeDestCoords?.lat, activeDestCoords?.lng]);
-
-  // Cleanup
-  useEffect(() => {
     return () => {
-      try {
-        if (mapRef.current) {
-          mapRef.current.remove();
-          mapRef.current = null;
-          driverMarkerRef.current = null;
-          accuracyCircleRef.current = null;
-          destMarkerRef.current = null;
-          routeLineRef.current = null;
-        }
-        if (mapContainerRef.current) {
-          delete (mapContainerRef.current as any)._leaflet_id;
-        }
-      } catch (err) {
-        console.error("[DriverGPS] Map cleanup error:", err);
-      }
+      cancelled = true;
     };
-  }, []);
+  }, [driverPosition?.lat, driverPosition?.lng, activeDestCoords?.lat, activeDestCoords?.lng]);
+
+  const pendingMarkers = useMemo(
+    () =>
+      pendingRequests
+        .filter((r) => !activeRequest || r.id !== activeRequest.id)
+        .map((r) => {
+          const coords = resolveStoreCoordinates(r.restaurants, r.pickup_lat, r.pickup_lng);
+          return {
+            id: r.id,
+            lat: coords.lat,
+            lng: coords.lng,
+            title: r.restaurants?.name || "Nova Entrega",
+            color: "#F59E0B",
+            onClick: () => onAcceptRequest?.(r.id),
+          };
+        }),
+    [pendingRequests, activeRequest, onAcceptRequest]
+  );
+
+  const qc = qualityConfig[gpsQuality] || qualityConfig.good;
 
   return (
     <div className="relative w-full h-full overflow-hidden flex flex-col">
-      {/* Map Container */}
       <div className="flex-1 relative min-h-0">
-        <div ref={mapContainerRef} className="w-full h-full z-0" />
+        <GoogleMapView
+          origin={
+            activeRequest
+              ? resolveStoreCoordinates(
+                  activeRequest.restaurants,
+                  activeRequest.pickup_lat,
+                  activeRequest.pickup_lng
+                )
+              : null
+          }
+          stops={
+            activeDestCoords
+              ? [
+                  {
+                    id: "active-gps-dest",
+                    lat: activeDestCoords.lat,
+                    lng: activeDestCoords.lng,
+                    label: isPickupPhase
+                      ? `Coleta: ${activeRequest?.restaurants?.name || "Loja"}`
+                      : `Entrega: ${activeRequest?.delivery_address || "Destino"}`,
+                  },
+                ]
+              : []
+          }
+          driverPosition={
+            driverPosition
+              ? {
+                  lat: driverPosition.lat,
+                  lng: driverPosition.lng,
+                  heading,
+                  label: "Sua posição",
+                }
+              : null
+          }
+          extraMarkers={pendingMarkers}
+          routePath={routePath}
+          routeColor="#3b82f6"
+          routeWeight={5}
+          mapType={mapMode === "satellite" ? "hybrid" : "roadmap"}
+          autoFitBounds={!autoFollow || !!activeDestCoords}
+          center={autoFollow ? driverPosition : null}
+          zoom={16}
+          recenterTrigger={recenterTrigger}
+          onUserInteract={() => setAutoFollow(false)}
+          className="w-full h-full"
+        />
 
         {/* Floating Controls - Top Right */}
         <div className="absolute top-4 right-4 z-[1000] flex flex-col gap-2">
           <Button
             variant="secondary"
             size="sm"
-            onClick={() => {
-              const types: (keyof typeof MAP_LAYERS)[] = ["streets", "google", "satellite"];
-              const next = types[(types.indexOf(mapType) + 1) % types.length];
-              setMapType(next);
-            }}
-            className="shadow-md gap-2 bg-white/90 backdrop-blur-sm hover:bg-white"
+            onClick={() => setMapMode((m) => (m === "roadmap" ? "satellite" : "roadmap"))}
+            className="shadow-md gap-2 bg-white/90 backdrop-blur-sm hover:bg-white text-zinc-900"
           >
             <Layers className="w-4 h-4" />
             <span className="hidden sm:inline">
-              {mapType === "streets" ? "Ver Google" : mapType === "google" ? "Ver Satélite" : "Ver Ruas"}
+              {mapMode === "roadmap" ? "Ver Satélite" : "Ver Ruas"}
             </span>
           </Button>
 
           <Button
             variant={autoFollow ? "default" : "secondary"}
             size="sm"
-            onClick={() => setAutoFollow(!autoFollow)}
-            className="shadow-md gap-2 bg-white/90 backdrop-blur-sm hover:bg-white"
+            onClick={() => {
+              setAutoFollow((v) => !v);
+              setRecenterTrigger((p) => p + 1);
+            }}
+            className="shadow-md gap-2 bg-white/90 backdrop-blur-sm hover:bg-white text-zinc-900"
           >
-            <Crosshair className={`w-4 h-4 ${autoFollow ? "text-white" : ""}`} />
+            <Crosshair className="w-4 h-4" />
             <span className="hidden sm:inline">{autoFollow ? "Seguindo" : "Seguir Me"}</span>
           </Button>
-          
+
           <Button
             variant="secondary"
             size="sm"
-            onClick={startTracking}
-            className="shadow-md gap-2 bg-white/90 backdrop-blur-sm hover:bg-white"
+            onClick={() => {
+              resumeAudioContext();
+              startTracking();
+            }}
+            className="shadow-md gap-2 bg-white/90 backdrop-blur-sm hover:bg-white text-zinc-900"
           >
             <RotateCcw className="w-4 h-4" />
             <span className="hidden sm:inline">Reiniciar</span>
@@ -327,16 +266,22 @@ const DriverGPS = ({ activeRequest, pendingRequests = [], onAcceptRequest, track
 
         {/* GPS Status Overlay - Top Left */}
         <div className="absolute top-4 left-4 z-[1000] max-w-[200px] sm:max-w-xs">
-          <div className="bg-white/90 backdrop-blur-sm p-3 rounded-lg shadow-md border border-gray-200">
+          <div className="bg-white/90 backdrop-blur-sm p-3 rounded-lg shadow-md border border-gray-200 text-zinc-900">
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${watching ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+                {watching ? (
+                  <Signal className="w-3.5 h-3.5 text-green-600 animate-pulse" />
+                ) : (
+                  <SignalZero className="w-3.5 h-3.5 text-red-500" />
+                )}
                 <span className="text-xs font-bold uppercase tracking-wider">
-                  GPS {watching ? 'Ativo' : 'Inativo'}
+                  GPS {watching ? "Ativo" : "Inativo"}
                 </span>
               </div>
               {isStationary && watching && (
-                <Badge variant="outline" className="text-[10px] h-4 px-1">Parado</Badge>
+                <Badge variant="outline" className="text-[10px] h-4 px-1">
+                  Parado
+                </Badge>
               )}
             </div>
 
@@ -351,91 +296,79 @@ const DriverGPS = ({ activeRequest, pendingRequests = [], onAcceptRequest, track
               <div className="space-y-1">
                 <div className="flex justify-between text-[11px]">
                   <span className="text-gray-500">Qualidade:</span>
-                  <span className={`font-bold ${qc.color}`}>{qc.icon} {qc.label}</span>
+                  <span className={`font-bold ${qc.color}`}>
+                    {qc.icon} {qc.label}
+                  </span>
                 </div>
                 <div className="flex justify-between text-[11px]">
                   <span className="text-gray-500">Precisão:</span>
-                  <span className={`font-bold ${accuracy <= 10 ? "text-green-600" : "text-yellow-600"}`}>±{Math.round(accuracy)}m</span>
-                </div>
-                {speed !== null && speed > 0 && (
-                  <div className="flex justify-between text-[11px]">
-                    <span className="text-gray-500">Velocidade:</span>
-                    <span className="font-bold">{Math.round(speed * 3.6)} km/h</span>
-                  </div>
-                )}
-                <div className="mt-2 flex gap-1">
-                  {!watching ? (
-                    <Button onClick={() => { resumeAudioContext(); startTracking(); }} size="sm" className="w-full h-7 text-[10px] px-2">
-                      <Locate className="w-3 h-3 mr-1" /> Reativar
-                    </Button>
-                  ) : (
-                    <Button onClick={stopTracking} variant="ghost" size="sm" className="w-full h-7 text-[10px] text-red-500 hover:text-red-700 hover:bg-red-50 px-2">
-                      <Pause className="w-3 h-3 mr-1" /> Pausar
-                    </Button>
-                  )}
+                  <span className="font-mono font-semibold">±{Math.round(accuracy)}m</span>
                 </div>
               </div>
             ) : (
-              <div className="flex items-center gap-2 py-1">
-                <Loader2 className="w-3 h-3 animate-spin text-primary" />
-                <span className="text-[11px]">Buscando sinal...</span>
-              </div>
-            )}
-            
-            {errorStatus && (
-              <div className="mt-2 text-[10px] text-red-500 font-medium leading-tight">
-                ⚠️ {errorStatus}
-              </div>
+              <p className="text-[11px] text-gray-500">Aguardando sinal de GPS...</p>
             )}
           </div>
         </div>
 
-        {/* Navigation Overlay - Bottom */}
-        {activeRequest && currentDestination && (
-          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-[1000] w-[90%] max-w-sm">
-            <div className="bg-primary text-primary-foreground p-3 rounded-xl shadow-xl border border-primary-foreground/10 overflow-hidden">
-              <div className="flex items-start gap-3">
-                <div className="bg-white/20 p-2 rounded-lg">
-                  <MapPin className="w-5 h-5 text-white" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-[10px] uppercase font-bold opacity-80">{currentDestinationLabel}</p>
-                  <p className="text-sm font-semibold truncate leading-tight">{currentDestination}</p>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-2 mt-3">
-                <Button 
-                  onClick={() => openNavigation(currentDestination, "google", activeDestCoords)} 
-                  variant="secondary" 
-                  size="sm" 
-                  className="bg-white text-primary hover:bg-white/90 h-8 text-xs font-bold"
-                >
-                  <ExternalLink className="w-3 h-3 mr-1" /> Google Maps
-                </Button>
-                <Button 
-                  onClick={() => openNavigation(currentDestination, "waze", activeDestCoords)} 
-                  variant="secondary" 
-                  size="sm" 
-                  className="bg-white text-primary hover:bg-white/90 h-8 text-xs font-bold"
-                >
-                  <ExternalLink className="w-3 h-3 mr-1" /> Waze
-                </Button>
-              </div>
+        {/* Active Request Navigation Bar */}
+        {activeRequest && (
+          <div className="absolute bottom-4 left-4 right-4 z-[1000] bg-white/95 backdrop-blur-md p-3 rounded-xl shadow-lg border border-gray-200 flex flex-wrap items-center justify-between gap-2 text-zinc-900">
+            <div className="min-w-0 flex-1">
+              <p className="text-[10px] font-bold uppercase text-primary">
+                {isPickupPhase ? "Ir para coleta" : "Ir para entrega"}
+              </p>
+              <p className="text-xs font-semibold truncate">
+                {isPickupPhase
+                  ? formatStorePickupAddress(activeRequest.restaurants, activeRequest.pickup_address)
+                  : activeRequest.delivery_address}
+              </p>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  openNavigation(
+                    isPickupPhase
+                      ? formatStorePickupAddress(activeRequest.restaurants, activeRequest.pickup_address)
+                      : activeRequest.delivery_address,
+                    "waze",
+                    activeDestCoords
+                  )
+                }
+                className="h-8 text-xs gap-1"
+              >
+                <Navigation className="w-3.5 h-3.5" /> Waze
+              </Button>
+              <Button
+                size="sm"
+                onClick={() =>
+                  openNavigation(
+                    isPickupPhase
+                      ? formatStorePickupAddress(activeRequest.restaurants, activeRequest.pickup_address)
+                      : activeRequest.delivery_address,
+                    "google",
+                    activeDestCoords
+                  )
+                }
+                className="h-8 text-xs gap-1"
+              >
+                <ExternalLink className="w-3.5 h-3.5" /> Maps
+              </Button>
+              {activeDestCoords && user?.id && (
+                <ReportLocationButton
+                  latitude={activeDestCoords.lat}
+                  longitude={activeDestCoords.lng}
+                  address={
+                    isPickupPhase ? activeRequest.pickup_address : activeRequest.delivery_address
+                  }
+                />
+              )}
             </div>
           </div>
         )}
       </div>
-
-      {/* Manual Report Action (Hidden/Minimized or only shown if needed) */}
-      {driverPosition && user?.id && (
-        <div className="hidden">
-           <ReportLocationButton
-              latitude={driverPosition.lat}
-              longitude={driverPosition.lng}
-              userId={user.id}
-            />
-        </div>
-      )}
     </div>
   );
 };

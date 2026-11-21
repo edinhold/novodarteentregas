@@ -1,5 +1,8 @@
-// Google Maps API desativada — projeto usa exclusivamente Leaflet/OSM/Nominatim/OSRM.
-export const GOOGLE_MAPS_API_KEY = "AIzaSyDcdnB6I1Q50awgozDwmlfH2rSqAnX6_Qk";
+// Chave pública do Google Maps JS SDK (usada APENAS para renderização visual; geocodificação/rotas usam Mapbox)
+export const GOOGLE_MAPS_API_KEY: string =
+  ((typeof import.meta !== "undefined" &&
+    (import.meta.env?.VITE_GOOGLE_MAPS_API_KEY as string | undefined)?.trim()) ||
+    "AIzaSyDcdnB6I1Q50awgozDwmlfH2rSqAnX6_Qk");
 export const DEFAULT_CENTER = { lat: -15.5595, lng: -54.3079 }; // Primavera do Leste, MT center
 export const DEFAULT_ZOOM = 14;
 
