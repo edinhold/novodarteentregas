@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from "react";
 import * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { MapPin } from "lucide-react";
-import { DEFAULT_CENTER, OPENFREEMAP_STYLES } from "@/config/maps";
+import { DEFAULT_CENTER } from "@/config/maps";
+import { MAPBOX_ACCESS_TOKEN } from "@/config/mapbox";
 import { isValidCoordinate } from "@/utils/geolocation";
 import {
   geoJsonGeometryToLatLngPath,
@@ -78,36 +79,52 @@ export interface MapLibreViewProps {
 const ROUTE_SOURCE_ID = "duarte-route-source";
 const ROUTE_CASING_LAYER_ID = "duarte-route-casing";
 const ROUTE_LINE_LAYER_ID = "duarte-route-line";
-const BUILDINGS_3D_LAYER_ID = "duarte-3d-buildings";
 
-const OSM_RASTER_FALLBACK_STYLE: maplibregl.StyleSpecification = {
-  version: 8,
-  sources: {
-    osm: {
-      type: "raster",
-      tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
-      tileSize: 256,
-      attribution: "© OpenStreetMap",
+function buildRasterStyle(tiles: string[], attribution: string, sourceId: string): maplibregl.StyleSpecification {
+  return {
+    version: 8,
+    sources: {
+      [sourceId]: {
+        type: "raster",
+        tiles,
+        tileSize: 256,
+        maxzoom: 19,
+        attribution,
+      },
     },
-  },
-  layers: [{ id: "osm", type: "raster", source: "osm" }],
-};
+    layers: [{ id: sourceId, type: "raster", source: sourceId }],
+  };
+}
 
-const SATELLITE_RASTER_STYLE: maplibregl.StyleSpecification = {
-  version: 8,
-  sources: {
-    esri: {
-      type: "raster",
-      tiles: [
-        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-      ],
-      tileSize: 256,
-      maxzoom: 19,
-      attribution: "© Esri World Imagery",
-    },
-  },
-  layers: [{ id: "esri-satellite", type: "raster", source: "esri" }],
-};
+const OSM_RASTER_FALLBACK_STYLE = buildRasterStyle(
+  ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+  "© OpenStreetMap",
+  "osm"
+);
+
+const ESRI_SATELLITE_STYLE = buildRasterStyle(
+  ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
+  "© Esri World Imagery",
+  "esri"
+);
+
+function getStyleForMode(mode: "dark" | "liberty" | "satellite"): maplibregl.StyleSpecification {
+  const token = MAPBOX_ACCESS_TOKEN?.trim();
+  if (!token) {
+    return mode === "satellite" ? ESRI_SATELLITE_STYLE : OSM_RASTER_FALLBACK_STYLE;
+  }
+  const styleId =
+    mode === "satellite"
+      ? "satellite-streets-v12"
+      : mode === "dark"
+      ? "dark-v11"
+      : "streets-v12";
+  return buildRasterStyle(
+    [`https://api.mapbox.com/styles/v1/mapbox/${styleId}/tiles/256/{z}/{x}/{y}@2x?access_token=${token}`],
+    "© Mapbox © OpenStreetMap",
+    `mapbox-${mode}`
+  );
+}
 
 function createOriginElement(): HTMLElement {
   const el = document.createElement("div");
@@ -202,47 +219,14 @@ export const MapLibreView: React.FC<MapLibreViewProps> = ({
 
   const isDark = darkMode !== undefined ? darkMode : docDark;
   const isSatellite = mapType === "satellite" || mapType === "hybrid";
-  const targetStyleKey = isSatellite ? "satellite" : isDark ? "dark" : "liberty";
-  const targetStyle: string | maplibregl.StyleSpecification = isSatellite
-    ? SATELLITE_RASTER_STYLE
+  const targetStyleKey: "dark" | "liberty" | "satellite" = isSatellite
+    ? "satellite"
     : isDark
-    ? OPENFREEMAP_STYLES.dark
-    : OPENFREEMAP_STYLES.liberty;
+    ? "dark"
+    : "liberty";
+  const targetStyle = getStyleForMode(targetStyleKey);
   const activeStyleKeyRef = useRef<string>(targetStyleKey);
   const usingFallbackStyleRef = useRef(false);
-  const styleLoadedRef = useRef(false);
-  const styleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pitchRef = useRef<number>(pitch);
-  pitchRef.current = pitch;
-
-  const ensure3DBuildings = useRef<() => void>(() => {});
-  ensure3DBuildings.current = () => {
-    const map = mapRef.current;
-    if (!map || !map.isStyleLoaded() || pitchRef.current <= 0) return;
-    if (map.getLayer(BUILDINGS_3D_LAYER_ID)) return;
-    try {
-      const style = map.getStyle();
-      const vectorSourceName = Object.keys(style?.sources || {}).find(
-        (key) => (style.sources as any)[key]?.type === "vector"
-      );
-      if (!vectorSourceName) return;
-      map.addLayer({
-        id: BUILDINGS_3D_LAYER_ID,
-        source: vectorSourceName,
-        "source-layer": "building",
-        type: "fill-extrusion",
-        minzoom: 14,
-        paint: {
-          "fill-extrusion-color": isDark ? "#334155" : "#cbd5e1",
-          "fill-extrusion-height": ["coalesce", ["get", "render_height"], ["get", "height"], 10],
-          "fill-extrusion-base": ["coalesce", ["get", "render_min_height"], 0],
-          "fill-extrusion-opacity": 0.72,
-        },
-      });
-    } catch {
-      // Style may not include a building layer (e.g., raster fallback)
-    }
-  };
 
   // Sync route GeoJSON into MapLibre Source + Layer
   const syncRouteLayer = useRef<() => void>(() => {});
@@ -309,14 +293,15 @@ export const MapLibreView: React.FC<MapLibreViewProps> = ({
     if (!containerEl || mapRef.current) return;
 
     let resizeObserver: ResizeObserver | null = null;
-    styleLoadedRef.current = false;
 
     const activateFallbackStyle = (map: maplibregl.Map, reason: unknown) => {
-      if (usingFallbackStyleRef.current || activeStyleKeyRef.current === "satellite") return;
+      if (usingFallbackStyleRef.current) return;
       usingFallbackStyleRef.current = true;
-      console.warn("[MapLibreView] Estilo vetorial indisponível, ativando fallback OpenStreetMap:", reason);
+      console.warn("[MapLibreView] Ativando fallback de tiles:", reason);
       try {
-        map.setStyle(OSM_RASTER_FALLBACK_STYLE);
+        map.setStyle(
+          activeStyleKeyRef.current === "satellite" ? ESRI_SATELLITE_STYLE : OSM_RASTER_FALLBACK_STYLE
+        );
       } catch (fallbackErr) {
         console.error("MapLibre Fallback Error:", fallbackErr);
       }
@@ -344,36 +329,17 @@ export const MapLibreView: React.FC<MapLibreViewProps> = ({
       activeStyleKeyRef.current = targetStyleKey;
       usingFallbackStyleRef.current = false;
 
-      // Fallback automático se o estilo vetorial demorar mais de 4.5s para carregar
-      styleTimeoutRef.current = setTimeout(() => {
-        if (!styleLoadedRef.current && mapRef.current) {
-          activateFallbackStyle(map, "timeout_4.5s");
-        }
-      }, 4500);
-
       map.on("load", () => {
-        styleLoadedRef.current = true;
-        if (styleTimeoutRef.current) {
-          clearTimeout(styleTimeoutRef.current);
-          styleTimeoutRef.current = null;
-        }
         map.resize();
         requestAnimationFrame(() => map.resize());
         setMapReady(true);
         setLoadError(null);
-        ensure3DBuildings.current();
         syncRouteLayer.current();
         onMapReady?.(map);
       });
 
       map.on("style.load", () => {
-        styleLoadedRef.current = true;
-        if (styleTimeoutRef.current) {
-          clearTimeout(styleTimeoutRef.current);
-          styleTimeoutRef.current = null;
-        }
         map.resize();
-        ensure3DBuildings.current();
         syncRouteLayer.current();
       });
 
@@ -387,8 +353,8 @@ export const MapLibreView: React.FC<MapLibreViewProps> = ({
 
       map.on("error", (e) => {
         console.error("MapLibre Error:", e);
-        if (!styleLoadedRef.current) {
-          activateFallbackStyle(map, e?.error?.message || "style_error");
+        if ((e as any)?.sourceId && !usingFallbackStyleRef.current) {
+          activateFallbackStyle(map, e?.error?.message || "tile_source_error");
         }
       });
 
@@ -402,11 +368,10 @@ export const MapLibreView: React.FC<MapLibreViewProps> = ({
       mapRef.current = map;
     } catch (err: any) {
       console.error("MapLibre Error:", err);
-      setLoadError(err?.message || "Erro ao inicializar mapa vetorial");
+      setLoadError(err?.message || "Erro ao inicializar mapa");
     }
 
     return () => {
-      if (styleTimeoutRef.current) clearTimeout(styleTimeoutRef.current);
       resizeObserver?.disconnect();
       originMarkerRef.current?.remove();
       stopMarkersRef.current.forEach((m) => m.remove());
@@ -423,28 +388,12 @@ export const MapLibreView: React.FC<MapLibreViewProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 2. Alternância dinâmica entre Claro (Liberty), Escuro (Dark) e Satélite (Esri) sem tela preta/branca
+  // 2. Alternância instantânea entre Escuro, Claro e Satélite (estilo inline sem espera de rede)
   useEffect(() => {
     const map = mapRef.current;
     if (!map || activeStyleKeyRef.current === targetStyleKey) return;
     activeStyleKeyRef.current = targetStyleKey;
     usingFallbackStyleRef.current = false;
-    styleLoadedRef.current = false;
-
-    if (styleTimeoutRef.current) {
-      clearTimeout(styleTimeoutRef.current);
-      styleTimeoutRef.current = null;
-    }
-
-    if (targetStyleKey !== "satellite") {
-      styleTimeoutRef.current = setTimeout(() => {
-        if (!styleLoadedRef.current && mapRef.current && !usingFallbackStyleRef.current) {
-          usingFallbackStyleRef.current = true;
-          mapRef.current.setStyle(OSM_RASTER_FALLBACK_STYLE);
-        }
-      }, 4500);
-    }
-
     map.setStyle(targetStyle);
   }, [targetStyleKey, targetStyle]);
 
@@ -453,9 +402,6 @@ export const MapLibreView: React.FC<MapLibreViewProps> = ({
     const map = mapRef.current;
     if (!map) return;
     map.easeTo({ pitch, duration: 450 });
-    if (pitch > 0) {
-      ensure3DBuildings.current();
-    }
   }, [pitch]);
 
   // 3. Atualiza marcador da Origem (Loja)
