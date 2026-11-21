@@ -1,3 +1,5 @@
+import { MAPBOX_ACCESS_TOKEN } from "@/config/mapbox";
+
 // Chave pública do Google Maps JS SDK (usada APENAS para renderização visual; geocodificação/rotas usam Mapbox)
 export const GOOGLE_MAPS_API_KEY: string =
   ((typeof import.meta !== "undefined" &&
@@ -8,8 +10,10 @@ export const DEFAULT_ZOOM = 14;
 
 export const MAP_LAYERS = {
   dark: {
-    url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-    attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    url: MAPBOX_ACCESS_TOKEN
+      ? `https://api.mapbox.com/styles/v1/mapbox/dark-v11/tiles/256/{z}/{x}/{y}?access_token=${MAPBOX_ACCESS_TOKEN}`
+      : "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    attribution: "&copy; Mapbox &copy; OpenStreetMap",
   },
   streets: {
     url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
