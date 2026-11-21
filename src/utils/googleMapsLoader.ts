@@ -41,6 +41,46 @@ export function latLngArrayToLiteralPath(
 }
 
 let googleMapsPromise: Promise<any> | null = null;
+let googleMapsAuthFailed = false;
+const authFailureListeners = new Set<() => void>();
+
+export function hasGoogleMapsAuthFailed(): boolean {
+  return googleMapsAuthFailed;
+}
+
+export function onGoogleMapsAuthFailure(listener: () => void): () => void {
+  authFailureListeners.add(listener);
+  if (googleMapsAuthFailed) {
+    listener();
+  }
+  return () => {
+    authFailureListeners.delete(listener);
+  };
+}
+
+function installAuthFailureHook() {
+  if (typeof window === "undefined") return;
+  const w = window as any;
+  if (w.__duarteGmAuthHookInstalled) return;
+  w.__duarteGmAuthHookInstalled = true;
+  const prev = typeof w.gm_authFailure === "function" ? w.gm_authFailure : null;
+  w.gm_authFailure = () => {
+    googleMapsAuthFailed = true;
+    console.warn(
+      "[GoogleMaps] Falha de autenticação/domínio/faturamento (gm_authFailure). Verifique no Google Cloud Console: Maps JavaScript API ativada, faturamento ativo e referenciador HTTP permitido."
+    );
+    authFailureListeners.forEach((fn) => {
+      try {
+        fn();
+      } catch {}
+    });
+    if (prev) {
+      try {
+        prev();
+      } catch {}
+    }
+  };
+}
 
 /**
  * Carrega apenas a biblioteca principal do Google Maps JS SDK (`libraries=maps`),
@@ -49,6 +89,11 @@ let googleMapsPromise: Promise<any> | null = null;
 export function loadGoogleMapsScript(customApiKey?: string): Promise<any> {
   if (typeof window === "undefined") {
     return Promise.reject(new Error("Google Maps só pode ser carregado no navegador."));
+  }
+
+  installAuthFailureHook();
+  if (googleMapsAuthFailed) {
+    return Promise.reject(new Error("Falha de autenticação do Google Maps (gm_authFailure)."));
   }
 
   const w = window as any;
