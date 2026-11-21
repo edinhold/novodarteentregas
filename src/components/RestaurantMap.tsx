@@ -202,14 +202,15 @@ const RestaurantMap = ({ restaurants }: RestaurantMapProps) => {
       console.error("[RestaurantMap] Map init error:", err);
     }
 
+    const containerEl = containerRef.current;
     return () => {
       try {
         if (mapRef.current) {
           mapRef.current.remove();
           mapRef.current = null;
         }
-        if (containerRef.current) {
-          delete (containerRef.current as any)._leaflet_id;
+        if (containerEl) {
+          delete (containerEl as any)._leaflet_id;
         }
       } catch (err) {
         console.error("[RestaurantMap] Map cleanup error:", err);

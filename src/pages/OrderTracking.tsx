@@ -238,6 +238,7 @@ const OrderTracking = () => {
 
   // Cleanup
   useEffect(() => {
+    const containerEl = containerRef.current;
     return () => {
       try {
         if (mapRef.current) {
@@ -246,8 +247,8 @@ const OrderTracking = () => {
           driverMarkerRef.current = null;
           accuracyCircleRef.current = null;
         }
-        if (containerRef.current) {
-          delete (containerRef.current as any)._leaflet_id;
+        if (containerEl) {
+          delete (containerEl as any)._leaflet_id;
         }
       } catch (err) {
         console.error("[OrderTracking] Map cleanup error:", err);
