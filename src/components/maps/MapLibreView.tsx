@@ -63,6 +63,7 @@ export interface MapLibreViewProps {
   routeDashed?: boolean;
   darkMode?: boolean;
   mapType?: "roadmap" | "satellite" | "hybrid";
+  pitch?: number;
   center?: LatLngLiteral | null;
   zoom?: number;
   autoFitBounds?: boolean;
@@ -77,6 +78,7 @@ export interface MapLibreViewProps {
 const ROUTE_SOURCE_ID = "duarte-route-source";
 const ROUTE_CASING_LAYER_ID = "duarte-route-casing";
 const ROUTE_LINE_LAYER_ID = "duarte-route-line";
+const BUILDINGS_3D_LAYER_ID = "duarte-3d-buildings";
 
 const OSM_RASTER_FALLBACK_STYLE: maplibregl.StyleSpecification = {
   version: 8,
@@ -89,6 +91,22 @@ const OSM_RASTER_FALLBACK_STYLE: maplibregl.StyleSpecification = {
     },
   },
   layers: [{ id: "osm", type: "raster", source: "osm" }],
+};
+
+const SATELLITE_RASTER_STYLE: maplibregl.StyleSpecification = {
+  version: 8,
+  sources: {
+    esri: {
+      type: "raster",
+      tiles: [
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      ],
+      tileSize: 256,
+      maxzoom: 19,
+      attribution: "© Esri World Imagery",
+    },
+  },
+  layers: [{ id: "esri-satellite", type: "raster", source: "esri" }],
 };
 
 function createOriginElement(): HTMLElement {
@@ -144,6 +162,8 @@ export const MapLibreView: React.FC<MapLibreViewProps> = ({
   routeWeight = 5,
   routeDashed = false,
   darkMode,
+  mapType = "roadmap",
+  pitch = 0,
   center,
   zoom = 14,
   autoFitBounds = true,
@@ -181,9 +201,48 @@ export const MapLibreView: React.FC<MapLibreViewProps> = ({
   }, []);
 
   const isDark = darkMode !== undefined ? darkMode : docDark;
-  const targetStyleUrl = isDark ? OPENFREEMAP_STYLES.dark : OPENFREEMAP_STYLES.liberty;
-  const activeStyleUrlRef = useRef<string>(targetStyleUrl);
+  const isSatellite = mapType === "satellite" || mapType === "hybrid";
+  const targetStyleKey = isSatellite ? "satellite" : isDark ? "dark" : "liberty";
+  const targetStyle: string | maplibregl.StyleSpecification = isSatellite
+    ? SATELLITE_RASTER_STYLE
+    : isDark
+    ? OPENFREEMAP_STYLES.dark
+    : OPENFREEMAP_STYLES.liberty;
+  const activeStyleKeyRef = useRef<string>(targetStyleKey);
   const usingFallbackStyleRef = useRef(false);
+  const styleLoadedRef = useRef(false);
+  const styleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pitchRef = useRef<number>(pitch);
+  pitchRef.current = pitch;
+
+  const ensure3DBuildings = useRef<() => void>(() => {});
+  ensure3DBuildings.current = () => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded() || pitchRef.current <= 0) return;
+    if (map.getLayer(BUILDINGS_3D_LAYER_ID)) return;
+    try {
+      const style = map.getStyle();
+      const vectorSourceName = Object.keys(style?.sources || {}).find(
+        (key) => (style.sources as any)[key]?.type === "vector"
+      );
+      if (!vectorSourceName) return;
+      map.addLayer({
+        id: BUILDINGS_3D_LAYER_ID,
+        source: vectorSourceName,
+        "source-layer": "building",
+        type: "fill-extrusion",
+        minzoom: 14,
+        paint: {
+          "fill-extrusion-color": isDark ? "#334155" : "#cbd5e1",
+          "fill-extrusion-height": ["coalesce", ["get", "render_height"], ["get", "height"], 10],
+          "fill-extrusion-base": ["coalesce", ["get", "render_min_height"], 0],
+          "fill-extrusion-opacity": 0.72,
+        },
+      });
+    } catch {
+      // Style may not include a building layer (e.g., raster fallback)
+    }
+  };
 
   // Sync route GeoJSON into MapLibre Source + Layer
   const syncRouteLayer = useRef<() => void>(() => {});
@@ -249,14 +308,13 @@ export const MapLibreView: React.FC<MapLibreViewProps> = ({
     const containerEl = containerRef.current;
     if (!containerEl || mapRef.current) return;
 
-    let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
     let resizeObserver: ResizeObserver | null = null;
-    let styleLoaded = false;
+    styleLoadedRef.current = false;
 
     const activateFallbackStyle = (map: maplibregl.Map, reason: unknown) => {
-      if (usingFallbackStyleRef.current) return;
+      if (usingFallbackStyleRef.current || activeStyleKeyRef.current === "satellite") return;
       usingFallbackStyleRef.current = true;
-      console.warn("[MapLibreView] OpenFreeMap indisponível, ativando fallback OpenStreetMap:", reason);
+      console.warn("[MapLibreView] Estilo vetorial indisponível, ativando fallback OpenStreetMap:", reason);
       try {
         map.setStyle(OSM_RASTER_FALLBACK_STYLE);
       } catch (fallbackErr) {
@@ -276,43 +334,46 @@ export const MapLibreView: React.FC<MapLibreViewProps> = ({
 
       const map = new maplibregl.Map({
         container: containerEl,
-        style: targetStyleUrl,
+        style: targetStyle,
         center: initialCenter as [number, number],
         zoom,
+        pitch,
         attributionControl: false,
       });
 
-      activeStyleUrlRef.current = targetStyleUrl;
+      activeStyleKeyRef.current = targetStyleKey;
       usingFallbackStyleRef.current = false;
 
-      // Fallback automático se o estilo vetorial demorar mais de 5s para carregar
-      fallbackTimer = setTimeout(() => {
-        if (!styleLoaded && mapRef.current) {
-          activateFallbackStyle(map, "timeout_5s");
+      // Fallback automático se o estilo vetorial demorar mais de 4.5s para carregar
+      styleTimeoutRef.current = setTimeout(() => {
+        if (!styleLoadedRef.current && mapRef.current) {
+          activateFallbackStyle(map, "timeout_4.5s");
         }
-      }, 5000);
+      }, 4500);
 
       map.on("load", () => {
-        styleLoaded = true;
-        if (fallbackTimer) {
-          clearTimeout(fallbackTimer);
-          fallbackTimer = null;
+        styleLoadedRef.current = true;
+        if (styleTimeoutRef.current) {
+          clearTimeout(styleTimeoutRef.current);
+          styleTimeoutRef.current = null;
         }
         map.resize();
         requestAnimationFrame(() => map.resize());
         setMapReady(true);
         setLoadError(null);
+        ensure3DBuildings.current();
         syncRouteLayer.current();
         onMapReady?.(map);
       });
 
       map.on("style.load", () => {
-        styleLoaded = true;
-        if (fallbackTimer) {
-          clearTimeout(fallbackTimer);
-          fallbackTimer = null;
+        styleLoadedRef.current = true;
+        if (styleTimeoutRef.current) {
+          clearTimeout(styleTimeoutRef.current);
+          styleTimeoutRef.current = null;
         }
         map.resize();
+        ensure3DBuildings.current();
         syncRouteLayer.current();
       });
 
@@ -326,7 +387,7 @@ export const MapLibreView: React.FC<MapLibreViewProps> = ({
 
       map.on("error", (e) => {
         console.error("MapLibre Error:", e);
-        if (!styleLoaded) {
+        if (!styleLoadedRef.current) {
           activateFallbackStyle(map, e?.error?.message || "style_error");
         }
       });
@@ -345,7 +406,7 @@ export const MapLibreView: React.FC<MapLibreViewProps> = ({
     }
 
     return () => {
-      if (fallbackTimer) clearTimeout(fallbackTimer);
+      if (styleTimeoutRef.current) clearTimeout(styleTimeoutRef.current);
       resizeObserver?.disconnect();
       originMarkerRef.current?.remove();
       stopMarkersRef.current.forEach((m) => m.remove());
@@ -362,14 +423,40 @@ export const MapLibreView: React.FC<MapLibreViewProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 2. Alternância dinâmica entre OpenFreeMap Liberty (claro) e Dark (escuro)
+  // 2. Alternância dinâmica entre Claro (Liberty), Escuro (Dark) e Satélite (Esri) sem tela preta/branca
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || activeStyleUrlRef.current === targetStyleUrl) return;
-    activeStyleUrlRef.current = targetStyleUrl;
+    if (!map || activeStyleKeyRef.current === targetStyleKey) return;
+    activeStyleKeyRef.current = targetStyleKey;
     usingFallbackStyleRef.current = false;
-    map.setStyle(targetStyleUrl);
-  }, [targetStyleUrl]);
+    styleLoadedRef.current = false;
+
+    if (styleTimeoutRef.current) {
+      clearTimeout(styleTimeoutRef.current);
+      styleTimeoutRef.current = null;
+    }
+
+    if (targetStyleKey !== "satellite") {
+      styleTimeoutRef.current = setTimeout(() => {
+        if (!styleLoadedRef.current && mapRef.current && !usingFallbackStyleRef.current) {
+          usingFallbackStyleRef.current = true;
+          mapRef.current.setStyle(OSM_RASTER_FALLBACK_STYLE);
+        }
+      }, 4500);
+    }
+
+    map.setStyle(targetStyle);
+  }, [targetStyleKey, targetStyle]);
+
+  // 2b. Alternância suave de inclinação 3D (pitch)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    map.easeTo({ pitch, duration: 450 });
+    if (pitch > 0) {
+      ensure3DBuildings.current();
+    }
+  }, [pitch]);
 
   // 3. Atualiza marcador da Origem (Loja)
   useEffect(() => {

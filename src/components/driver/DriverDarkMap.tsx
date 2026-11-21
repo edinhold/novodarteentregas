@@ -17,7 +17,7 @@ interface DriverDarkMapProps {
   isBottomCardCollapsed?: boolean;
 }
 
-type VisualMapMode = "dark" | "roadmap" | "satellite";
+type VisualMapMode = "dark" | "roadmap" | "3d" | "satellite";
 
 export const DriverDarkMap: React.FC<DriverDarkMapProps> = ({
   driverPosition,
@@ -212,7 +212,9 @@ export const DriverDarkMap: React.FC<DriverDarkMapProps> = ({
         routePath={routePath}
         routeColor="#0ea5e9"
         routeWeight={5}
-        darkMode={mapMode === "dark"}
+        darkMode={mapMode === "dark" || mapMode === "3d"}
+        mapType={mapMode === "satellite" ? "satellite" : "roadmap"}
+        pitch={mapMode === "3d" ? 55 : mapMode === "satellite" ? 30 : 0}
         autoFitBounds={!autoFollow || hasActiveDelivery}
         center={autoFollow ? driverPosition || pickupLocation || DEFAULT_CENTER : DEFAULT_CENTER}
         zoom={14}
@@ -230,12 +232,26 @@ export const DriverDarkMap: React.FC<DriverDarkMapProps> = ({
       >
         <button
           type="button"
-          onClick={() => setMapMode((prev) => (prev === "dark" ? "roadmap" : "dark"))}
-          aria-label="Alternar tema do mapa"
-          title={mapMode === "dark" ? "Mapa Escuro (OpenFreeMap)" : "Mapa Claro (OpenFreeMap)"}
-          className="w-12 h-12 rounded-full bg-[#18181b]/95 hover:bg-zinc-800 text-white border border-white/15 shadow-2xl flex items-center justify-center transition active:scale-95 backdrop-blur-md"
+          onClick={() => {
+            const modes: VisualMapMode[] = ["dark", "roadmap", "3d", "satellite"];
+            setMapMode(modes[(modes.indexOf(mapMode) + 1) % modes.length]);
+          }}
+          aria-label="Alternar tipo de mapa"
+          title={`Modo atual: ${
+            mapMode === "dark"
+              ? "Escuro"
+              : mapMode === "roadmap"
+              ? "Claro"
+              : mapMode === "3d"
+              ? "3D"
+              : "Satélite"
+          }`}
+          className="w-12 h-12 rounded-full bg-[#18181b]/95 hover:bg-zinc-800 text-white border border-white/15 shadow-2xl flex flex-col items-center justify-center transition active:scale-95 backdrop-blur-md"
         >
-          <Layers className="w-5 h-5 text-white" />
+          <Layers className="w-4 h-4 text-white" />
+          <span className="text-[9px] font-bold uppercase tracking-tight leading-none mt-0.5 text-sky-400">
+            {mapMode === "dark" ? "Esc" : mapMode === "roadmap" ? "Cla" : mapMode === "3d" ? "3D" : "Sat"}
+          </span>
         </button>
 
         <button
