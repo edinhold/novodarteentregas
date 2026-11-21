@@ -1,37 +1,16 @@
-import { MAPBOX_ACCESS_TOKEN } from "@/config/mapbox";
-
 // Chave pública do Google Maps JS SDK (usada APENAS para renderização visual; geocodificação/rotas usam Mapbox)
 export const GOOGLE_MAPS_API_KEY: string =
   ((typeof import.meta !== "undefined" &&
     (import.meta.env?.VITE_GOOGLE_MAPS_API_KEY as string | undefined)?.trim()) ||
-    "AIzaSyCO9r8RD6KA_5M5oQH6QuqYiLl6FIkbEFA");
+    "AIzaSyBHAKwJo3RyXxG6a1PKe_juQBaEvuxHJAk");
+
+export const GOOGLE_MAPS_DARK_MAP_ID: string =
+  ((typeof import.meta !== "undefined" &&
+    (import.meta.env?.VITE_GOOGLE_MAPS_MAP_ID as string | undefined)?.trim()) ||
+    "5c323fec164a136ac5d6c2f7");
+
 export const DEFAULT_CENTER = { lat: -15.5595, lng: -54.3079 }; // Primavera do Leste, MT center
 export const DEFAULT_ZOOM = 14;
-
-export const MAP_LAYERS = {
-  dark: {
-    url: MAPBOX_ACCESS_TOKEN
-      ? `https://api.mapbox.com/styles/v1/mapbox/dark-v11/tiles/256/{z}/{x}/{y}?access_token=${MAPBOX_ACCESS_TOKEN}`
-      : "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-    attribution: "&copy; Mapbox &copy; OpenStreetMap",
-  },
-  streets: {
-    url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-  },
-  osm: {
-    url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-  },
-  satellite: {
-    url: "https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}",
-    attribution: "Google",
-  },
-  google: {
-    url: "https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}",
-    attribution: "Google",
-  },
-};
 
 /**
  * Limites geográficos estritos da área urbana e perimetral de Primavera do Leste - MT.

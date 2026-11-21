@@ -1,49 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Restaurant } from "@/types";
-import { DEFAULT_CENTER, DEFAULT_ZOOM, MAP_LAYERS } from "@/config/maps";
+import { DEFAULT_CENTER, DEFAULT_ZOOM } from "@/config/maps";
 import { useNavigate } from "react-router-dom";
 import { useDriverLocations } from "@/hooks/useDriverLocations";
 import { geocodeAddress } from "@/services/mapbox";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
-
-import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
-import markerIcon from "leaflet/dist/images/marker-icon.png";
-import markerShadow from "leaflet/dist/images/marker-shadow.png";
-
-delete (L.Icon.Default.prototype as any)._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: markerIcon2x,
-  iconUrl: markerIcon,
-  shadowUrl: markerShadow,
-});
-
-const openIcon = new L.Icon({
-  iconUrl: "data:image/svg+xml," + encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="%23e53935" stroke="white" stroke-width="1.5"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3" fill="white"/></svg>`
-  ),
-  iconSize: [32, 32],
-  iconAnchor: [16, 32],
-  popupAnchor: [0, -32],
-});
-
-const closedIcon = new L.Icon({
-  iconUrl: "data:image/svg+xml," + encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="%23999" stroke="white" stroke-width="1.5"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3" fill="white"/></svg>`
-  ),
-  iconSize: [32, 32],
-  iconAnchor: [16, 32],
-  popupAnchor: [0, -32],
-});
-
-const driverMapIcon = new L.Icon({
-  iconUrl: "data:image/svg+xml," + encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="%233b82f6" stroke="white" stroke-width="2"><circle cx="12" cy="12" r="8"/><path d="M12 6v6l3 3" stroke="white" stroke-width="2" fill="none"/></svg>`
-  ),
-  iconSize: [28, 28],
-  iconAnchor: [14, 14],
-  popupAnchor: [0, -14],
-});
+import GoogleMapView, { type GoogleMapExtraMarker } from "@/components/maps/GoogleMapView";
 
 interface RestaurantMapProps {
   restaurants: Restaurant[];
@@ -129,15 +90,13 @@ const geocodeRestaurant = async (restaurant: Restaurant): Promise<RestaurantWith
 
     cachePosition(restaurant, parsed.coordinates.latitude, parsed.coordinates.longitude);
     return { ...restaurant, mapLatitude: parsed.coordinates.latitude, mapLongitude: parsed.coordinates.longitude };
-  } catch (err) {
+  } catch {
     return null;
   }
 };
 
 const RestaurantMap = ({ restaurants }: RestaurantMapProps) => {
   const navigate = useNavigate();
-  const mapRef = useRef<L.Map | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
   const [geocodedMarkers, setGeocodedMarkers] = useState<RestaurantWithMapPosition[]>([]);
   const { data: driverLocations = [] } = useDriverLocations();
 
@@ -147,8 +106,8 @@ const RestaurantMap = ({ restaurants }: RestaurantMapProps) => {
       .map((r) => ({ ...r, mapLatitude: r.latitude!, mapLongitude: r.longitude! }));
 
     const positionedIds = new Set(positioned.map((r) => r.id));
-    const fallbackMarkers = geocodedMarkers.filter((r) =>
-      restaurants.some((restaurant) => restaurant.id === r.id) && !positionedIds.has(r.id)
+    const fallbackMarkers = geocodedMarkers.filter(
+      (r) => restaurants.some((restaurant) => restaurant.id === r.id) && !positionedIds.has(r.id)
     );
 
     return [...positioned, ...fallbackMarkers];
@@ -179,45 +138,6 @@ const RestaurantMap = ({ restaurants }: RestaurantMapProps) => {
     });
   }, [markers]);
 
-  const center: [number, number] = visibleMarkers.length > 0
-    ? [visibleMarkers[0].mapLatitude, visibleMarkers[0].mapLongitude]
-    : [DEFAULT_CENTER.lat, DEFAULT_CENTER.lng];
-
-  useEffect(() => {
-    if (!containerRef.current || mapRef.current) return;
-    if ((containerRef.current as any)._leaflet_id) return;
-
-    try {
-      const map = L.map(containerRef.current).setView(center, DEFAULT_ZOOM);
-      mapRef.current = map;
-
-      L.tileLayer(MAP_LAYERS.streets.url, {
-        attribution: MAP_LAYERS.streets.attribution,
-      }).addTo(map);
-
-      requestAnimationFrame(() => {
-        if ((map as any)._container && (map as any)._mapPane) map.invalidateSize();
-      });
-    } catch (err) {
-      console.error("[RestaurantMap] Map init error:", err);
-    }
-
-    const containerEl = containerRef.current;
-    return () => {
-      try {
-        if (mapRef.current) {
-          mapRef.current.remove();
-          mapRef.current = null;
-        }
-        if (containerEl) {
-          delete (containerEl as any)._leaflet_id;
-        }
-      } catch (err) {
-        console.error("[RestaurantMap] Map cleanup error:", err);
-      }
-    };
-  }, []);
-
   useEffect(() => {
     let cancelled = false;
     const missingCoordinates = restaurants.filter(
@@ -241,12 +161,10 @@ const RestaurantMap = ({ restaurants }: RestaurantMapProps) => {
     if (uncachedRestaurants.length === 0) return;
 
     (async () => {
-      const resolved: RestaurantWithMapPosition[] = [];
       for (const restaurant of uncachedRestaurants) {
         const marker = await geocodeRestaurant(restaurant).catch(() => null);
         if (cancelled) return;
         if (marker) {
-          resolved.push(marker);
           setGeocodedMarkers((current) => [
             ...current.filter((item) => item.id !== marker.id),
             marker,
@@ -261,96 +179,44 @@ const RestaurantMap = ({ restaurants }: RestaurantMapProps) => {
     };
   }, [restaurants]);
 
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
+  const center = useMemo(
+    () =>
+      visibleMarkers.length > 0
+        ? { lat: visibleMarkers[0].mapLatitude, lng: visibleMarkers[0].mapLongitude }
+        : DEFAULT_CENTER,
+    [visibleMarkers]
+  );
 
-    // Clear existing markers
-    map.eachLayer((layer) => {
-      if (layer instanceof L.Marker || layer instanceof L.Circle) map.removeLayer(layer);
-    });
+  const extraMarkers = useMemo<GoogleMapExtraMarker[]>(() => {
+    const restaurantPins: GoogleMapExtraMarker[] = visibleMarkers.map((r) => ({
+      id: `rest-${r.id}`,
+      lat: r.mapLatitude,
+      lng: r.mapLongitude,
+      title: r.name,
+      color: r.is_open ? "#e53935" : "#999999",
+      onClick: () => navigate(`/restaurant/${r.id}`),
+    }));
 
-    // Restaurant markers
-    visibleMarkers.forEach((r) => {
-      const marker = L.marker([r.mapLatitude, r.mapLongitude], {
-        icon: r.is_open ? openIcon : closedIcon,
-        title: r.name,
-        zIndexOffset: 1000,
-      }).addTo(map);
+    const driverPins: GoogleMapExtraMarker[] = driverLocations.map((d: any, idx: number) => ({
+      id: `drv-${d.user_id || idx}`,
+      lat: Number(d.latitude),
+      lng: Number(d.longitude),
+      title: "Entregador em atividade",
+      color: "#3b82f6",
+    }));
 
-      marker.bindTooltip(r.name, {
-        direction: "top",
-        offset: [0, -28],
-        opacity: 0.95,
-        sticky: true,
-        className: "restaurant-map-tooltip",
-      });
+    return [...restaurantPins, ...driverPins];
+  }, [visibleMarkers, driverLocations, navigate]);
 
-      marker.on("mouseover", () => marker.openTooltip());
-      marker.on("mouseout", () => marker.closeTooltip());
-
-      marker.bindPopup(`
-        <div style="min-width:160px">
-          <h3 style="font-weight:bold;font-size:14px;margin:0">${r.name}</h3>
-          <p style="font-size:12px;color:#666;margin:2px 0">${r.category_name}</p>
-          <div style="display:flex;gap:8px;font-size:11px;color:#888;margin-top:4px">
-            <span>⭐ ${r.rating}</span>
-            <span>🕐 ${r.delivery_time}</span>
-          </div>
-          <p style="font-size:11px;color:${r.is_open ? '#e53935' : '#999'};font-weight:600;margin-top:4px">
-            ${r.is_open ? 'Aberto' : 'Fechado'}
-          </p>
-        </div>
-      `);
-
-      marker.on("click", () => navigate(`/restaurant/${r.id}`));
-    });
-
-    if (visibleMarkers.length > 1) {
-      const bounds = L.latLngBounds(visibleMarkers.map((r) => [r.mapLatitude, r.mapLongitude]));
-      map.fitBounds(bounds, { padding: [28, 28], maxZoom: DEFAULT_ZOOM });
-    } else if (visibleMarkers.length === 1) {
-      map.setView([visibleMarkers[0].mapLatitude, visibleMarkers[0].mapLongitude], DEFAULT_ZOOM);
-    }
-
-    requestAnimationFrame(() => {
-      // Map may already be removed when the component unmounts before this frame
-      if ((map as any)._container && (map as any)._mapPane) map.invalidateSize();
-    });
-
-    // Driver markers
-    driverLocations.forEach((d: any) => {
-      const dMarker = L.marker([d.latitude, d.longitude], {
-        icon: driverMapIcon,
-      }).addTo(map);
-
-      const speedKmh = d.speed ? Math.round(d.speed * 3.6) : 0;
-      const accText = d.accuracy ? `±${Math.round(d.accuracy)}m` : "";
-
-      dMarker.bindPopup(`
-        <div style="min-width:120px">
-          <h3 style="font-weight:bold;font-size:13px;margin:0">🚴 Entregador</h3>
-          ${speedKmh > 0 ? `<p style="font-size:11px;color:#666;margin:2px 0">🚗 ${speedKmh} km/h</p>` : ""}
-          ${accText ? `<p style="font-size:11px;color:#888;margin:2px 0">🎯 ${accText}</p>` : ""}
-          <p style="font-size:10px;color:#3b82f6;font-weight:600;margin-top:4px">Em atividade</p>
-        </div>
-      `);
-
-      // Accuracy circle
-      if (d.accuracy && d.accuracy > 0) {
-        L.circle([d.latitude, d.longitude], {
-          radius: d.accuracy,
-          fillColor: "#3b82f6",
-          fillOpacity: 0.05,
-          color: "#3b82f6",
-          opacity: 0.15,
-          weight: 1,
-        }).addTo(map);
-      }
-    });
-  }, [visibleMarkers, navigate, driverLocations]);
-
-  return <div ref={containerRef} style={{ width: "100%", height: "100%" }} />;
+  return (
+    <GoogleMapView
+      extraMarkers={extraMarkers}
+      center={center}
+      zoom={DEFAULT_ZOOM}
+      autoFitBounds={visibleMarkers.length > 1}
+      className="w-full h-full"
+    />
+  );
 };
 
 export default RestaurantMap;

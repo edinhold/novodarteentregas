@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { reverseGeocode as reverseGeocodeMapbox } from "@/services/mapbox";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
@@ -24,31 +24,10 @@ import {
   KeyRound,
   RefreshCw
 } from "lucide-react";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
-import { MAP_LAYERS, GOOGLE_MAPS_API_KEY, resolveStoreCoordinates, isWithinPrimaveraBounds } from "@/config/maps";
+import { resolveStoreCoordinates, isWithinPrimaveraBounds } from "@/config/maps";
 import { getBestLocation, isValidCoordinate } from "@/utils/geolocation";
 import MapErrorBoundary from "@/components/MapErrorBoundary";
-
-import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
-import markerIcon from "leaflet/dist/images/marker-icon.png";
-import markerShadow from "leaflet/dist/images/marker-shadow.png";
-
-delete (L.Icon.Default.prototype as any)._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: markerIcon2x,
-  iconUrl: markerIcon,
-  shadowUrl: markerShadow,
-});
-
-const storePin = new L.Icon({
-  iconUrl: "data:image/svg+xml," + encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" fill="%23e53935" stroke="white" stroke-width="1.5"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3" fill="white"/></svg>`
-  ),
-  iconSize: [36, 36],
-  iconAnchor: [18, 36],
-  popupAnchor: [0, -36],
-});
+import GoogleMapView from "@/components/maps/GoogleMapView";
 
 interface StoreInfoTabProps {
   restaurant: any;
@@ -82,11 +61,7 @@ const StoreInfoTab = ({ restaurant, userId }: StoreInfoTabProps) => {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [passwordLoading, setPasswordLoading] = useState(false);
 
-  const mapContainerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<L.Map | null>(null);
-  const markerRef = useRef<L.Marker | null>(null);
-  const tileLayerRef = useRef<L.TileLayer | null>(null);
-  const [mapType, setMapType] = useState<keyof typeof MAP_LAYERS>("streets");
+  const [mapType, setMapType] = useState<"roadmap" | "satellite">("roadmap");
   const [gpsLoading, setGpsLoading] = useState(false);
 
   useEffect(() => {
@@ -113,27 +88,6 @@ const StoreInfoTab = ({ restaurant, userId }: StoreInfoTabProps) => {
     }
   }, [restaurant]);
 
-  const updateMarkerPosition = useCallback((lat: number, lng: number) => {
-    setForm(f => ({ ...f, latitude: lat.toFixed(7), longitude: lng.toFixed(7) }));
-
-    if (mapRef.current) {
-      if (markerRef.current) {
-        markerRef.current.setLatLng([lat, lng]);
-      } else {
-        markerRef.current = L.marker([lat, lng], { icon: storePin, draggable: true })
-          .addTo(mapRef.current)
-          .bindPopup("<b>📍 Localização da Loja</b>");
-
-        markerRef.current.on("dragend", () => {
-          const pos = markerRef.current!.getLatLng();
-          setForm(f => ({ ...f, latitude: pos.lat.toFixed(7), longitude: pos.lng.toFixed(7) }));
-          reverseGeocode(pos.lat, pos.lng);
-        });
-      }
-      mapRef.current.setView([lat, lng], 17);
-    }
-  }, []);
-
   const reverseGeocode = useCallback(async (lat: number, lng: number) => {
     try {
       const parsed = await reverseGeocodeMapbox(lat, lng);
@@ -145,93 +99,9 @@ const StoreInfoTab = ({ restaurant, userId }: StoreInfoTabProps) => {
     }
   }, []);
 
-  // Initialize map safely
-  useEffect(() => {
-    if (!mapContainerRef.current || mapRef.current) return;
-    if ((mapContainerRef.current as any)._leaflet_id) return;
-
-    try {
-      const lat = parseFloat(form.latitude) || -15.5454;
-      const lng = parseFloat(form.longitude) || -54.2958;
-
-      const map = L.map(mapContainerRef.current).setView([lat, lng], form.latitude ? 17 : 12);
-      mapRef.current = map;
-
-      tileLayerRef.current = L.tileLayer(MAP_LAYERS[mapType].url, {
-        attribution: MAP_LAYERS[mapType].attribution,
-        maxZoom: mapType === "satellite" ? 18 : 19,
-      }).addTo(map);
-
-      if (form.latitude && form.longitude) {
-        markerRef.current = L.marker([parseFloat(form.latitude), parseFloat(form.longitude)], { icon: storePin, draggable: true })
-          .addTo(map)
-          .bindPopup("<b>📍 Localização da Loja</b>");
-
-        markerRef.current.on("dragend", () => {
-          const pos = markerRef.current!.getLatLng();
-          setForm(f => ({ ...f, latitude: pos.lat.toFixed(7), longitude: pos.lng.toFixed(7) }));
-          reverseGeocode(pos.lat, pos.lng);
-        });
-      }
-
-      map.on("click", (e: L.LeafletMouseEvent) => {
-        const { lat: clickLat, lng: clickLng } = e.latlng;
-        updateMarkerPosition(clickLat, clickLng);
-        reverseGeocode(clickLat, clickLng);
-      });
-    } catch (err) {
-      console.error("[StoreInfoTab] Error initializing Leaflet map:", err);
-    }
-
-    return () => {
-      try {
-        if (mapRef.current) {
-          mapRef.current.remove();
-          mapRef.current = null;
-        }
-        markerRef.current = null;
-        tileLayerRef.current = null;
-        if (mapContainerRef.current) {
-          delete (mapContainerRef.current as any)._leaflet_id;
-        }
-      } catch (err) {
-        console.error("[StoreInfoTab] Error removing Leaflet map:", err);
-      }
-    };
+  const updateMarkerPosition = useCallback((lat: number, lng: number) => {
+    setForm((f) => ({ ...f, latitude: lat.toFixed(7), longitude: lng.toFixed(7) }));
   }, []);
-
-  // Update tile layer if mapType changed
-  useEffect(() => {
-    const map = mapRef.current;
-    if (tileLayerRef.current && map) {
-      const currentUrl = MAP_LAYERS[mapType].url;
-      if ((tileLayerRef.current as any)._url !== currentUrl) {
-        map.removeLayer(tileLayerRef.current);
-        tileLayerRef.current = L.tileLayer(currentUrl, {
-          attribution: MAP_LAYERS[mapType].attribution,
-          maxZoom: mapType === "satellite" ? 18 : 19,
-        }).addTo(map);
-      }
-    }
-  }, [mapType]);
-
-  // Sync marker when form coords change from restaurant load
-  useEffect(() => {
-    if (!mapRef.current) return;
-    const lat = parseFloat(form.latitude);
-    const lng = parseFloat(form.longitude);
-    if (!isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0) {
-      if (markerRef.current) {
-        const cur = markerRef.current.getLatLng();
-        if (Math.abs(cur.lat - lat) > 0.0001 || Math.abs(cur.lng - lng) > 0.0001) {
-          markerRef.current.setLatLng([lat, lng]);
-          mapRef.current.setView([lat, lng], 17);
-        }
-      } else {
-        updateMarkerPosition(lat, lng);
-      }
-    }
-  }, [restaurant?.latitude, restaurant?.longitude]);
 
   const handleUseGPS = async () => {
     setGpsLoading(true);
@@ -603,15 +473,11 @@ const StoreInfoTab = ({ restaurant, userId }: StoreInfoTabProps) => {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => {
-                  const types: (keyof typeof MAP_LAYERS)[] = ["streets", "satellite"];
-                  const next = types[(types.indexOf(mapType) + 1) % types.length];
-                  setMapType(next);
-                }}
+                onClick={() => setMapType((prev) => (prev === "roadmap" ? "satellite" : "roadmap"))}
                 className="gap-1 text-xs h-7"
               >
                 <Layers className="w-3 h-3" />
-                {mapType === "streets" ? "OSM" : "Satélite"}
+                {mapType === "roadmap" ? "Mapa" : "Satélite"}
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
@@ -624,10 +490,36 @@ const StoreInfoTab = ({ restaurant, userId }: StoreInfoTabProps) => {
               </Button>
             </div>
             <MapErrorBoundary fallbackHeight="250px">
-              <div
-                ref={mapContainerRef}
-                className="w-full h-[250px] rounded-lg border border-border overflow-hidden z-0"
-              />
+              <div className="w-full h-[250px] rounded-lg border border-border overflow-hidden z-0">
+                <GoogleMapView
+                  origin={
+                    isValidCoordinate(parseFloat(form.latitude), parseFloat(form.longitude))
+                      ? {
+                          lat: parseFloat(form.latitude),
+                          lng: parseFloat(form.longitude),
+                          name: form.name || "Localização da Loja",
+                          draggable: true,
+                          onDragEnd: (lat, lng) => {
+                            updateMarkerPosition(lat, lng);
+                            void reverseGeocode(lat, lng);
+                          },
+                        }
+                      : null
+                  }
+                  center={
+                    isValidCoordinate(parseFloat(form.latitude), parseFloat(form.longitude))
+                      ? { lat: parseFloat(form.latitude), lng: parseFloat(form.longitude) }
+                      : undefined
+                  }
+                  zoom={16}
+                  mapType={mapType}
+                  onMapClick={(lat, lng) => {
+                    updateMarkerPosition(lat, lng);
+                    void reverseGeocode(lat, lng);
+                  }}
+                  className="w-full h-full"
+                />
+              </div>
             </MapErrorBoundary>
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">

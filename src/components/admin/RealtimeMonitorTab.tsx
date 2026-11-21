@@ -1,6 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase, createFreshChannel } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,38 +6,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Layers, Truck, Package, Users, Search, Activity } from "lucide-react";
-import { MAP_LAYERS } from "@/config/maps";
 import MapErrorBoundary from "@/components/MapErrorBoundary";
+import GoogleMapView, { type GoogleMapExtraMarker } from "@/components/maps/GoogleMapView";
 import { DriverPhoto } from "@/components/DriverPhoto";
-
-import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
-import markerIcon from "leaflet/dist/images/marker-icon.png";
-import markerShadow from "leaflet/dist/images/marker-shadow.png";
-
-delete (L.Icon.Default.prototype as any)._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: markerIcon2x,
-  iconUrl: markerIcon,
-  shadowUrl: markerShadow,
-});
-
-const svgIcon = (color: string, size = 30) =>
-  new L.Icon({
-    iconUrl:
-      "data:image/svg+xml," +
-      encodeURIComponent(
-        `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="${color}" stroke="white" stroke-width="1.5"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3" fill="white"/></svg>`
-      ),
-    iconSize: [size, size],
-    iconAnchor: [size / 2, size],
-    popupAnchor: [0, -size],
-  });
-
-const iconAvailable = svgIcon("#22c55e", 28);
-const iconBusy = svgIcon("#ef4444", 32);
-const iconStore = svgIcon("#f59e0b", 28);
-const iconDest = svgIcon("#a855f7", 26);
-
 import { geocodeAddress } from "@/services/mapbox";
 
 async function geocode(address: string): Promise<{ lat: number; lng: number } | null> {
@@ -54,14 +23,9 @@ async function geocode(address: string): Promise<{ lat: number; lng: number } | 
 
 const RealtimeMonitorContent = () => {
   const qc = useQueryClient();
-  const mapRef = useRef<L.Map | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const driverMarkers = useRef<Map<string, L.Marker>>(new Map());
-  const routeLines = useRef<Map<string, L.Polyline>>(new Map());
-  const extraMarkers = useRef<L.Marker[]>([]);
-  const didFit = useRef(false);
-  const [mapType, setMapType] = useState<keyof typeof MAP_LAYERS>("streets");
+  const [mapType, setMapType] = useState<"roadmap" | "satellite">("roadmap");
   const [search, setSearch] = useState("");
+  const [destCoordsMap, setDestCoordsMap] = useState<Record<string, { lat: number; lng: number }>>({});
 
   const { data: drivers = [] } = useQuery({
     queryKey: ["monitor-drivers"],
@@ -177,133 +141,61 @@ const RealtimeMonitorContent = () => {
     return { available, busy, offline, activeCount: activeDeliveries.length };
   }, [enrichedDrivers, activeDeliveries]);
 
-  // Init map safely
+  // Resolve destination coordinates for active deliveries via Mapbox Geocoding
   useEffect(() => {
-    if (!containerRef.current || mapRef.current) return;
-    if ((containerRef.current as any)._leaflet_id) return;
-
-    try {
-      mapRef.current = L.map(containerRef.current).setView([-15.5454, -54.2958], 12);
-      L.tileLayer(MAP_LAYERS[mapType].url, { attribution: MAP_LAYERS[mapType].attribution }).addTo(mapRef.current);
-    } catch (err) {
-      console.error("[RealtimeMonitorTab] Map init error:", err);
-    }
-
-    const containerEl = containerRef.current;
-    return () => {
-      try {
-        if (mapRef.current) {
-          mapRef.current.remove();
-          mapRef.current = null;
-        }
-        if (containerEl) {
-          delete (containerEl as any)._leaflet_id;
-        }
-      } catch (err) {
-        console.error("[RealtimeMonitorTab] Map cleanup error:", err);
+    let cancelled = false;
+    (async () => {
+      const nextMap: Record<string, { lat: number; lng: number }> = {};
+      for (const a of activeDeliveries) {
+        const target = a.status === "picked_up" ? a.delivery_address : a.pickup_address;
+        if (!target) continue;
+        const coords = await geocode(target);
+        if (cancelled) return;
+        if (coords) nextMap[a.id] = coords;
       }
+      if (!cancelled) setDestCoordsMap(nextMap);
+    })();
+    return () => {
+      cancelled = true;
     };
-  }, []);
+  }, [activeDeliveries]);
 
-  // Change map type
-  useEffect(() => {
-    if (!mapRef.current) return;
-    mapRef.current.eachLayer((l) => {
-      if (l instanceof L.TileLayer) mapRef.current!.removeLayer(l);
-    });
-    L.tileLayer(MAP_LAYERS[mapType].url, { attribution: MAP_LAYERS[mapType].attribution }).addTo(mapRef.current);
-  }, [mapType]);
-
-  // Update driver markers
-  useEffect(() => {
-    if (!mapRef.current) return;
-    const map = mapRef.current;
-    const seen = new Set<string>();
-
+  const extraMarkers = useMemo<GoogleMapExtraMarker[]>(() => {
+    const markers: GoogleMapExtraMarker[] = [];
     enrichedDrivers.forEach((d: any) => {
       if (!d.latitude || !d.longitude) return;
-      seen.add(d.user_id);
-      const pos: [number, number] = [d.latitude, d.longitude];
-      const icon = d.status === "in_delivery" ? iconBusy : iconAvailable;
       const statusLabel =
         d.status === "in_delivery"
           ? `Em Entrega (${d.active?.status === "picked_up" ? "entregando" : "coletando"})`
           : "Disponível";
-      const popup = `
-        <div class="p-1 min-w-[180px]">
-          <p class="font-bold text-sm">${d.full_name || "Sem nome"}</p>
-          <p class="text-xs text-muted-foreground">Cód: ${d.driver_code || "-"}</p>
-          <p class="text-xs">${d.vehicle_type || ""} ${d.vehicle_plate ? "• " + d.vehicle_plate : ""}</p>
-          <p class="text-xs mt-1"><strong>${statusLabel}</strong></p>
-          ${d.active ? `<p class="text-xs mt-1">📦 ${d.active.customer_name || "Cliente"}</p><p class="text-xs">→ ${d.active.delivery_address || ""}</p>` : ""}
-        </div>`;
-      if (driverMarkers.current.has(d.user_id)) {
-        const m = driverMarkers.current.get(d.user_id)!;
-        m.setLatLng(pos);
-        m.setIcon(icon);
-        m.getPopup()?.setContent(popup);
-      } else {
-        const m = L.marker(pos, { icon }).addTo(map).bindPopup(popup);
-        driverMarkers.current.set(d.user_id, m);
-      }
+      markers.push({
+        id: `drv-${d.user_id}`,
+        lat: Number(d.latitude),
+        lng: Number(d.longitude),
+        title: d.full_name || "Motorista",
+        color: d.status === "in_delivery" ? "#ef4444" : "#22c55e",
+        infoHtml: `<div style="padding:4px;min-width:160px">
+          <p style="font-weight:700;font-size:13px;margin:0">${d.full_name || "Sem nome"}</p>
+          <p style="font-size:11px;color:#666;margin:2px 0">Cód: ${d.driver_code || "-"}</p>
+          <p style="font-size:11px;margin:2px 0"><strong>${statusLabel}</strong></p>
+        </div>`,
+      });
     });
 
-    driverMarkers.current.forEach((m, id) => {
-      if (!seen.has(id)) {
-        map.removeLayer(m);
-        driverMarkers.current.delete(id);
-      }
+    activeDeliveries.forEach((a: any) => {
+      const coords = destCoordsMap[a.id];
+      if (!coords) return;
+      markers.push({
+        id: `dest-${a.id}`,
+        lat: coords.lat,
+        lng: coords.lng,
+        title: a.status === "picked_up" ? "Entrega" : "Coleta",
+        color: a.status === "picked_up" ? "#a855f7" : "#f59e0b",
+      });
     });
 
-    if (!didFit.current && driverMarkers.current.size > 0) {
-      const g = L.featureGroup(Array.from(driverMarkers.current.values()));
-      map.fitBounds(g.getBounds().pad(0.2));
-      didFit.current = true;
-    }
-  }, [enrichedDrivers]);
-
-  // Draw active delivery routes (driver → destination)
-  useEffect(() => {
-    if (!mapRef.current) return;
-    const map = mapRef.current;
-
-    // Clear old lines & extra markers
-    routeLines.current.forEach((l) => map.removeLayer(l));
-    routeLines.current.clear();
-    extraMarkers.current.forEach((m) => map.removeLayer(m));
-    extraMarkers.current = [];
-
-    (async () => {
-      for (const a of activeDeliveries) {
-        if (!a.driver_id) continue;
-        const loc = locMap.get(a.driver_id);
-        if (!loc?.latitude || !loc?.longitude) continue;
-        const target = a.status === "picked_up" ? a.delivery_address : a.pickup_address;
-        if (!target) continue;
-        const coords = await geocode(target);
-        if (!coords) continue;
-
-        const color = a.status === "picked_up" ? "#a855f7" : "#f59e0b";
-        const line = L.polyline(
-          [
-            [loc.latitude, loc.longitude],
-            [coords.lat, coords.lng],
-          ],
-          { color, weight: 3, opacity: 0.75, dashArray: "6,8" }
-        ).addTo(map);
-        routeLines.current.set(a.id, line);
-
-        const destMarker = L.marker([coords.lat, coords.lng], {
-          icon: a.status === "picked_up" ? iconDest : iconStore,
-        })
-          .addTo(map)
-          .bindPopup(
-            `<div class="p-1"><p class="font-bold text-xs">${a.status === "picked_up" ? "Entrega" : "Coleta"}</p><p class="text-xs">${target}</p></div>`
-          );
-        extraMarkers.current.push(destMarker);
-      }
-    })();
-  }, [activeDeliveries, locMap]);
+    return markers;
+  }, [enrichedDrivers, activeDeliveries, destCoordsMap]);
 
   return (
     <div className="space-y-4">
@@ -349,13 +241,19 @@ const RealtimeMonitorContent = () => {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
           <CardTitle className="text-base">Mapa em Tempo Real</CardTitle>
-          <Button size="sm" variant="outline" onClick={() => setMapType(mapType === "streets" ? "satellite" : "streets")}>
-            <Layers className="w-4 h-4 mr-1" /> {mapType === "streets" ? "Satélite" : "Mapa"}
+          <Button size="sm" variant="outline" onClick={() => setMapType(mapType === "roadmap" ? "satellite" : "roadmap")}>
+            <Layers className="w-4 h-4 mr-1" /> {mapType === "roadmap" ? "Satélite" : "Mapa"}
           </Button>
         </CardHeader>
         <CardContent>
           <div className="relative w-full h-[500px] rounded-lg overflow-hidden border">
-            <div ref={containerRef} className="w-full h-full z-0" />
+            <GoogleMapView
+              extraMarkers={extraMarkers}
+              mapType={mapType}
+              zoom={12}
+              autoFitBounds={extraMarkers.length > 0}
+              className="w-full h-full z-0"
+            />
             <div className="absolute bottom-3 left-3 z-[400] bg-background/90 backdrop-blur-sm rounded-md p-2 text-xs space-y-1 shadow border">
               <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-[#22c55e]" /> Disponível</div>
               <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-[#ef4444]" /> Em entrega</div>

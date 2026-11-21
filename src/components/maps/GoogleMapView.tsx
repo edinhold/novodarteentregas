@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
-import L from "leaflet";
-import { DEFAULT_CENTER, MAP_LAYERS } from "@/config/maps";
+import { MapPin } from "lucide-react";
+import { DEFAULT_CENTER, GOOGLE_MAPS_DARK_MAP_ID } from "@/config/maps";
 import { isValidCoordinate } from "@/utils/geolocation";
 import {
   geoJsonGeometryToLatLngPath,
@@ -62,6 +62,7 @@ export interface GoogleMapViewProps {
   routeWeight?: number;
   routeDashed?: boolean;
   darkMode?: boolean;
+  mapId?: string;
   mapType?: "roadmap" | "satellite" | "hybrid";
   center?: LatLngLiteral | null;
   zoom?: number;
@@ -146,6 +147,7 @@ export const GoogleMapView: React.FC<GoogleMapViewProps> = ({
   routeWeight = 5,
   routeDashed = false,
   darkMode = false,
+  mapId,
   mapType = "roadmap",
   center,
   zoom = 14,
@@ -204,6 +206,7 @@ export const GoogleMapView: React.FC<GoogleMapViewProps> = ({
                 ? { lat: origin.lat, lng: origin.lng }
                 : DEFAULT_CENTER;
 
+        const effectiveMapId = mapId ?? (darkMode ? GOOGLE_MAPS_DARK_MAP_ID : undefined);
         const map = new maps.Map(containerRef.current, {
           center: initialCenter,
           zoom,
@@ -215,7 +218,9 @@ export const GoogleMapView: React.FC<GoogleMapViewProps> = ({
           fullscreenControl: false,
           clickableIcons: false,
           gestureHandling: "greedy",
-          styles: darkMode ? DARK_MAP_STYLES : undefined,
+          ...(effectiveMapId
+            ? { mapId: effectiveMapId }
+            : { styles: darkMode ? DARK_MAP_STYLES : undefined }),
         });
 
         infoWindowRef.current = new maps.InfoWindow();
@@ -264,9 +269,14 @@ export const GoogleMapView: React.FC<GoogleMapViewProps> = ({
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map || !mapReadyState) return;
+    const effectiveMapId = mapId ?? (darkMode ? GOOGLE_MAPS_DARK_MAP_ID : undefined);
     map.setMapTypeId(mapType);
-    map.setOptions({ styles: darkMode && mapType === "roadmap" ? DARK_MAP_STYLES : null });
-  }, [mapType, darkMode, mapReadyState]);
+    if (effectiveMapId) {
+      map.setOptions({ mapId: effectiveMapId });
+    } else {
+      map.setOptions({ styles: darkMode && mapType === "roadmap" ? DARK_MAP_STYLES : null });
+    }
+  }, [mapType, darkMode, mapId, mapReadyState]);
 
   // 3. Atualiza marcador da Origem (Loja)
   useEffect(() => {
@@ -525,240 +535,15 @@ export const GoogleMapView: React.FC<GoogleMapViewProps> = ({
     mapReadyState,
   ]);
 
+
   if (loadError) {
     return (
-      <LeafletFallbackMap
-        origin={origin}
-        stops={stops}
-        driverPosition={driverPosition}
-        extraMarkers={extraMarkers}
-        routePath={routePath}
-        geoJsonRoute={geoJsonRoute}
-        routeColor={routeColor}
-        routeWeight={routeWeight}
-        routeDashed={routeDashed}
-        darkMode={darkMode}
-        mapType={mapType}
-        center={center}
-        zoom={zoom}
-        autoFitBounds={autoFitBounds}
-        fitPadding={fitPadding}
-        recenterTrigger={recenterTrigger}
-        onMapClick={onMapClick}
-        onUserInteract={onUserInteract}
-        className={className}
-      />
+      <div className={`${className} flex flex-col items-center justify-center bg-slate-900/90 text-slate-300 p-4 text-center gap-2`}>
+        <MapPin className="w-6 h-6 text-orange-400" />
+        <p className="text-xs font-medium">Mapa indisponível no momento</p>
+      </div>
     );
   }
-
-  return <div ref={containerRef} className={className} />;
-};
-
-const LeafletFallbackMap: React.FC<GoogleMapViewProps> = ({
-  origin,
-  stops = [],
-  driverPosition,
-  extraMarkers = [],
-  routePath,
-  geoJsonRoute,
-  routeColor = "#EA580C",
-  routeWeight = 5,
-  routeDashed = false,
-  darkMode = false,
-  mapType = "roadmap",
-  center,
-  zoom = 14,
-  autoFitBounds = true,
-  fitPadding = 48,
-  recenterTrigger = 0,
-  onMapClick,
-  onUserInteract,
-  className = "w-full h-full",
-}) => {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<L.Map | null>(null);
-  const layerGroupRef = useRef<L.LayerGroup | null>(null);
-  const tileLayerRef = useRef<L.TileLayer | null>(null);
-  const onMapClickRef = useRef(onMapClick);
-  const onUserInteractRef = useRef(onUserInteract);
-  onMapClickRef.current = onMapClick;
-  onUserInteractRef.current = onUserInteract;
-
-  useEffect(() => {
-    if (!containerRef.current || mapRef.current) return;
-    const initialCenter: [number, number] =
-      center && isValidCoordinate(center.lat, center.lng)
-        ? [center.lat, center.lng]
-        : driverPosition && isValidCoordinate(driverPosition.lat, driverPosition.lng)
-          ? [driverPosition.lat, driverPosition.lng]
-          : origin && isValidCoordinate(origin.lat, origin.lng)
-            ? [origin.lat, origin.lng]
-            : [DEFAULT_CENTER.lat, DEFAULT_CENTER.lng];
-
-    const map = L.map(containerRef.current, {
-      center: initialCenter,
-      zoom,
-      zoomControl: false,
-      attributionControl: false,
-    });
-
-    const layerCfg =
-      mapType === "satellite" || mapType === "hybrid"
-        ? MAP_LAYERS.satellite
-        : darkMode
-          ? MAP_LAYERS.dark
-          : MAP_LAYERS.streets;
-    tileLayerRef.current = L.tileLayer(layerCfg.url, { maxZoom: 19 }).addTo(map);
-    layerGroupRef.current = L.layerGroup().addTo(map);
-
-    map.on("click", (e: L.LeafletMouseEvent) => {
-      onMapClickRef.current?.(e.latlng.lat, e.latlng.lng);
-    });
-    map.on("dragstart", () => {
-      onUserInteractRef.current?.();
-    });
-
-    mapRef.current = map;
-    return () => {
-      map.remove();
-      mapRef.current = null;
-      layerGroupRef.current = null;
-      tileLayerRef.current = null;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    const layerCfg =
-      mapType === "satellite" || mapType === "hybrid"
-        ? MAP_LAYERS.satellite
-        : darkMode
-          ? MAP_LAYERS.dark
-          : MAP_LAYERS.streets;
-    if (tileLayerRef.current) {
-      tileLayerRef.current.setUrl(layerCfg.url);
-    }
-  }, [darkMode, mapType]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    const group = layerGroupRef.current;
-    if (!map || !group) return;
-    group.clearLayers();
-
-    const boundsPts: [number, number][] = [];
-
-    if (origin && isValidCoordinate(origin.lat, origin.lng)) {
-      const icon = L.divIcon({
-        className: "",
-        html: `<div style="width:20px;height:20px;border-radius:9999px;background:#10B981;border:2.5px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.35)"></div>`,
-        iconSize: [20, 20],
-        iconAnchor: [10, 10],
-      });
-      const marker = L.marker([origin.lat, origin.lng], {
-        icon,
-        draggable: !!origin.draggable,
-      }).addTo(group);
-      if (origin.infoHtml) marker.bindPopup(origin.infoHtml);
-      if (origin.draggable && origin.onDragEnd) {
-        marker.on("dragend", () => {
-          const p = marker.getLatLng();
-          origin.onDragEnd?.(p.lat, p.lng);
-        });
-      }
-      boundsPts.push([origin.lat, origin.lng]);
-    }
-
-    stops.forEach((stop, idx) => {
-      if (!isValidCoordinate(stop.lat, stop.lng)) return;
-      const num = stop.number ?? idx + 1;
-      const icon = L.divIcon({
-        className: "",
-        html: `<div style="width:24px;height:24px;border-radius:9999px;background:#2563EB;border:2px solid #fff;color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,.35)">${num}</div>`,
-        iconSize: [24, 24],
-        iconAnchor: [12, 12],
-      });
-      const marker = L.marker([stop.lat, stop.lng], {
-        icon,
-        draggable: !!stop.draggable,
-      }).addTo(group);
-      if (stop.infoHtml) marker.bindPopup(stop.infoHtml);
-      if (stop.draggable && stop.onDragEnd) {
-        marker.on("dragend", () => {
-          const p = marker.getLatLng();
-          stop.onDragEnd?.(p.lat, p.lng);
-        });
-      }
-      boundsPts.push([stop.lat, stop.lng]);
-    });
-
-    if (driverPosition && isValidCoordinate(driverPosition.lat, driverPosition.lng)) {
-      const icon = L.divIcon({
-        className: "",
-        html: `<div style="width:24px;height:24px;border-radius:9999px;background:#EA580C;border:2.5px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.4)"></div>`,
-        iconSize: [24, 24],
-        iconAnchor: [12, 12],
-      });
-      const marker = L.marker([driverPosition.lat, driverPosition.lng], { icon }).addTo(group);
-      if (driverPosition.infoHtml) marker.bindPopup(driverPosition.infoHtml);
-      boundsPts.push([driverPosition.lat, driverPosition.lng]);
-    }
-
-    extraMarkers.forEach((em) => {
-      if (!isValidCoordinate(em.lat, em.lng)) return;
-      const icon = L.divIcon({
-        className: "",
-        html: `<div style="width:16px;height:16px;border-radius:9999px;background:${em.color || "#F59E0B"};border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.3)"></div>`,
-        iconSize: [16, 16],
-        iconAnchor: [8, 8],
-      });
-      const marker = L.marker([em.lat, em.lng], { icon }).addTo(group);
-      if (em.infoHtml) marker.bindPopup(em.infoHtml);
-      if (em.onClick) marker.on("click", em.onClick);
-    });
-
-    const convertedPath =
-      routePath && routePath.length > 0
-        ? routePath
-        : geoJsonRoute && geoJsonRoute.length > 0
-          ? geoJsonGeometryToLatLngPath(geoJsonRoute)
-          : [];
-    if (convertedPath.length >= 2) {
-      L.polyline(
-        convertedPath.map((p) => [p.lat, p.lng] as [number, number]),
-        {
-          color: routeColor,
-          weight: routeWeight,
-          opacity: 0.9,
-          dashArray: routeDashed ? "8, 8" : undefined,
-        }
-      ).addTo(group);
-    }
-
-    if (autoFitBounds && boundsPts.length >= 2) {
-      map.fitBounds(boundsPts, { padding: [fitPadding, fitPadding] });
-    } else if (autoFitBounds && boundsPts.length === 1) {
-      map.panTo(boundsPts[0]);
-    } else if (center && isValidCoordinate(center.lat, center.lng)) {
-      map.panTo([center.lat, center.lng]);
-    }
-  }, [
-    origin,
-    stops,
-    driverPosition,
-    extraMarkers,
-    routePath,
-    geoJsonRoute,
-    routeColor,
-    routeWeight,
-    routeDashed,
-    autoFitBounds,
-    fitPadding,
-    center,
-    recenterTrigger,
-  ]);
 
   return <div ref={containerRef} className={className} />;
 };

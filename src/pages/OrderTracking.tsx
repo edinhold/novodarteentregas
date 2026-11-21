@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase, createFreshChannel } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -7,36 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import MapErrorBoundary from "@/components/MapErrorBoundary";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
-
-import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
-import markerIcon from "leaflet/dist/images/marker-icon.png";
-import markerShadow from "leaflet/dist/images/marker-shadow.png";
-
-delete (L.Icon.Default.prototype as any)._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: markerIcon2x,
-  iconUrl: markerIcon,
-  shadowUrl: markerShadow,
-});
-
-const driverIcon = new L.Icon({
-  iconUrl: "data:image/svg+xml," + encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="%233b82f6" stroke="white" stroke-width="2"/><path d="M8 12l2 2 4-4" stroke="white" stroke-width="2" fill="none" stroke-linecap="round"/></svg>`
-  ),
-  iconSize: [32, 32],
-  iconAnchor: [16, 16],
-});
-
-const destIcon = new L.Icon({
-  iconUrl: "data:image/svg+xml," + encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="%23e53935" stroke="white" stroke-width="1.5"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3" fill="white"/></svg>`
-  ),
-  iconSize: [32, 32],
-  iconAnchor: [16, 32],
-  popupAnchor: [0, -32],
-});
+import GoogleMapView from "@/components/maps/GoogleMapView";
 
 const statusLabels: Record<string, { label: string; color: string }> = {
   pending: { label: "Aguardando restaurante", color: "bg-yellow-500" },
@@ -56,11 +27,6 @@ const OrderTracking = () => {
   const [driverProfile, setDriverProfile] = useState<any>(null);
   const [restaurant, setRestaurant] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-
-  const mapRef = useRef<L.Map | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const driverMarkerRef = useRef<L.Marker | null>(null);
-  const accuracyCircleRef = useRef<L.Circle | null>(null);
 
   // Load order data
   useEffect(() => {
@@ -174,88 +140,6 @@ const OrderTracking = () => {
     };
   }, [deliveryRequest?.driver_id, deliveryRequest?.id]);
 
-  // Map
-  useEffect(() => {
-    if (!containerRef.current) return;
-
-    const center: [number, number] = driverLocation
-      ? [driverLocation.lat, driverLocation.lng]
-      : restaurant?.latitude && restaurant?.longitude
-        ? [restaurant.latitude, restaurant.longitude]
-        : [-15.78, -47.93];
-
-    if (!mapRef.current) {
-      if ((containerRef.current as any)._leaflet_id) return;
-      try {
-        const map = L.map(containerRef.current).setView(center, 15);
-        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-        }).addTo(map);
-        mapRef.current = map;
-
-        // Restaurant marker
-        if (restaurant?.latitude && restaurant?.longitude) {
-          L.marker([restaurant.latitude, restaurant.longitude], { icon: destIcon })
-            .addTo(map)
-            .bindPopup(`<b>${restaurant.name}</b>`);
-        }
-      } catch (err) {
-        console.error("[OrderTracking] Map init error:", err);
-        return;
-      }
-    }
-
-    const map = mapRef.current;
-
-    // Update driver marker
-    if (driverLocation) {
-      if (driverMarkerRef.current) {
-        driverMarkerRef.current.setLatLng([driverLocation.lat, driverLocation.lng]);
-      } else {
-        driverMarkerRef.current = L.marker([driverLocation.lat, driverLocation.lng], { icon: driverIcon })
-          .addTo(map)
-          .bindPopup("🚴 Entregador");
-      }
-
-      if (driverLocation.accuracy) {
-        if (accuracyCircleRef.current) {
-          accuracyCircleRef.current.setLatLng([driverLocation.lat, driverLocation.lng]).setRadius(driverLocation.accuracy);
-        } else {
-          accuracyCircleRef.current = L.circle([driverLocation.lat, driverLocation.lng], {
-            radius: driverLocation.accuracy,
-            fillColor: "#3b82f6",
-            fillOpacity: 0.1,
-            color: "#3b82f6",
-            opacity: 0.2,
-            weight: 1,
-          }).addTo(map);
-        }
-      }
-
-      map.setView([driverLocation.lat, driverLocation.lng]);
-    }
-  }, [driverLocation, restaurant]);
-
-  // Cleanup
-  useEffect(() => {
-    const containerEl = containerRef.current;
-    return () => {
-      try {
-        if (mapRef.current) {
-          mapRef.current.remove();
-          mapRef.current = null;
-          driverMarkerRef.current = null;
-          accuracyCircleRef.current = null;
-        }
-        if (containerEl) {
-          delete (containerEl as any)._leaflet_id;
-        }
-      } catch (err) {
-        console.error("[OrderTracking] Map cleanup error:", err);
-      }
-    };
-  }, []);
-
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -278,7 +162,28 @@ const OrderTracking = () => {
       {/* Map */}
       <div className="h-[50vh]">
         <MapErrorBoundary fallbackHeight="50vh">
-          <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
+          <GoogleMapView
+            origin={
+              restaurant?.latitude && restaurant?.longitude
+                ? { lat: Number(restaurant.latitude), lng: Number(restaurant.longitude), name: restaurant.name }
+                : null
+            }
+            driverPosition={
+              driverLocation
+                ? { lat: driverLocation.lat, lng: driverLocation.lng, label: "Entregador" }
+                : null
+            }
+            center={
+              driverLocation
+                ? { lat: driverLocation.lat, lng: driverLocation.lng }
+                : restaurant?.latitude && restaurant?.longitude
+                ? { lat: Number(restaurant.latitude), lng: Number(restaurant.longitude) }
+                : undefined
+            }
+            zoom={15}
+            autoFitBounds
+            className="w-full h-full"
+          />
         </MapErrorBoundary>
       </div>
 

@@ -1,42 +1,13 @@
-import { useEffect, useRef, useState, useMemo } from "react";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
+import { useEffect, useState, useMemo } from "react";
 import { supabase, createFreshChannel } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Layers, Navigation, Package, Truck, MapPin } from "lucide-react";
-import { MAP_LAYERS } from "@/config/maps";
+import { Layers, Navigation, Package, Truck } from "lucide-react";
 import MapErrorBoundary from "@/components/MapErrorBoundary";
-
-import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
-import markerIcon from "leaflet/dist/images/marker-icon.png";
-import markerShadow from "leaflet/dist/images/marker-shadow.png";
-
-delete (L.Icon.Default.prototype as any)._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: markerIcon2x,
-  iconUrl: markerIcon,
-  shadowUrl: markerShadow,
-});
-
-const makeIcon = (color: string, size = 30) =>
-  new L.Icon({
-    iconUrl:
-      "data:image/svg+xml," +
-      encodeURIComponent(
-        `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="${color}" stroke="white" stroke-width="1.5"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3" fill="white"/></svg>`
-      ),
-    iconSize: [size, size],
-    iconAnchor: [size / 2, size],
-    popupAnchor: [0, -size],
-  });
-
-const storeIcon = makeIcon("#e53935", 34);
-const availableIcon = makeIcon("#22c55e", 28);
-const assignedIcon = makeIcon("#3b82f6", 34);
-const destIcon = makeIcon("#a855f7", 30);
+import GoogleMapView, { type GoogleMapExtraMarker } from "@/components/maps/GoogleMapView";
+import { geocodeAddress } from "@/services/mapbox";
 
 function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number) {
   const R = 6371000;
@@ -55,36 +26,9 @@ function formatDistance(m: number) {
   return `${(m / 1000).toFixed(2)} km`;
 }
 
-import { geocodeAddress } from "@/services/mapbox";
-
-async function geocode(address: string): Promise<{ lat: number; lng: number } | null> {
-  try {
-    const parsed = await geocodeAddress(address);
-    if (parsed?.coordinates) {
-      return { lat: parsed.coordinates.latitude, lng: parsed.coordinates.longitude };
-    }
-  } catch (e) {
-    console.error("[RadarTab] geocode error", e);
-  }
-  return null;
-}
-
-interface Props {
-  restaurant: any;
-  userId: string;
-}
-
 const RadarTabContent = ({ restaurant, userId }: Props) => {
   const queryClient = useQueryClient();
-  const mapRef = useRef<L.Map | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const markersRef = useRef<Map<string, L.Marker>>(new Map());
-  const extraMarkersRef = useRef<L.Marker[]>([]);
-  const routeLineRef = useRef<L.Polyline | null>(null);
-  const didInitialFitRef = useRef(false);
-  const lastAssignedRef = useRef<string | null>(null);
-
-  const [mapType, setMapType] = useState<keyof typeof MAP_LAYERS>("streets");
+  const [mapType, setMapType] = useState<"roadmap" | "satellite">("roadmap");
   const [destCoords, setDestCoords] = useState<{ lat: number; lng: number } | null>(null);
 
   // Available drivers (safe RPC — no PIX/CPF/phone exposed)
@@ -207,9 +151,17 @@ const RadarTabContent = ({ restaurant, userId }: Props) => {
   useEffect(() => {
     if (activeDelivery?.status === "picked_up" && activeDelivery.delivery_address) {
       let cancelled = false;
-      geocode(activeDelivery.delivery_address).then((c) => {
-        if (!cancelled) setDestCoords(c);
-      });
+      geocodeAddress(activeDelivery.delivery_address)
+        .then((parsed) => {
+          if (!cancelled && parsed?.coordinates) {
+            setDestCoords({ lat: parsed.coordinates.latitude, lng: parsed.coordinates.longitude });
+          } else if (!cancelled) {
+            setDestCoords(null);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setDestCoords(null);
+        });
       return () => {
         cancelled = true;
       };
@@ -242,73 +194,9 @@ const RadarTabContent = ({ restaurant, userId }: Props) => {
     return null;
   }, [assignedDriver, activeDelivery, restaurant, destCoords]);
 
-  // Init map safely
-  useEffect(() => {
-    if (!containerRef.current || mapRef.current) return;
-    if ((containerRef.current as any)._leaflet_id) return;
+  const extraMarkers = useMemo<GoogleMapExtraMarker[]>(() => {
+    const list: GoogleMapExtraMarker[] = [];
 
-    try {
-      const center: [number, number] =
-        restaurant?.latitude && restaurant?.longitude
-          ? [restaurant.latitude, restaurant.longitude]
-          : [-15.5454, -54.2958];
-      mapRef.current = L.map(containerRef.current).setView(center, 13);
-      L.tileLayer(MAP_LAYERS[mapType].url, { attribution: MAP_LAYERS[mapType].attribution }).addTo(
-        mapRef.current
-      );
-    } catch (err) {
-      console.error("[RadarTab] Map init error:", err);
-    }
-
-    return () => {
-      try {
-        if (mapRef.current) {
-          mapRef.current.remove();
-          mapRef.current = null;
-        }
-        if (containerRef.current) {
-          delete (containerRef.current as any)._leaflet_id;
-        }
-      } catch (err) {
-        console.error("[RadarTab] Map cleanup error:", err);
-      }
-    };
-  }, []);
-
-  // Tile layer change
-  useEffect(() => {
-    if (!mapRef.current) return;
-    mapRef.current.eachLayer((l) => {
-      if (l instanceof L.TileLayer) mapRef.current?.removeLayer(l);
-    });
-    L.tileLayer(MAP_LAYERS[mapType].url, { attribution: MAP_LAYERS[mapType].attribution }).addTo(
-      mapRef.current
-    );
-  }, [mapType]);
-
-  // Render markers
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-
-    // Clear extra markers + route
-    extraMarkersRef.current.forEach((m) => map.removeLayer(m));
-    extraMarkersRef.current = [];
-    if (routeLineRef.current) {
-      map.removeLayer(routeLineRef.current);
-      routeLineRef.current = null;
-    }
-
-    // Store marker
-    if (restaurant?.latitude && restaurant?.longitude) {
-      const m = L.marker([restaurant.latitude, restaurant.longitude], { icon: storeIcon })
-        .addTo(map)
-        .bindPopup(`<b>${restaurant.name || "Sua loja"}</b>`);
-      extraMarkersRef.current.push(m);
-    }
-
-    // Driver markers — show available (active, with location, not busy) + assigned
-    const seen = new Set<string>();
     drivers.forEach((d) => {
       const loc = locationMap.get(d.user_id);
       if (!loc) return;
@@ -316,69 +204,44 @@ const RadarTabContent = ({ restaurant, userId }: Props) => {
       const isAvailable = d.is_active && !busySet.has(d.user_id);
       if (!isAssigned && !isAvailable) return;
 
-      seen.add(d.user_id);
-      const pos: [number, number] = [loc.latitude, loc.longitude];
-      const icon = isAssigned ? assignedIcon : availableIcon;
-      const plate = d.vehicle_plate ? ` • <b>${d.vehicle_plate}</b>` : "";
-      const popup = `<div class="p-1"><b>${d.full_name || "Motorista"}</b>${plate}<br/><span style="font-size:11px">${d.driver_code || ""} ${d.vehicle_type || ""}</span>${
-        isAssigned && tracking ? `<br/><span style="font-size:11px">${tracking.label} — ${formatDistance(tracking.meters)}</span>` : ""
-      }</div>`;
-
-      if (markersRef.current.has(d.user_id)) {
-        const mk = markersRef.current.get(d.user_id)!;
-        mk.setLatLng(pos);
-        mk.setIcon(icon);
-        mk.getPopup()?.setContent(popup);
-      } else {
-        const mk = L.marker(pos, { icon }).addTo(map).bindPopup(popup);
-        markersRef.current.set(d.user_id, mk);
-      }
+      list.push({
+        id: `drv-${d.user_id}`,
+        lat: Number(loc.latitude),
+        lng: Number(loc.longitude),
+        title: d.full_name || "Motorista",
+        color: isAssigned ? "#3b82f6" : "#22c55e",
+        infoHtml: `<div style="padding:4px"><b>${d.full_name || "Motorista"}</b>${
+          d.vehicle_plate ? ` • <b>${d.vehicle_plate}</b>` : ""
+        }<br/><span style="font-size:11px">${d.driver_code || ""} ${d.vehicle_type || ""}</span>${
+          isAssigned && tracking
+            ? `<br/><span style="font-size:11px">${tracking.label} — ${formatDistance(tracking.meters)}</span>`
+            : ""
+        }</div>`,
+      });
     });
 
-    // Remove stale
-    markersRef.current.forEach((mk, id) => {
-      if (!seen.has(id)) {
-        map.removeLayer(mk);
-        markersRef.current.delete(id);
-      }
-    });
-
-    // Destination marker + route line
     if (tracking && assignedDriver?.location) {
-      const tm = L.marker([tracking.target.lat, tracking.target.lng], { icon: destIcon })
-        .addTo(map)
-        .bindPopup(`<b>${tracking.toLabel}</b>`);
-      extraMarkersRef.current.push(tm);
-
-      routeLineRef.current = L.polyline(
-        [
-          [assignedDriver.location.latitude, assignedDriver.location.longitude],
-          [tracking.target.lat, tracking.target.lng],
-        ],
-        { color: "#3b82f6", weight: 4, opacity: 0.7, dashArray: "8 8" }
-      ).addTo(map);
-
-      const bounds = L.latLngBounds([
-        [assignedDriver.location.latitude, assignedDriver.location.longitude],
-        [tracking.target.lat, tracking.target.lng],
-      ]);
-      if (!didInitialFitRef.current || lastAssignedRef.current !== assignedDriver.user_id) {
-        map.fitBounds(bounds.pad(0.3));
-        didInitialFitRef.current = true;
-        lastAssignedRef.current = assignedDriver.user_id;
-      }
-    } else if (markersRef.current.size > 0) {
-      const grp = L.featureGroup([
-        ...Array.from(markersRef.current.values()),
-        ...extraMarkersRef.current,
-      ]);
-      if (!didInitialFitRef.current && grp.getBounds().isValid()) {
-        map.fitBounds(grp.getBounds().pad(0.2));
-        didInitialFitRef.current = true;
-      }
-      lastAssignedRef.current = null;
+      list.push({
+        id: "radar-target",
+        lat: tracking.target.lat,
+        lng: tracking.target.lng,
+        title: tracking.toLabel,
+        color: "#a855f7",
+      });
     }
-  }, [drivers, locationMap, busySet, assignedDriver, tracking, restaurant]);
+
+    return list;
+  }, [drivers, locationMap, busySet, assignedDriver, tracking]);
+
+  const routePath = useMemo(() => {
+    if (tracking && assignedDriver?.location) {
+      return [
+        { lat: Number(assignedDriver.location.latitude), lng: Number(assignedDriver.location.longitude) },
+        { lat: tracking.target.lat, lng: tracking.target.lng },
+      ];
+    }
+    return [];
+  }, [tracking, assignedDriver]);
 
 
   const availableCount = useMemo(
@@ -442,17 +305,32 @@ const RadarTabContent = ({ restaurant, userId }: Props) => {
       )}
 
       <div className="relative w-full h-[400px] sm:h-[560px] rounded-xl overflow-hidden border">
-        <div ref={containerRef} className="w-full h-full z-0" />
+        <GoogleMapView
+          origin={
+            restaurant?.latitude && restaurant?.longitude
+              ? { lat: Number(restaurant.latitude), lng: Number(restaurant.longitude), name: restaurant.name || "Sua loja" }
+              : null
+          }
+          extraMarkers={extraMarkers}
+          routePath={routePath}
+          routeColor="#3b82f6"
+          routeWeight={4}
+          routeDashed
+          mapType={mapType}
+          zoom={13}
+          autoFitBounds
+          className="w-full h-full z-0"
+        />
 
         <div className="absolute top-3 right-3 z-[400]">
           <Button
             size="sm"
             variant="secondary"
             className="bg-white/90 dark:bg-slate-800/90 shadow-md backdrop-blur-sm"
-            onClick={() => setMapType(mapType === "streets" ? "satellite" : "streets")}
+            onClick={() => setMapType(mapType === "roadmap" ? "satellite" : "roadmap")}
           >
             <Layers className="w-4 h-4 mr-2" />
-            {mapType === "streets" ? "Satélite" : "Mapa"}
+            {mapType === "roadmap" ? "Satélite" : "Mapa"}
           </Button>
         </div>
 
