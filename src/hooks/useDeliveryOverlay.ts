@@ -177,9 +177,10 @@ export function useDeliveryOverlay({ standby, timeoutMs = 30000, onAccepted }: O
     if (typeof window === "undefined" || !user) return;
     const consumeParam = () => {
       const params = new URLSearchParams(window.location.search);
-      const id = params.get("entrega");
+      const id = params.get("entrega") || params.get("pedido");
       if (!id) return;
       params.delete("entrega");
+      params.delete("pedido");
       const qs = params.toString();
       window.history.replaceState({}, "", window.location.pathname + (qs ? `?${qs}` : ""));
       console.log("[DeliveryOverlay] Deep link de push recebido", id);
@@ -318,6 +319,48 @@ export function useDeliveryOverlay({ standby, timeoutMs = 30000, onAccepted }: O
       supabase.removeChannel(channel);
     };
   }, [user?.id, startAlerts, loadDelivery, close, queryClient]);
+
+  // Fallback polling when Realtime WebSocket drops on mobile/PWA background
+  useEffect(() => {
+    if (!user?.id || !standby) return;
+    let active = true;
+
+    const checkPending = async () => {
+      if (!active || !standbyRef.current || deliveryRef.current) return;
+      try {
+        const { data } = await supabase
+          .from("delivery_requests")
+          .select("id, driver_id, driver_fee")
+          .eq("status", "pending")
+          .is("group_id", null)
+          .or(`driver_id.is.null,driver_id.eq.${user.id}`)
+          .order("created_at", { ascending: false })
+          .limit(3);
+
+        const nextRow = (data || []).find((r: any) => r?.id && !dismissedRef.current.has(r.id));
+        if (nextRow && active && standbyRef.current && !deliveryRef.current) {
+          console.log("[DeliveryOverlay] Nova entrega detectada via fallback polling", nextRow.id);
+          startAlerts(nextRow.id);
+          loadDelivery(nextRow.id);
+        }
+      } catch {
+        // Non-blocking fallback
+      }
+    };
+
+    const interval = setInterval(checkPending, 8000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        void checkPending();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      active = false;
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [user?.id, standby, startAlerts, loadDelivery]);
 
   // Cleanup on unmount.
   useEffect(() => () => stopAlerts(), [stopAlerts]);

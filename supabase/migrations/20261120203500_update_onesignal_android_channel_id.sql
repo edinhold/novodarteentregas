@@ -10,7 +10,7 @@ AS $$
 DECLARE
   v_app_id text := '4f68f47f-63ee-4326-8f98-e63514f2b154';
   v_api_key text;
-  v_api_url text := 'https://api.onesignal.com/notifications';
+  v_api_url text := 'https://api.onesignal.com/notifications?c=push';
   v_app_url text := 'https://duarteentregas.vercel.app';
   v_android_channel_id text := '427c58c3-215f-491b-8fbe-8a5c8f94ebe2';
 
@@ -63,6 +63,7 @@ BEGIN
   -- 6. Construir payload OneSignal otimizado com o canal Android oficial
   v_payload := jsonb_build_object(
     'app_id', v_app_id,
+    'target_channel', 'push',
     'included_segments', jsonb_build_array('Total Subscriptions', 'Active Subscriptions'),
     'headings', jsonb_build_object(
       'pt', '🚚 Nova entrega disponível!',

@@ -76,9 +76,9 @@ export async function initPush(): Promise<boolean> {
           appId: ONESIGNAL_APP_ID,
           serviceWorkerPath:
             typeof window !== "undefined" && window.location.origin
-              ? `${window.location.origin}/OneSignalSDKWorker.js`
-              : "OneSignalSDKWorker.js",
-          serviceWorkerParam: { scope: "/" },
+              ? `${window.location.origin}/push/onesignal/OneSignalSDKWorker.js`
+              : "push/onesignal/OneSignalSDKWorker.js",
+          serviceWorkerParam: { scope: "/push/onesignal/" },
           allowLocalhostAsSecureOrigin: true,
           notifyButton: { enable: false },
         });
