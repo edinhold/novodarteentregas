@@ -11,6 +11,7 @@ interface StoreMiniTrackingMapProps {
   driverPosition?: { lat: number; lng: number } | null;
   className?: string;
   onExpand?: () => void;
+  onDeliveryDragEnd?: (lat: number, lng: number) => void;
   statusText?: string;
 }
 
@@ -20,6 +21,7 @@ export const StoreMiniTrackingMap: React.FC<StoreMiniTrackingMapProps> = ({
   driverPosition,
   className = "",
   onExpand,
+  onDeliveryDragEnd,
   statusText,
 }) => {
   const [routeDistance, setRouteDistance] = useState<string | null>(null);
@@ -117,6 +119,8 @@ export const StoreMiniTrackingMap: React.FC<StoreMiniTrackingMapProps> = ({
                   lat: deliveryLocation!.lat,
                   lng: deliveryLocation!.lng,
                   label: deliveryLocation?.address || "Destino da Entrega",
+                  draggable: Boolean(onDeliveryDragEnd),
+                  onDragEnd: onDeliveryDragEnd,
                 },
               ]
             : []

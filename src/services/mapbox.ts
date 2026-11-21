@@ -493,38 +493,60 @@ export function parseMapboxFeature(
 }
 
 /**
+ * Normaliza abreviações comuns de logradouros e condomínios em português (sem exigir CEP)
+ */
+export function normalizePrimaveraAddressQuery(rawInput: string): string {
+  return rawInput
+    .trim()
+    .replace(/^(av\.?|av)\s+/i, "Avenida ")
+    .replace(/\b(av\.?)\s+/gi, "Avenida ")
+    .replace(/^(r\.?|r)\s+/i, "Rua ")
+    .replace(/\b(r\.?)\s+/gi, "Rua ")
+    .replace(/^(cond\.?|cond)\s+/i, "Condomínio ")
+    .replace(/\b(cond\.?)\s+/gi, "Condomínio ")
+    .replace(/^(res\.?|res)\s+/i, "Residencial ")
+    .replace(/^(al\.?|al)\s+/i, "Alameda ")
+    .replace(/^(tv\.?|tv)\s+/i, "Travessa ")
+    .replace(/^(rod\.?|rod)\s+/i, "Rodovia ")
+    .replace(/^(p[çc]a?\.?)\s+/i, "Praça ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
  * Prepara a query de busca garantindo foco em Primavera do Leste - MT - Brasil
  */
 function buildPrimaveraQuery(rawInput: string): string {
-  const cleaned = rawInput.trim();
+  const cleaned = normalizePrimaveraAddressQuery(rawInput);
   if (!cleaned) return "";
 
   const lower = cleaned.toLowerCase();
   const hasCity = lower.includes("primavera do leste");
   const hasState = lower.includes("mato grosso") || /\bmt\b/.test(lower);
-  const hasCountry = lower.includes("brasil") || lower.includes("brazil");
 
   const additions: string[] = [];
   if (!hasCity) additions.push("Primavera do Leste");
-  if (!hasState) additions.push("MT");
-  if (!hasCountry) additions.push("Brasil");
+  if (!hasState) additions.push("Mato Grosso");
 
   return additions.length > 0 ? `${cleaned}, ${additions.join(", ")}` : cleaned;
 }
 
 /**
- * Fallback via OpenStreetMap Nominatim com foco exclusivo em Primavera do Leste - MT
+ * Fallback via OpenStreetMap Nominatim com foco exclusivo em Primavera do Leste - MT (bounded=1)
  */
 async function fetchNominatimSuggestions(
   query: string,
-  limit: number = 5,
+  limit: number = 8,
   detectedNumber?: string,
   signal?: AbortSignal
 ): Promise<MapboxParsedAddress[]> {
   const results: MapboxParsedAddress[] = [];
   try {
-    const nomQuery = `${query}, Primavera do Leste, MT, Brasil`;
-    const nomUrl = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&countrycodes=br&limit=${limit}&q=${encodeURIComponent(nomQuery)}`;
+    const normalized = normalizePrimaveraAddressQuery(query);
+    const nomQuery = `${normalized}, Primavera do Leste, Mato Grosso, Brasil`;
+    const nomUrl = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&countrycodes=br&viewbox=${encodeURIComponent(
+      PRIMAVERA_DO_LESTE.NOMINATIM_VIEWBOX
+    )}&bounded=1&limit=${limit}&q=${encodeURIComponent(nomQuery)}`;
     const nomRes = await fetch(nomUrl, {
       signal,
       headers: { "Accept-Language": "pt-BR" },
@@ -601,7 +623,7 @@ export async function searchAddressSuggestions(
 
   const detectedNumber = options.userNumber || extractHouseNumber(trimmed);
   const fullQuery = buildPrimaveraQuery(trimmed);
-  const limit = options.limit || 5;
+  const limit = options.limit || 8;
 
   if (!token) {
     return fetchNominatimSuggestions(trimmed, limit, detectedNumber, options.signal);
@@ -612,6 +634,8 @@ export async function searchAddressSuggestions(
   url.searchParams.set("access_token", token);
   url.searchParams.set("country", "br");
   url.searchParams.set("language", "pt");
+  url.searchParams.set("autocomplete", "true");
+  url.searchParams.set("types", "address,neighborhood,locality,place,street");
   url.searchParams.set("limit", limit.toString());
   url.searchParams.set("bbox", PRIMAVERA_DO_LESTE.BBOX.join(","));
   url.searchParams.set(

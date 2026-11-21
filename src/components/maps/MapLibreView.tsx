@@ -78,6 +78,19 @@ const ROUTE_SOURCE_ID = "duarte-route-source";
 const ROUTE_CASING_LAYER_ID = "duarte-route-casing";
 const ROUTE_LINE_LAYER_ID = "duarte-route-line";
 
+const OSM_RASTER_FALLBACK_STYLE: maplibregl.StyleSpecification = {
+  version: 8,
+  sources: {
+    osm: {
+      type: "raster",
+      tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+      tileSize: 256,
+      attribution: "© OpenStreetMap",
+    },
+  },
+  layers: [{ id: "osm", type: "raster", source: "osm" }],
+};
+
 function createOriginElement(): HTMLElement {
   const el = document.createElement("div");
   el.style.cssText =
@@ -170,6 +183,7 @@ export const MapLibreView: React.FC<MapLibreViewProps> = ({
   const isDark = darkMode !== undefined ? darkMode : docDark;
   const targetStyleUrl = isDark ? OPENFREEMAP_STYLES.dark : OPENFREEMAP_STYLES.liberty;
   const activeStyleUrlRef = useRef<string>(targetStyleUrl);
+  const usingFallbackStyleRef = useRef(false);
 
   // Sync route GeoJSON into MapLibre Source + Layer
   const syncRouteLayer = useRef<() => void>(() => {});
@@ -232,7 +246,23 @@ export const MapLibreView: React.FC<MapLibreViewProps> = ({
 
   // 1. Inicialização do MapLibre GL
   useEffect(() => {
-    if (!containerRef.current || mapRef.current) return;
+    const containerEl = containerRef.current;
+    if (!containerEl || mapRef.current) return;
+
+    let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
+    let resizeObserver: ResizeObserver | null = null;
+    let styleLoaded = false;
+
+    const activateFallbackStyle = (map: maplibregl.Map, reason: unknown) => {
+      if (usingFallbackStyleRef.current) return;
+      usingFallbackStyleRef.current = true;
+      console.warn("[MapLibreView] OpenFreeMap indisponível, ativando fallback OpenStreetMap:", reason);
+      try {
+        map.setStyle(OSM_RASTER_FALLBACK_STYLE);
+      } catch (fallbackErr) {
+        console.error("MapLibre Fallback Error:", fallbackErr);
+      }
+    };
 
     try {
       const initialCenter =
@@ -245,7 +275,7 @@ export const MapLibreView: React.FC<MapLibreViewProps> = ({
           : [DEFAULT_CENTER.lng, DEFAULT_CENTER.lat];
 
       const map = new maplibregl.Map({
-        container: containerRef.current,
+        container: containerEl,
         style: targetStyleUrl,
         center: initialCenter as [number, number],
         zoom,
@@ -253,8 +283,23 @@ export const MapLibreView: React.FC<MapLibreViewProps> = ({
       });
 
       activeStyleUrlRef.current = targetStyleUrl;
+      usingFallbackStyleRef.current = false;
+
+      // Fallback automático se o estilo vetorial demorar mais de 5s para carregar
+      fallbackTimer = setTimeout(() => {
+        if (!styleLoaded && mapRef.current) {
+          activateFallbackStyle(map, "timeout_5s");
+        }
+      }, 5000);
 
       map.on("load", () => {
+        styleLoaded = true;
+        if (fallbackTimer) {
+          clearTimeout(fallbackTimer);
+          fallbackTimer = null;
+        }
+        map.resize();
+        requestAnimationFrame(() => map.resize());
         setMapReady(true);
         setLoadError(null);
         syncRouteLayer.current();
@@ -262,6 +307,12 @@ export const MapLibreView: React.FC<MapLibreViewProps> = ({
       });
 
       map.on("style.load", () => {
+        styleLoaded = true;
+        if (fallbackTimer) {
+          clearTimeout(fallbackTimer);
+          fallbackTimer = null;
+        }
+        map.resize();
         syncRouteLayer.current();
       });
 
@@ -273,17 +324,29 @@ export const MapLibreView: React.FC<MapLibreViewProps> = ({
         onUserInteractRef.current?.();
       });
 
-      map.on("error", (ev) => {
-        console.warn("[MapLibreView] Aviso de renderização:", ev?.error?.message || ev);
+      map.on("error", (e) => {
+        console.error("MapLibre Error:", e);
+        if (!styleLoaded) {
+          activateFallbackStyle(map, e?.error?.message || "style_error");
+        }
       });
+
+      if (typeof ResizeObserver !== "undefined") {
+        resizeObserver = new ResizeObserver(() => {
+          map.resize();
+        });
+        resizeObserver.observe(containerEl);
+      }
 
       mapRef.current = map;
     } catch (err: any) {
-      console.warn("[MapLibreView] Falha ao inicializar MapLibre:", err);
+      console.error("MapLibre Error:", err);
       setLoadError(err?.message || "Erro ao inicializar mapa vetorial");
     }
 
     return () => {
+      if (fallbackTimer) clearTimeout(fallbackTimer);
+      resizeObserver?.disconnect();
       originMarkerRef.current?.remove();
       stopMarkersRef.current.forEach((m) => m.remove());
       driverMarkerRef.current?.remove();
@@ -304,6 +367,7 @@ export const MapLibreView: React.FC<MapLibreViewProps> = ({
     const map = mapRef.current;
     if (!map || activeStyleUrlRef.current === targetStyleUrl) return;
     activeStyleUrlRef.current = targetStyleUrl;
+    usingFallbackStyleRef.current = false;
     map.setStyle(targetStyleUrl);
   }, [targetStyleUrl]);
 
@@ -491,7 +555,13 @@ export const MapLibreView: React.FC<MapLibreViewProps> = ({
     );
   }
 
-  return <div ref={containerRef} className={className} />;
+  return (
+    <div
+      ref={containerRef}
+      className={`relative ${className}`}
+      style={{ width: "100%", height: "100%" }}
+    />
+  );
 };
 
 export default MapLibreView;

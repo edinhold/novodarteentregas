@@ -33,7 +33,14 @@ import {
   FileText,
   Flame,
 } from "lucide-react";
-import { searchAddressSuggestions, geocodeAddress, calculateRoute, detectLocationCategory } from "@/services/mapbox";
+import {
+  searchAddressSuggestions,
+  geocodeAddress,
+  calculateRoute,
+  detectLocationCategory,
+  normalizePrimaveraAddressQuery,
+} from "@/services/geocodingService";
+import { PRIMAVERA_DO_LESTE } from "@/config/mapbox";
 import { DEFAULT_CENTER, resolveStoreCoordinates, formatStorePickupAddress, isWithinPrimaveraBounds } from "@/config/maps";
 import { isValidCoordinate } from "@/utils/geolocation";
 import { calculateDeliveryFare, getEffectiveDeliveryRates, resolveStoreDeliveryCost } from "@/utils/deliveryPricing";
@@ -439,8 +446,10 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
         // 2. Fallback complementar no Nominatim (OpenStreetMap) caso Mapbox retorne menos de 3 resultados
         if (formatted.length < 3) {
           try {
-            const nomQuery = `${query}, Primavera do Leste, MT, Brasil`;
-            const url = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&countrycodes=br&limit=6&q=${encodeURIComponent(nomQuery)}`;
+            const nomQuery = `${normalizePrimaveraAddressQuery(query)}, Primavera do Leste, Mato Grosso, Brasil`;
+            const url = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&countrycodes=br&viewbox=${encodeURIComponent(
+              PRIMAVERA_DO_LESTE.NOMINATIM_VIEWBOX
+            )}&bounded=1&limit=8&q=${encodeURIComponent(nomQuery)}`;
             const nomRes = await fetch(url, { headers: { "Accept-Language": "pt-BR" } });
             if (nomRes.ok) {
               const nomData = await nomRes.json();
@@ -497,7 +506,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
       } finally {
         setSearchingAddress(false);
       }
-    }, 280);
+    }, 350);
 
     return () => clearTimeout(timer);
   }, [addressInput, streetNumber]);
@@ -1876,6 +1885,10 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
                   }
                   deliveryLocation={mapDeliveryLocation}
                   driverPosition={currentDriverPos}
+                  onDeliveryDragEnd={(lat, lng) => {
+                    setDeliveryCoordinates({ lat, lng });
+                    toast.success("Ponto exato da entrega ajustado no mapa!");
+                  }}
                   className="w-full h-full"
                   statusText={
                     displayMapRequest?.status === "picked_up"

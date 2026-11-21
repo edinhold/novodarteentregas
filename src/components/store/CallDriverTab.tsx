@@ -1821,7 +1821,13 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
                   {showSuggestions && addressSuggestions.length > 0 && (
                     <div className="absolute z-50 w-full mt-1 bg-card border border-border rounded-lg shadow-lg max-h-56 overflow-y-auto">
                       {addressSuggestions.map((item: any, idx: number) => {
-                        const formatted = formatAddress(item);
+                        const parsed = item.parsed;
+                        const mainTitle = parsed?.street
+                          ? `${parsed.street}${parsed.number ? `, ${parsed.number}` : ""}`
+                          : formatAddress(item);
+                        const subLocation = [parsed?.neighborhood, "Primavera do Leste - MT"]
+                          .filter(Boolean)
+                          .join(" • ");
                         const dist = storeLat && storeLng
                           ? haversineKm(storeLat, storeLng, parseFloat(item.lat), parseFloat(item.lon))
                           : null;
@@ -1832,12 +1838,13 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
                             className="w-full text-left px-3 py-2.5 hover:bg-muted/80 border-b border-border/30 last:border-b-0 transition-colors"
                             onClick={() => selectSuggestion(item)}
                           >
-                            <p className="text-sm font-medium leading-tight">{formatted}</p>
-                            {dist !== null && (
-                              <p className="text-[10px] text-muted-foreground mt-0.5">
-                                📍 ~{dist < 1 ? `${Math.round(dist * 1000)}m` : `${dist.toFixed(1)}km`} da loja
-                              </p>
-                            )}
+                            <p className="text-sm font-medium leading-tight">{mainTitle}</p>
+                            <p className="text-[11px] text-muted-foreground mt-0.5">
+                              {subLocation}
+                              {dist !== null
+                                ? ` · 📍 ~${dist < 1 ? `${Math.round(dist * 1000)}m` : `${dist.toFixed(1)}km`} da loja`
+                                : ""}
+                            </p>
                           </button>
                         );
                       })}

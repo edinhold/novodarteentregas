@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Crosshair, Layers } from "lucide-react";
+import { DEFAULT_CENTER } from "@/config/maps";
 import { calculateRoute } from "@/services/mapbox";
 import { latLngArrayToLiteralPath, type LatLngLiteral } from "@/utils/mapCoordinates";
 import MapLibreView from "@/components/maps/MapLibreView";
@@ -213,8 +214,8 @@ export const DriverDarkMap: React.FC<DriverDarkMapProps> = ({
         routeWeight={5}
         darkMode={mapMode === "dark"}
         autoFitBounds={!autoFollow || hasActiveDelivery}
-        center={autoFollow ? driverPosition || pickupLocation : null}
-        zoom={16}
+        center={autoFollow ? driverPosition || pickupLocation || DEFAULT_CENTER : DEFAULT_CENTER}
+        zoom={14}
         fitPadding={60}
         recenterTrigger={recenterTrigger}
         onUserInteract={() => setAutoFollow(false)}

@@ -59,10 +59,11 @@ export const PRIMAVERA_DO_LESTE = {
   STATE_NAME: "Mato Grosso",
   STATE_CODE: "MT",
   COUNTRY_NAME: "Brasil",
-  CENTER_LAT_LNG: { lat: -15.5595, lng: -54.3079 },
-  CENTER_LNG_LAT: [-54.3079, -15.5595] as [number, number],
-  // Bounding box abrangendo o município de Primavera do Leste [minLng, minLat, maxLng, maxLat]
-  BBOX: [-54.75, -15.75, -53.75, -14.60] as [number, number, number, number],
+  CENTER_LAT_LNG: { lat: -15.5561, lng: -54.3011 },
+  CENTER_LNG_LAT: [-54.3011, -15.5561] as [number, number],
+  // Bounding box abrangendo todo o perímetro urbano, distritos industriais e condomínios [minLng, minLat, maxLng, maxLat]
+  BBOX: [-54.4500, -15.6500, -54.1500, -15.4500] as [number, number, number, number],
+  NOMINATIM_VIEWBOX: "-54.4500,-15.4500,-54.1500,-15.6500",
   LAT_RANGE: { min: -16.20, max: -14.20 },
   LNG_RANGE: { min: -55.20, max: -53.20 },
 };

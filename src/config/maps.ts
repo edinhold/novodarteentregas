@@ -4,8 +4,8 @@ export const OPENFREEMAP_STYLES = {
   dark: "https://tiles.openfreemap.org/styles/dark",
 } as const;
 
-export const DEFAULT_CENTER = { lat: -15.5595, lng: -54.3079 }; // Primavera do Leste, MT center
-export const DEFAULT_ZOOM = 14;
+export const DEFAULT_CENTER = { lat: -15.5561, lng: -54.3011 }; // Primavera do Leste, MT center
+export const DEFAULT_ZOOM = 13.5;
 
 /**
  * Limites geográficos estritos da área urbana e perimetral de Primavera do Leste - MT.
