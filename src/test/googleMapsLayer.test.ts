@@ -3,9 +3,9 @@ import {
   geoJsonCoordToLatLng,
   geoJsonGeometryToLatLngPath,
   latLngArrayToLiteralPath,
-} from "@/utils/googleMapsLoader";
+} from "@/utils/mapCoordinates";
 
-describe("Google Maps Visual Layer & Mapbox Coordinate Conversion", () => {
+describe("Mapbox Coordinate Conversion for MapLibre", () => {
   it("converte coordenadas GeoJSON da Mapbox [lng, lat] para Google Maps { lat, lng }", () => {
     const mapboxCoord: [number, number] = [-54.328506, -15.523614];
     expect(geoJsonCoordToLatLng(mapboxCoord)).toEqual({

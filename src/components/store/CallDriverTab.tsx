@@ -24,8 +24,8 @@ import { useDriverLocations } from "@/hooks/useDriverLocations";
 import { resolveStoreCoordinates, isWithinPrimaveraBounds } from "@/config/maps";
 import { getBestLocation, isValidCoordinate } from "@/utils/geolocation";
 import { calculateDeliveryFare, getEffectiveDeliveryRates, resolveStoreDeliveryCost } from "@/utils/deliveryPricing";
-import { latLngArrayToLiteralPath } from "@/utils/googleMapsLoader";
-import GoogleMapView from "@/components/maps/GoogleMapView";
+import { latLngArrayToLiteralPath } from "@/utils/mapCoordinates";
+import MapLibreView from "@/components/maps/MapLibreView";
 import {
   searchAddressSuggestions,
   geocodeAddress as geocodeAddressMapbox,
@@ -1568,7 +1568,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
           </div>
 
           <div ref={containerRef} style={{ width: "100%", height: 320, borderRadius: 8 }} className="border border-border overflow-hidden">
-            <GoogleMapView
+            <MapLibreView
               origin={
                 isValidCoordinate(storeLat, storeLng)
                   ? {

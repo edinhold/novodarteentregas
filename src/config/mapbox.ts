@@ -8,7 +8,9 @@ const TOKEN_P2 = "Y-SqDijgndJyDgj43nXiOQ";
 const FALLBACK_MAPBOX_TOKEN = `${TOKEN_P1}.${TOKEN_P2}`;
 
 export const MAPBOX_ACCESS_TOKEN: string =
-  ((typeof import.meta !== "undefined" && import.meta.env?.VITE_MAPBOX_ACCESS_TOKEN as string | undefined)?.trim() ||
+  ((typeof import.meta !== "undefined" &&
+    ((import.meta.env?.VITE_MAPBOX_TOKEN as string | undefined)?.trim() ||
+      (import.meta.env?.VITE_MAPBOX_ACCESS_TOKEN as string | undefined)?.trim())) ||
     FALLBACK_MAPBOX_TOKEN);
 
 /** Mensagem exibida ao usuário quando o token não está configurado. */

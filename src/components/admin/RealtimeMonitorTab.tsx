@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Layers, Truck, Package, Users, Search, Activity } from "lucide-react";
 import MapErrorBoundary from "@/components/MapErrorBoundary";
-import GoogleMapView, { type GoogleMapExtraMarker } from "@/components/maps/GoogleMapView";
+import MapLibreView, { type MapExtraMarker } from "@/components/maps/MapLibreView";
 import { DriverPhoto } from "@/components/DriverPhoto";
 import { geocodeAddress } from "@/services/mapbox";
 
@@ -160,8 +160,8 @@ const RealtimeMonitorContent = () => {
     };
   }, [activeDeliveries]);
 
-  const extraMarkers = useMemo<GoogleMapExtraMarker[]>(() => {
-    const markers: GoogleMapExtraMarker[] = [];
+  const extraMarkers = useMemo<MapExtraMarker[]>(() => {
+    const markers: MapExtraMarker[] = [];
     enrichedDrivers.forEach((d: any) => {
       if (!d.latitude || !d.longitude) return;
       const statusLabel =
@@ -247,7 +247,7 @@ const RealtimeMonitorContent = () => {
         </CardHeader>
         <CardContent>
           <div className="relative w-full h-[500px] rounded-lg overflow-hidden border">
-            <GoogleMapView
+            <MapLibreView
               extraMarkers={extraMarkers}
               mapType={mapType}
               zoom={12}

@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Crosshair, Layers } from "lucide-react";
 import { calculateRoute } from "@/services/mapbox";
-import { latLngArrayToLiteralPath, type LatLngLiteral } from "@/utils/googleMapsLoader";
-import GoogleMapView from "@/components/maps/GoogleMapView";
+import { latLngArrayToLiteralPath, type LatLngLiteral } from "@/utils/mapCoordinates";
+import MapLibreView from "@/components/maps/MapLibreView";
 
 interface DriverDarkMapProps {
   driverPosition: { lat: number; lng: number } | null;
@@ -36,8 +36,21 @@ export const DriverDarkMap: React.FC<DriverDarkMapProps> = ({
 
   const [routePath, setRoutePath] = useState<LatLngLiteral[]>([]);
   const [autoFollow, setAutoFollow] = useState(true);
-  const [mapMode, setMapMode] = useState<VisualMapMode>("dark");
+  const [mapMode, setMapMode] = useState<VisualMapMode>(() =>
+    typeof document !== "undefined" && document.documentElement.classList.contains("dark")
+      ? "dark"
+      : "roadmap"
+  );
   const [recenterTrigger, setRecenterTrigger] = useState(0);
+
+  useEffect(() => {
+    const onThemeChange = () => {
+      const isDark = document.documentElement.classList.contains("dark");
+      setMapMode(isDark ? "dark" : "roadmap");
+    };
+    window.addEventListener("theme-change", onThemeChange);
+    return () => window.removeEventListener("theme-change", onThemeChange);
+  }, []);
 
   // Calcula a rota contínua via Mapbox Directions API e converte para { lat, lng }[]
   useEffect(() => {
@@ -172,8 +185,8 @@ export const DriverDarkMap: React.FC<DriverDarkMapProps> = ({
   };
 
   return (
-    <div className="absolute inset-0 w-full h-full z-0 overflow-hidden bg-[#121214]">
-      <GoogleMapView
+    <div className="absolute inset-0 w-full h-full z-0 overflow-hidden bg-background">
+      <MapLibreView
         origin={
           pickupLocation
             ? {
@@ -199,7 +212,6 @@ export const DriverDarkMap: React.FC<DriverDarkMapProps> = ({
         routeColor="#0ea5e9"
         routeWeight={5}
         darkMode={mapMode === "dark"}
-        mapType={mapMode === "satellite" ? "hybrid" : "roadmap"}
         autoFitBounds={!autoFollow || hasActiveDelivery}
         center={autoFollow ? driverPosition || pickupLocation : null}
         zoom={16}
@@ -217,14 +229,9 @@ export const DriverDarkMap: React.FC<DriverDarkMapProps> = ({
       >
         <button
           type="button"
-          onClick={() => {
-            const modes: VisualMapMode[] = ["dark", "roadmap", "satellite"];
-            setMapMode(modes[(modes.indexOf(mapMode) + 1) % modes.length]);
-          }}
-          aria-label="Alternar camada do mapa"
-          title={`Camada atual: ${
-            mapMode === "dark" ? "Google Escuro" : mapMode === "roadmap" ? "Google Padrão" : "Google Satélite"
-          }`}
+          onClick={() => setMapMode((prev) => (prev === "dark" ? "roadmap" : "dark"))}
+          aria-label="Alternar tema do mapa"
+          title={mapMode === "dark" ? "Mapa Escuro (OpenFreeMap)" : "Mapa Claro (OpenFreeMap)"}
           className="w-12 h-12 rounded-full bg-[#18181b]/95 hover:bg-zinc-800 text-white border border-white/15 shadow-2xl flex items-center justify-center transition active:scale-95 backdrop-blur-md"
         >
           <Layers className="w-5 h-5 text-white" />

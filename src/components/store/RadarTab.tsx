@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Layers, Navigation, Package, Truck } from "lucide-react";
 import MapErrorBoundary from "@/components/MapErrorBoundary";
-import GoogleMapView, { type GoogleMapExtraMarker } from "@/components/maps/GoogleMapView";
+import MapLibreView, { type MapExtraMarker } from "@/components/maps/MapLibreView";
 import { geocodeAddress } from "@/services/mapbox";
 
 function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number) {
@@ -194,8 +194,8 @@ const RadarTabContent = ({ restaurant, userId }: Props) => {
     return null;
   }, [assignedDriver, activeDelivery, restaurant, destCoords]);
 
-  const extraMarkers = useMemo<GoogleMapExtraMarker[]>(() => {
-    const list: GoogleMapExtraMarker[] = [];
+  const extraMarkers = useMemo<MapExtraMarker[]>(() => {
+    const list: MapExtraMarker[] = [];
 
     drivers.forEach((d) => {
       const loc = locationMap.get(d.user_id);
@@ -305,7 +305,7 @@ const RadarTabContent = ({ restaurant, userId }: Props) => {
       )}
 
       <div className="relative w-full h-[400px] sm:h-[560px] rounded-xl overflow-hidden border">
-        <GoogleMapView
+        <MapLibreView
           origin={
             restaurant?.latitude && restaurant?.longitude
               ? { lat: Number(restaurant.latitude), lng: Number(restaurant.longitude), name: restaurant.name || "Sua loja" }

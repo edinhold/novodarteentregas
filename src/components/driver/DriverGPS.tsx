@@ -18,8 +18,8 @@ import {
   formatStorePickupAddress,
 } from "@/config/maps";
 import { calculateRoute } from "@/services/mapbox";
-import { latLngArrayToLiteralPath, type LatLngLiteral } from "@/utils/googleMapsLoader";
-import GoogleMapView from "@/components/maps/GoogleMapView";
+import { latLngArrayToLiteralPath, type LatLngLiteral } from "@/utils/mapCoordinates";
+import MapLibreView from "@/components/maps/MapLibreView";
 import { useAuth } from "@/contexts/AuthContext";
 import { resumeAudioContext } from "@/lib/notificationSound";
 
@@ -176,7 +176,7 @@ const DriverGPS = ({
   return (
     <div className="relative w-full h-full overflow-hidden flex flex-col">
       <div className="flex-1 relative min-h-0">
-        <GoogleMapView
+        <MapLibreView
           origin={
             activeRequest
               ? resolveStoreCoordinates(

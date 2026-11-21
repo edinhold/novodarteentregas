@@ -4,7 +4,7 @@ import { DEFAULT_CENTER, DEFAULT_ZOOM } from "@/config/maps";
 import { useNavigate } from "react-router-dom";
 import { useDriverLocations } from "@/hooks/useDriverLocations";
 import { geocodeAddress } from "@/services/mapbox";
-import GoogleMapView, { type GoogleMapExtraMarker } from "@/components/maps/GoogleMapView";
+import MapLibreView, { type MapExtraMarker } from "@/components/maps/MapLibreView";
 
 interface RestaurantMapProps {
   restaurants: Restaurant[];
@@ -187,8 +187,8 @@ const RestaurantMap = ({ restaurants }: RestaurantMapProps) => {
     [visibleMarkers]
   );
 
-  const extraMarkers = useMemo<GoogleMapExtraMarker[]>(() => {
-    const restaurantPins: GoogleMapExtraMarker[] = visibleMarkers.map((r) => ({
+  const extraMarkers = useMemo<MapExtraMarker[]>(() => {
+    const restaurantPins: MapExtraMarker[] = visibleMarkers.map((r) => ({
       id: `rest-${r.id}`,
       lat: r.mapLatitude,
       lng: r.mapLongitude,
@@ -197,7 +197,7 @@ const RestaurantMap = ({ restaurants }: RestaurantMapProps) => {
       onClick: () => navigate(`/restaurant/${r.id}`),
     }));
 
-    const driverPins: GoogleMapExtraMarker[] = driverLocations.map((d: any, idx: number) => ({
+    const driverPins: MapExtraMarker[] = driverLocations.map((d: any, idx: number) => ({
       id: `drv-${d.user_id || idx}`,
       lat: Number(d.latitude),
       lng: Number(d.longitude),
@@ -209,7 +209,7 @@ const RestaurantMap = ({ restaurants }: RestaurantMapProps) => {
   }, [visibleMarkers, driverLocations, navigate]);
 
   return (
-    <GoogleMapView
+    <MapLibreView
       extraMarkers={extraMarkers}
       center={center}
       zoom={DEFAULT_ZOOM}

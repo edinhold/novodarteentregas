@@ -27,7 +27,7 @@ import {
 import { resolveStoreCoordinates, isWithinPrimaveraBounds } from "@/config/maps";
 import { getBestLocation, isValidCoordinate } from "@/utils/geolocation";
 import MapErrorBoundary from "@/components/MapErrorBoundary";
-import GoogleMapView from "@/components/maps/GoogleMapView";
+import MapLibreView from "@/components/maps/MapLibreView";
 
 interface StoreInfoTabProps {
   restaurant: any;
@@ -491,7 +491,7 @@ const StoreInfoTab = ({ restaurant, userId }: StoreInfoTabProps) => {
             </div>
             <MapErrorBoundary fallbackHeight="250px">
               <div className="w-full h-[250px] rounded-lg border border-border overflow-hidden z-0">
-                <GoogleMapView
+                <MapLibreView
                   origin={
                     isValidCoordinate(parseFloat(form.latitude), parseFloat(form.longitude))
                       ? {

@@ -1,13 +1,8 @@
-// Chave pública do Google Maps JS SDK (usada APENAS para renderização visual; geocodificação/rotas usam Mapbox)
-export const GOOGLE_MAPS_API_KEY: string =
-  ((typeof import.meta !== "undefined" &&
-    (import.meta.env?.VITE_GOOGLE_MAPS_API_KEY as string | undefined)?.trim()) ||
-    "AIzaSyBHAKwJo3RyXxG6a1PKe_juQBaEvuxHJAk");
-
-export const GOOGLE_MAPS_DARK_MAP_ID: string =
-  ((typeof import.meta !== "undefined" &&
-    (import.meta.env?.VITE_GOOGLE_MAPS_MAP_ID as string | undefined)?.trim()) ||
-    "5c323fec164a136ac5d6c2f7");
+// Estilos vetoriais gratuitos do OpenFreeMap para MapLibre GL JS (sem API Key e sem faturamento)
+export const OPENFREEMAP_STYLES = {
+  liberty: "https://tiles.openfreemap.org/styles/liberty",
+  dark: "https://tiles.openfreemap.org/styles/dark",
+} as const;
 
 export const DEFAULT_CENTER = { lat: -15.5595, lng: -54.3079 }; // Primavera do Leste, MT center
 export const DEFAULT_ZOOM = 14;

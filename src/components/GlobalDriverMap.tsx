@@ -4,13 +4,13 @@ import { Button } from "./ui/button";
 import { Layers, Navigation } from "lucide-react";
 import { Card, CardContent } from "./ui/card";
 import MapErrorBoundary from "./MapErrorBoundary";
-import GoogleMapView, { type GoogleMapExtraMarker } from "./maps/GoogleMapView";
+import MapLibreView, { type MapExtraMarker } from "./maps/MapLibreView";
 
 const GlobalDriverMapContent = () => {
   const { data: drivers = [], isLoading } = useAllDriversStatus();
   const [mapType, setMapType] = useState<"roadmap" | "satellite">("roadmap");
 
-  const extraMarkers = useMemo<GoogleMapExtraMarker[]>(() => {
+  const extraMarkers = useMemo<MapExtraMarker[]>(() => {
     return drivers
       .filter((d) => d.latitude && d.longitude)
       .map((driver) => {
@@ -45,7 +45,7 @@ const GlobalDriverMapContent = () => {
 
   return (
     <div className="relative w-full h-[400px] sm:h-[600px] rounded-xl overflow-hidden border">
-      <GoogleMapView
+      <MapLibreView
         extraMarkers={extraMarkers}
         mapType={mapType}
         zoom={12}

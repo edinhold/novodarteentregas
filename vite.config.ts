@@ -28,6 +28,7 @@ export default defineConfig(({ mode }) => ({
         cleanupOutdatedCaches: true,
         clientsClaim: true,
         skipWaiting: true,
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2,jpeg}"],
         globIgnores: ["**/OneSignalSDKWorker.js"],
         navigateFallback: "/index.html",
@@ -68,6 +69,13 @@ export default defineConfig(({ mode }) => ({
   ].filter(Boolean),
   build: {
     outDir: "dist",
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          maplibre: ["maplibre-gl"],
+        },
+      },
+    },
   },
   resolve: {
     alias: {

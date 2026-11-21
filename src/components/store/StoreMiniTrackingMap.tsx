@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { calculateRoute } from "@/services/mapbox";
 import { isValidCoordinate } from "@/utils/geolocation";
-import { latLngArrayToLiteralPath, type LatLngLiteral } from "@/utils/googleMapsLoader";
-import GoogleMapView from "@/components/maps/GoogleMapView";
+import { latLngArrayToLiteralPath, type LatLngLiteral } from "@/utils/mapCoordinates";
+import MapLibreView from "@/components/maps/MapLibreView";
 import { Maximize2, Crosshair } from "lucide-react";
 
 interface StoreMiniTrackingMapProps {
@@ -99,7 +99,7 @@ export const StoreMiniTrackingMap: React.FC<StoreMiniTrackingMapProps> = ({
     <div
       className={`relative rounded-2xl overflow-hidden border border-border/80 shadow-md bg-card select-none group transition-all ${className}`}
     >
-      <GoogleMapView
+      <MapLibreView
         origin={
           hasPickup
             ? {

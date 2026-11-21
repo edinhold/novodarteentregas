@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import MapErrorBoundary from "@/components/MapErrorBoundary";
-import GoogleMapView from "@/components/maps/GoogleMapView";
+import MapLibreView from "@/components/maps/MapLibreView";
 
 const statusLabels: Record<string, { label: string; color: string }> = {
   pending: { label: "Aguardando restaurante", color: "bg-yellow-500" },
@@ -162,7 +162,7 @@ const OrderTracking = () => {
       {/* Map */}
       <div className="h-[50vh]">
         <MapErrorBoundary fallbackHeight="50vh">
-          <GoogleMapView
+          <MapLibreView
             origin={
               restaurant?.latitude && restaurant?.longitude
                 ? { lat: Number(restaurant.latitude), lng: Number(restaurant.longitude), name: restaurant.name }
