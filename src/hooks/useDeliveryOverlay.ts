@@ -342,6 +342,15 @@ export function useDeliveryOverlay({ standby, timeoutMs = 30000, onAccepted }: O
           console.log("[DeliveryOverlay] Nova entrega detectada via fallback polling", nextRow.id);
           startAlerts(nextRow.id);
           loadDelivery(nextRow.id);
+          void showSafeNotification("🚨 Nova entrega disponível!", {
+            body: "Novo chamado urgente aguardando aceite. Toque para abrir!",
+            tag: `delivery-${nextRow.id}`,
+            renotify: true,
+            requireInteraction: true,
+            vibrate: [500, 200, 500, 200, 500],
+            icon: "/pwa-192x192.png",
+            badge: "/pwa-192x192.png",
+          } as NotificationOptions).catch(() => {});
         }
       } catch {
         // Non-blocking fallback

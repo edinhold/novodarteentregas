@@ -88,9 +88,11 @@ BEGIN
     'android_visibility', 1,
     'android_sound', 'delivery_ringtone',
     'android_accent_color', 'FFF97316',
+    'android_led_color', 'FFF97316',
     'web_push_options', jsonb_build_object(
       'require_interaction', true,
-      'vibrate', jsonb_build_array(300, 100, 300, 100, 300),
+      'renotify', true,
+      'vibrate', jsonb_build_array(500, 200, 500, 200, 500, 200, 800),
       'urgency', 'high'
     ),
     'web_buttons', jsonb_build_array(

@@ -1002,9 +1002,11 @@ export async function handleEdgeFunction(
       android_visibility: 1,
       android_sound: "delivery_ringtone",
       android_accent_color: "FFF97316",
+      android_led_color: "FFF97316",
       web_push_options: {
         require_interaction: true,
-        vibrate: [300, 100, 300, 100, 300],
+        renotify: true,
+        vibrate: [500, 200, 500, 200, 500, 200, 800],
         urgency: "high",
       },
       web_buttons: [
