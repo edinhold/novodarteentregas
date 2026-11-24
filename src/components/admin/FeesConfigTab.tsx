@@ -138,7 +138,7 @@ const FeesConfigTab = () => {
         whatsapp_number: (config as any).whatsapp_number || "",
         recharge_url: (config as any).recharge_url || "",
         min_km: String((config as any).min_km ?? 0),
-        max_km: String((config as any).max_km ?? 0),
+        max_km: "0",
         round_km_up: !!(config as any).round_km_up,
         dynamic_pricing_enabled: parsedDynamicEnabled,
         dynamic_fee_per_km: parsedDynamicEnabled && Number(parsedDynamicFee) > 0 ? parsedDynamicFee : "",
@@ -175,7 +175,7 @@ const FeesConfigTab = () => {
       const baseFeeVal = isNaN(parseFloat(form.base_fee)) || parseFloat(form.base_fee) <= 0 ? 5.3 : parseFloat(form.base_fee);
       const feePerKmVal = isNaN(parseFloat(form.fee_per_km)) || parseFloat(form.fee_per_km) <= 0 ? 1.7 : parseFloat(form.fee_per_km);
       const minKmVal = isNaN(parseFloat(form.min_km)) ? 0 : Math.max(0, parseFloat(form.min_km));
-      const maxKmVal = isNaN(parseFloat(form.max_km)) ? 0 : Math.max(0, parseFloat(form.max_km));
+      const maxKmVal = 0;
       const earlyWithdrawalFeePercentVal = isNaN(parseFloat(form.early_withdrawal_fee_percent)) ? 10 : Math.max(0, parseFloat(form.early_withdrawal_fee_percent));
       const withdrawalFixedFeeVal = isNaN(parseFloat(form.withdrawal_fixed_fee)) ? 1.00 : Math.max(0, parseFloat(form.withdrawal_fixed_fee));
       const paymentDayVal = isNaN(parseInt(form.payment_day, 10)) ? 3 : parseInt(form.payment_day, 10);
@@ -296,12 +296,7 @@ const FeesConfigTab = () => {
 
   const handleSave = async () => {
     const minKmVal = isNaN(parseFloat(form.min_km)) ? 0 : Math.max(0, parseFloat(form.min_km));
-    const maxKmVal = isNaN(parseFloat(form.max_km)) ? 0 : Math.max(0, parseFloat(form.max_km));
-
-    if (maxKmVal > 0 && minKmVal > maxKmVal) {
-      toast.error("Km mínimo não pode ser maior que o máximo");
-      return;
-    }
+    const maxKmVal = 0;
 
     setLoading(true);
     isSavingRef.current = true;
@@ -545,8 +540,8 @@ const FeesConfigTab = () => {
           </div>
           <div className="space-y-2">
             <Label>Km máximo</Label>
-            <Input type="number" step="0.5" min="0" value={form.max_km} onChange={(e) => setForm(f => ({ ...f, max_km: e.target.value }))} />
-            <p className="text-xs text-muted-foreground">0 = sem limite</p>
+            <Input type="number" value="0" disabled readOnly />
+            <p className="text-xs text-muted-foreground">Sem limite — cálculo rigoroso de todo o km rodado</p>
           </div>
         </div>
         <div className="flex items-center justify-between">
