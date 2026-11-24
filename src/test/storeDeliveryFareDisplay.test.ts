@@ -93,4 +93,23 @@ describe("Exibição do Valor Real da Corrida para o Lojista vs Valor do Motoris
       expect(calculateDeliveryFare(km, standardConfig).totalCost).toBe(expected);
     }
   });
+
+  it("nunca deve travar ou limitar em 2,5 km mesmo se max_km estiver preenchido na config", () => {
+    const configWithStaleCap = {
+      base_fee: 5.4,
+      fee_per_km: 1.7,
+      max_km: 2.5,
+      round_km_up: false,
+    };
+
+    const fare58 = calculateDeliveryFare(5.8, configWithStaleCap);
+    expect(fare58.effectiveKm).toBe(5.8);
+    expect(fare58.kmCost).toBe(9.86);
+    expect(fare58.totalCost).toBe(15.26);
+
+    const fare124 = calculateDeliveryFare(12.4, configWithStaleCap);
+    expect(fare124.effectiveKm).toBe(12.4);
+    expect(fare124.kmCost).toBe(21.08);
+    expect(fare124.totalCost).toBe(26.48);
+  });
 });

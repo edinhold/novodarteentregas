@@ -49,7 +49,7 @@ export function getEffectiveDeliveryRates(config?: DeliveryPricingConfig | null)
   // Regra oficial: tarifa dinâmica (quando ativa e > 0) soma ao valor regular por KM
   const feePerKm = Number((baseKmFee + dynamicFee).toFixed(4));
   const minKm = Math.max(0, Number(config?.min_km ?? 0) || 0);
-  const maxKm = Math.max(0, Number(config?.max_km ?? 0) || 0);
+  const maxKm = 0; // Sem teto de KM: o sistema calcula rigorosamente toda a quilometragem rodada
   const roundKmUp = Boolean(config?.round_km_up ?? false);
 
   return {
@@ -117,7 +117,6 @@ export function calculateDeliveryFare(
   }
 
   if (minKm > 0 && effectiveKm < minKm) effectiveKm = minKm;
-  if (maxKm > 0 && effectiveKm > maxKm) effectiveKm = maxKm;
 
   const kmCost = Number((effectiveKm * feePerKm).toFixed(2));
   const totalCost = Number((baseFee + kmCost).toFixed(2));
