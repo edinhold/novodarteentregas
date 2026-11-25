@@ -36,6 +36,7 @@ import {
 import {
   searchAddressSuggestions,
   geocodeAddress,
+  reverseGeocode,
   calculateRoute,
   detectLocationCategory,
   normalizePrimaveraAddressQuery,
@@ -990,6 +991,44 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
   }, [displayMapRequest?.id, displayMapRequest?.delivery_address]);
 
   // Coordenadas de entrega da corrida exibida no mini-mapa
+  const miniMapRef = useRef<HTMLDivElement>(null);
+
+  const handleDeliveryPinAdjust = async (lat: number, lng: number) => {
+    if (!isValidCoordinate(lat, lng)) return;
+    setDeliveryCoordinates({ lat, lng });
+    setManualDistanceEnabled(false);
+    setShowSuggestions(false);
+
+    try {
+      const parsed = await reverseGeocode(lat, lng);
+      const label = parsed?.street && parsed.street !== "Ponto no Mapa"
+        ? `${parsed.street}${parsed.neighborhood ? `, ${parsed.neighborhood}` : ""}`
+        : "local marcado no mapa";
+
+      if (!addressInput.trim() && parsed?.street && parsed.street !== "Ponto no Mapa") {
+        setAddressInput(parsed.neighborhood ? `${parsed.street}, ${parsed.neighborhood}` : parsed.street);
+        if (parsed.number && !streetNumber.trim()) {
+          setStreetNumber(parsed.number);
+        }
+      }
+      toast.success(`Pino ajustado (${label}). Distância recalculada!`);
+    } catch {
+      toast.success("Ponto exato da entrega ajustado no mapa!");
+    }
+  };
+
+  const handlePlacePinManually = () => {
+    const base = storeCoords && isValidCoordinate(storeCoords.lat, storeCoords.lng)
+      ? storeCoords
+      : DEFAULT_CENTER;
+    if (!deliveryCoordinates) {
+      setDeliveryCoordinates({ lat: base.lat + 0.0025, lng: base.lng + 0.0025 });
+    }
+    setShowSuggestions(false);
+    miniMapRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    toast.info("Arraste o pino azul ou clique no mapa para marcar o local exato da entrega!");
+  };
+
   const mapDeliveryLocation = useMemo(() => {
     if (deliveryCoordinates && isValidCoordinate(deliveryCoordinates.lat, deliveryCoordinates.lng)) {
       return deliveryCoordinates;
@@ -1202,6 +1241,23 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
                       {detectedCategory.iconName === "map-pin" && <MapPin className="w-3 h-3 text-[#EA580C]" />}
                       <span>{detectedCategory.label}</span>
                     </span>
+                  </div>
+                )}
+
+                {/* Botão para posicionar pino manualmente quando o endereço não for localizado */}
+                {addressInput.trim().length >= 3 && !searchingAddress && !deliveryCoordinates && !showSuggestions && (
+                  <div className="flex items-center justify-between gap-2 pt-1.5 px-2.5 py-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[11px]">
+                    <span className="text-amber-700 dark:text-amber-300 font-medium">
+                      Não localizou o endereço?
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handlePlacePinManually}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#EA580C] hover:bg-[#c2410c] text-white font-bold transition shrink-0"
+                    >
+                      <MapPin className="w-3 h-3" />
+                      Posicionar pino no mapa
+                    </button>
                   </div>
                 )}
 
@@ -1875,7 +1931,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
             {/* ======================================================== */}
             {/* MINI-MAPA DE ACOMPANHAMENTO (FIXADO NO CANTO INFERIOR)    */}
             {/* ======================================================== */}
-            <div className="pt-2 flex justify-end">
+            <div className="pt-2 flex justify-end" ref={miniMapRef}>
               <div className="w-full sm:w-80 md:w-96 h-56 sm:h-64 rounded-2xl overflow-hidden shadow-lg border border-border/80">
                 <StoreMiniTrackingMap
                   pickupLocation={
@@ -1885,10 +1941,7 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
                   }
                   deliveryLocation={mapDeliveryLocation}
                   driverPosition={currentDriverPos}
-                  onDeliveryDragEnd={(lat, lng) => {
-                    setDeliveryCoordinates({ lat, lng });
-                    toast.success("Ponto exato da entrega ajustado no mapa!");
-                  }}
+                  onDeliveryDragEnd={(lat, lng) => void handleDeliveryPinAdjust(lat, lng)}
                   className="w-full h-full"
                   statusText={
                     displayMapRequest?.status === "picked_up"

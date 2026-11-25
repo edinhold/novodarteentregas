@@ -1155,8 +1155,11 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
 
   const handleSelectDeliveryPinMode = () => {
     setPinPlacementMode("delivery");
+    if (!deliveryLatLng && isValidCoordinate(storeLat, storeLng)) {
+      setDeliveryLatLng([storeLat + 0.0025, storeLng + 0.0025]);
+    }
     containerRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-    toast.info("📍 Modo Entrega ativado: clique no mapa para posicionar o ponto de entrega.");
+    toast.info("📍 Pino de entrega ativado: arraste o pino ou clique no mapa para marcar o local exato.");
   };
 
   const handleSelectStorePinMode = () => {
@@ -1862,18 +1865,32 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
                 />
               </div>
             </div>
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-xs text-muted-foreground">
-                📍 Digite o endereço, selecione uma sugestão, e coloque o número
+                📍 Digite o endereço, selecione uma sugestão, ou arraste o pino no mapa
               </p>
-              {deliveryLatLng && user?.id && (
-                <ReportLocationButton
+              <div className="flex items-center gap-2">
+                {callForm.delivery.trim().length >= 3 && !searchingAddress && !deliveryLatLng && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={handleSelectDeliveryPinMode}
+                    className="h-7 text-xs gap-1 border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300 hover:bg-amber-500/20"
+                  >
+                    <MapPin className="w-3 h-3" />
+                    Não achou? Colocar pino no mapa
+                  </Button>
+                )}
+                {deliveryLatLng && user?.id && (
+                  <ReportLocationButton
                   latitude={deliveryLatLng[0]}
                   longitude={deliveryLatLng[1]}
                   address={formatDeliveryAddressWithNumber(callForm.delivery, callForm.delivery_number)}
                   userId={user.id}
                 />
               )}
+              </div>
             </div>
           </div>
           <div className="space-y-2">

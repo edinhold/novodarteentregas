@@ -141,6 +141,7 @@ export const StoreMiniTrackingMap: React.FC<StoreMiniTrackingMapProps> = ({
         autoFitBounds={true}
         fitPadding={28}
         recenterTrigger={recenterTrigger}
+        onMapClick={onDeliveryDragEnd ? (lat, lng) => onDeliveryDragEnd(lat, lng) : undefined}
         className="w-full h-full min-h-[160px]"
       />
 
@@ -154,6 +155,14 @@ export const StoreMiniTrackingMap: React.FC<StoreMiniTrackingMapProps> = ({
           )}
         </span>
       </div>
+
+      {onDeliveryDragEnd && (
+        <div className="absolute bottom-2 left-2 z-10 pointer-events-none">
+          <span className="bg-background/85 dark:bg-zinc-900/85 backdrop-blur-md text-[10px] font-semibold text-muted-foreground px-2 py-1 rounded-md border border-border/60 shadow-xs">
+            Arraste o pino azul ou clique no mapa
+          </span>
+        </div>
+      )}
 
       {/* Botões Flutuantes de Ação no Mapa */}
       <div className="absolute bottom-2 right-2 z-10 flex items-center gap-1.5">
