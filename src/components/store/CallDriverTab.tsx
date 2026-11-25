@@ -1329,10 +1329,11 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
     }
 
     if (finalDistance <= 0 || !finalDistance) {
-      finalDistance = minKm > 0 ? minKm : 2.5;
+      finalDistance = minKm > 0 ? minKm : 1.0;
     }
 
-    const estimatedCost = deliveryCost ?? (baseFee + (feePerKm * (finalDistance > 0 ? finalDistance : 2.5)));
+    const finalFareCalc = calculateDeliveryFare(finalDistance, configObj, manualKmVal, true);
+    const estimatedCost = Number(finalFareCalc.totalCost ?? 0);
     if (credits && Number(credits.balance || 0) < estimatedCost) {
       toast.error(`Saldo insuficiente (R$ ${Number(credits.balance || 0).toFixed(2).replace(".", ",")}). Recarregue seus créditos para chamar entregadores.`);
       if (onNavigateTab) onNavigateTab("credits");
@@ -1341,7 +1342,7 @@ const CallDriverTab = ({ user, restaurant, requests, activeRequest, chatMessages
 
     setCalling(true);
     try {
-      const safeDistance = billableKm > 0 ? billableKm : Math.max(Number(finalDistance.toFixed(1)), minKm > 0 ? minKm : 1.0);
+      const safeDistance = finalFareCalc.effectiveKm > 0 ? finalFareCalc.effectiveKm : Math.max(Number(finalDistance.toFixed(1)), minKm > 0 ? minKm : 1.0);
       const { data: requestId, error } = await supabase.rpc("deduct_credits_for_delivery", {
         p_pickup_address: effectivePickup,
         p_delivery_address: finalDeliveryAddress,

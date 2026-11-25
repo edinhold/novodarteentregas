@@ -50,6 +50,7 @@ const FeesConfigTab = () => {
         const { data: tableData, error: tableError } = await supabase
           .from("delivery_config")
           .select("*")
+          .order("updated_at", { ascending: false })
           .limit(1)
           .maybeSingle();
 
@@ -172,8 +173,8 @@ const FeesConfigTab = () => {
   const persistDynamicPricing = async (enabled: boolean, fee: number) => {
     isSavingRef.current = true;
     try {
-      const baseFeeVal = isNaN(parseFloat(form.base_fee)) || parseFloat(form.base_fee) <= 0 ? 5.3 : parseFloat(form.base_fee);
-      const feePerKmVal = isNaN(parseFloat(form.fee_per_km)) || parseFloat(form.fee_per_km) <= 0 ? 1.7 : parseFloat(form.fee_per_km);
+      const baseFeeVal = isNaN(parseFloat(form.base_fee)) || parseFloat(form.base_fee) < 0 ? 5.4 : parseFloat(form.base_fee);
+      const feePerKmVal = isNaN(parseFloat(form.fee_per_km)) || parseFloat(form.fee_per_km) < 0 ? 1.7 : parseFloat(form.fee_per_km);
       const minKmVal = isNaN(parseFloat(form.min_km)) ? 0 : Math.max(0, parseFloat(form.min_km));
       const maxKmVal = 0;
       const earlyWithdrawalFeePercentVal = isNaN(parseFloat(form.early_withdrawal_fee_percent)) ? 10 : Math.max(0, parseFloat(form.early_withdrawal_fee_percent));
@@ -302,8 +303,8 @@ const FeesConfigTab = () => {
     isSavingRef.current = true;
 
     try {
-      const baseFeeVal = isNaN(parseFloat(form.base_fee)) || parseFloat(form.base_fee) <= 0 ? 5.3 : parseFloat(form.base_fee);
-      const feePerKmVal = isNaN(parseFloat(form.fee_per_km)) || parseFloat(form.fee_per_km) <= 0 ? 1.7 : parseFloat(form.fee_per_km);
+      const baseFeeVal = isNaN(parseFloat(form.base_fee)) || parseFloat(form.base_fee) < 0 ? 5.4 : parseFloat(form.base_fee);
+      const feePerKmVal = isNaN(parseFloat(form.fee_per_km)) || parseFloat(form.fee_per_km) < 0 ? 1.7 : parseFloat(form.fee_per_km);
       const earlyWithdrawalFeePercentVal = isNaN(parseFloat(form.early_withdrawal_fee_percent)) ? 10 : Math.max(0, parseFloat(form.early_withdrawal_fee_percent));
       const withdrawalFixedFeeVal = isNaN(parseFloat(form.withdrawal_fixed_fee)) ? 1.00 : Math.max(0, parseFloat(form.withdrawal_fixed_fee));
       const paymentDayVal = isNaN(parseInt(form.payment_day, 10)) ? 3 : parseInt(form.payment_day, 10);

@@ -29,7 +29,17 @@ const DeliveryOverlay = ({ delivery, state, secondsLeft = 0, permissionWarning, 
   const { data: config } = useQuery({
     queryKey: ["delivery-config-app-fee"],
     queryFn: async () => {
-      const { data } = await supabase.from("delivery_config").select("app_fee_per_delivery").limit(1).maybeSingle();
+      const { data: rpcData, error: rpcError } = await (supabase as any).rpc("get_public_delivery_config");
+      if (!rpcError && rpcData) {
+        const item = Array.isArray(rpcData) ? rpcData[0] : rpcData;
+        if (item) return item;
+      }
+      const { data } = await supabase
+        .from("delivery_config")
+        .select("app_fee_per_delivery")
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
       return data;
     },
   });

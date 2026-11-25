@@ -846,11 +846,18 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
 
     // Configuração de precificação oficial do admin
     const { minKm } = getEffectiveDeliveryRates(deliveryConfig);
-    const rawDistanceToSend = manualKmVal ?? (finalDistance > 0 ? Number(finalDistance.toFixed(1)) : (fareDetails.rawKm > 0 ? fareDetails.rawKm : (minKm > 0 ? minKm : 2.5)));
+    const rawDistanceToSend = manualKmVal ?? (finalDistance > 0 ? Number(finalDistance.toFixed(1)) : (fareDetails.rawKm > 0 ? fareDetails.rawKm : (minKm > 0 ? minKm : 1.0)));
     const distanceToSend = Math.max(rawDistanceToSend, minKm > 0 ? minKm : 1.0);
     const calculatedFare = calculateDeliveryFare(distanceToSend, deliveryConfig, manualKmVal, true);
     const effectiveKm = calculatedFare.effectiveKm;
     const finalCalculatedCost = Number(calculatedFare.totalCost ?? 0);
+
+    if (credits && Number(credits.balance || 0) < finalCalculatedCost) {
+      toast.error(`Saldo insuficiente na carteira (Possui R$ ${Number(credits.balance || 0).toFixed(2).replace(".", ",")}, necessário R$ ${finalCalculatedCost.toFixed(2).replace(".", ",")}). Recarregue para chamar.`);
+      if (onNavigateTab) onNavigateTab("credits");
+      setIsSubmitting(false);
+      return;
+    }
 
     setIsSubmitting(true);
     try {

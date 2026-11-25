@@ -266,8 +266,21 @@ export function useDeliveryOverlay({ standby, timeoutMs = 30000, onAccepted }: O
           // Show OS-level notification safely across platforms (including Safari iOS PWA)
           void (async () => {
             try {
-              const { data: cfg } = await supabase.from("delivery_config").select("app_fee_per_delivery").limit(1).maybeSingle();
-              const appFeePct = Number((cfg as any)?.app_fee_per_delivery ?? 2);
+              let cfg: any = null;
+              const { data: rpcData, error: rpcError } = await (supabase as any).rpc("get_public_delivery_config");
+              if (!rpcError && rpcData) {
+                cfg = Array.isArray(rpcData) ? rpcData[0] : rpcData;
+              }
+              if (!cfg) {
+                const { data: tableCfg } = await supabase
+                  .from("delivery_config")
+                  .select("app_fee_per_delivery")
+                  .order("updated_at", { ascending: false })
+                  .limit(1)
+                  .maybeSingle();
+                cfg = tableCfg;
+              }
+              const appFeePct = Number(cfg?.app_fee_per_delivery ?? 2);
               const grossFee = Number(row.driver_fee ?? 0);
               const netFee = Math.max(0, grossFee * (1 - appFeePct / 100));
 
