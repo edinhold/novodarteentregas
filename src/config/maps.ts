@@ -5,7 +5,7 @@ export const OPENFREEMAP_STYLES = {
 } as const;
 
 export const DEFAULT_CENTER = { lat: -15.5561, lng: -54.3011 }; // Primavera do Leste, MT center
-export const DEFAULT_ZOOM = 13.5;
+export const DEFAULT_ZOOM = 14.5;
 
 /**
  * Limites geográficos estritos da área urbana e perimetral de Primavera do Leste - MT.

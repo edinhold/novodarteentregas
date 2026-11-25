@@ -6,6 +6,7 @@ import {
   searchAddressSuggestions,
   geocodeAddress,
   reverseGeocode,
+  normalizePrimaveraAddressQuery,
 } from "@/services/mapbox";
 import { isWithinPrimaveraBounds as isWithinPrimaveraBoundsMaps } from "@/config/maps";
 
@@ -301,6 +302,76 @@ describe("Geocodificação e Gestão de Mapa do Lojista (Primavera do Leste)", (
       const deliveryCost = baseFee + feePerKm * effectiveKm;
       // 5.30 + 1.80 * 1.0 = 7.10 (não cai abaixo do valor mínimo com km mínimo)
       expect(deliveryCost).toBeCloseTo(7.10, 2);
+    });
+  });
+
+  describe("7. Busca sem CEP (Ruas, Avenidas, Condomínios e Bairros)", () => {
+    it("deve normalizar abreviações locais e remover CEP sem exigir código postal", () => {
+      expect(normalizePrimaveraAddressQuery("Av. Cuiabá 78850-000")).toBe("Avenida Cuiabá");
+      expect(normalizePrimaveraAddressQuery("Cond. Cidade Jardim, Primavera 3")).toBe(
+        "Condomínio Cidade Jardim, Primavera III"
+      );
+      expect(normalizePrimaveraAddressQuery("Jd. Riva")).toBe("Jardim Riva");
+    });
+
+    it("deve descartar feição genérica de cidade (place) e priorizar condomínio/bairro real", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input: any) => {
+        const urlStr = String(input);
+        if (urlStr.includes("api.mapbox.com")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              type: "FeatureCollection",
+              features: [
+                {
+                  id: "generic-city",
+                  type: "Feature",
+                  geometry: { type: "Point", coordinates: [-54.3011, -15.5561] },
+                  properties: {
+                    feature_type: "place",
+                    name: "Primavera do Leste",
+                    context: {
+                      place: { name: "Primavera do Leste" },
+                      region: { region_code: "MT" },
+                      country: { country_code: "BR" },
+                    },
+                  },
+                },
+              ],
+            }),
+          } as Response;
+        }
+
+        // Nominatim retorna o condomínio específico em Primavera do Leste
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            {
+              place_id: 98765,
+              name: "Condomínio Cidade Jardim",
+              class: "landuse",
+              type: "residential",
+              lat: "-15.5412",
+              lon: "-54.3215",
+              display_name: "Condomínio Cidade Jardim, Primavera III, Primavera do Leste, MT",
+              address: {
+                suburb: "Primavera III",
+                road: "Avenida Califórnia",
+              },
+            },
+          ],
+        } as Response;
+      });
+
+      const suggestions = await searchAddressSuggestions("Cond. Cidade Jardim");
+      expect(suggestions.length).toBe(1);
+      expect(suggestions[0].street).toBe("Condomínio Cidade Jardim");
+      expect(suggestions[0].placeCategory).toBe("condominium");
+      expect(suggestions[0].coordinates.latitude).toBeCloseTo(-15.5412, 4);
+
+      fetchSpy.mockRestore();
     });
   });
 });

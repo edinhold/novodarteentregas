@@ -80,14 +80,19 @@ const ROUTE_SOURCE_ID = "duarte-route-source";
 const ROUTE_CASING_LAYER_ID = "duarte-route-casing";
 const ROUTE_LINE_LAYER_ID = "duarte-route-line";
 
-function buildRasterStyle(tiles: string[], attribution: string, sourceId: string): maplibregl.StyleSpecification {
+function buildRasterStyle(
+  tiles: string[],
+  attribution: string,
+  sourceId: string,
+  tileSize: number = 256
+): maplibregl.StyleSpecification {
   return {
     version: 8,
     sources: {
       [sourceId]: {
         type: "raster",
         tiles,
-        tileSize: 256,
+        tileSize,
         maxzoom: 19,
         attribution,
       },
@@ -102,11 +107,37 @@ const OSM_RASTER_FALLBACK_STYLE = buildRasterStyle(
   "osm"
 );
 
-const ESRI_SATELLITE_STYLE = buildRasterStyle(
-  ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
-  "© Esri World Imagery",
-  "esri"
-);
+const ESRI_SATELLITE_STYLE: maplibregl.StyleSpecification = {
+  version: 8,
+  sources: {
+    esri: {
+      type: "raster",
+      tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
+      tileSize: 256,
+      maxzoom: 19,
+      attribution: "© Esri World Imagery",
+    },
+    "esri-streets": {
+      type: "raster",
+      tiles: ["https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}"],
+      tileSize: 256,
+      maxzoom: 19,
+      attribution: "© Esri Transportation",
+    },
+    "esri-labels": {
+      type: "raster",
+      tiles: ["https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"],
+      tileSize: 256,
+      maxzoom: 19,
+      attribution: "© Esri Places",
+    },
+  },
+  layers: [
+    { id: "esri", type: "raster", source: "esri" },
+    { id: "esri-streets", type: "raster", source: "esri-streets" },
+    { id: "esri-labels", type: "raster", source: "esri-labels" },
+  ],
+};
 
 function getStyleForMode(mode: "dark" | "liberty" | "satellite"): maplibregl.StyleSpecification {
   const token = MAPBOX_ACCESS_TOKEN?.trim();
@@ -117,12 +148,14 @@ function getStyleForMode(mode: "dark" | "liberty" | "satellite"): maplibregl.Sty
     mode === "satellite"
       ? "satellite-streets-v12"
       : mode === "dark"
-      ? "dark-v11"
+      ? "navigation-night-v1"
       : "streets-v12";
+  // Tiles 512@2x preservam alta legibilidade dos nomes de ruas, avenidas, bairros e condomínios
   return buildRasterStyle(
-    [`https://api.mapbox.com/styles/v1/mapbox/${styleId}/tiles/256/{z}/{x}/{y}@2x?access_token=${token}`],
+    [`https://api.mapbox.com/styles/v1/mapbox/${styleId}/tiles/512/{z}/{x}/{y}@2x?access_token=${token}`],
     "© Mapbox © OpenStreetMap",
-    `mapbox-${mode}`
+    `mapbox-${mode}`,
+    512
   );
 }
 
@@ -322,6 +355,7 @@ export const MapLibreView: React.FC<MapLibreViewProps> = ({
         style: targetStyle,
         center: initialCenter as [number, number],
         zoom,
+        maxZoom: 20,
         pitch,
         attributionControl: false,
       });
@@ -555,7 +589,7 @@ export const MapLibreView: React.FC<MapLibreViewProps> = ({
       }
 
       if (pointsCount >= 2) {
-        map.fitBounds(bounds, { padding: fitPadding, duration: 500 });
+        map.fitBounds(bounds, { padding: fitPadding, maxZoom: 16.5, duration: 500 });
         return;
       }
       if (pointsCount === 1) {

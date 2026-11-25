@@ -493,11 +493,13 @@ export function parseMapboxFeature(
 }
 
 /**
- * Normaliza abreviações comuns de logradouros e condomínios em português (sem exigir CEP)
+ * Normaliza abreviações comuns de logradouros, bairros e condomínios em português (sem exigir CEP)
  */
 export function normalizePrimaveraAddressQuery(rawInput: string): string {
   return rawInput
     .trim()
+    // Remove eventual CEP digitado para não restringir/confundir buscas locais sem CEP
+    .replace(/\b\d{5}-?\d{3}\b/g, " ")
     .replace(/^(av\.?|av)\s+/i, "Avenida ")
     .replace(/\b(av\.?)\s+/gi, "Avenida ")
     .replace(/^(r\.?|r)\s+/i, "Rua ")
@@ -505,10 +507,20 @@ export function normalizePrimaveraAddressQuery(rawInput: string): string {
     .replace(/^(cond\.?|cond)\s+/i, "Condomínio ")
     .replace(/\b(cond\.?)\s+/gi, "Condomínio ")
     .replace(/^(res\.?|res)\s+/i, "Residencial ")
+    .replace(/\b(res\.?)\s+/gi, "Residencial ")
+    .replace(/^(jd\.?|jd)\s+/i, "Jardim ")
+    .replace(/\b(jd\.?)\s+/gi, "Jardim ")
+    .replace(/^(pq\.?|pq)\s+/i, "Parque ")
+    .replace(/\b(pq\.?)\s+/gi, "Parque ")
+    .replace(/^(st\.?|st)\s+/i, "Setor ")
     .replace(/^(al\.?|al)\s+/i, "Alameda ")
     .replace(/^(tv\.?|tv)\s+/i, "Travessa ")
     .replace(/^(rod\.?|rod)\s+/i, "Rodovia ")
     .replace(/^(p[çc]a?\.?)\s+/i, "Praça ")
+    // Padroniza setores Primavera 1 / 2 / 3 -> Primavera I / II / III
+    .replace(/\bprimavera\s+1\b/gi, "Primavera I")
+    .replace(/\bprimavera\s+2\b/gi, "Primavera II")
+    .replace(/\bprimavera\s+3\b/gi, "Primavera III")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -544,7 +556,7 @@ async function fetchNominatimSuggestions(
   try {
     const normalized = normalizePrimaveraAddressQuery(query);
     const nomQuery = `${normalized}, Primavera do Leste, Mato Grosso, Brasil`;
-    const nomUrl = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&countrycodes=br&viewbox=${encodeURIComponent(
+    const nomUrl = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&namedetails=1&extratags=1&countrycodes=br&viewbox=${encodeURIComponent(
       PRIMAVERA_DO_LESTE.NOMINATIM_VIEWBOX
     )}&bounded=1&limit=${limit}&q=${encodeURIComponent(nomQuery)}`;
     const nomRes = await fetch(nomUrl, {
@@ -559,15 +571,43 @@ async function fetchNominatimSuggestions(
           const lonNum = parseFloat(item.lon);
           if (isValidCoordinate(latNum, lonNum) && isWithinPrimaveraBounds(latNum, lonNum)) {
             const addr = item.address || {};
-            const road = addr.road || addr.pedestrian || addr.suburb || (item.display_name ? item.display_name.split(",")[0] : query);
-            const suburb = addr.suburb || addr.neighbourhood || addr.city_district || "";
+            const itemName = (item.name || item.namedetails?.name || "").trim();
+            const isPlaceOrCondo =
+              item.class === "landuse" ||
+              item.type === "residential" ||
+              item.class === "building" ||
+              item.class === "shop" ||
+              item.class === "amenity" ||
+              item.class === "place";
+            const road =
+              (isPlaceOrCondo && itemName ? itemName : "") ||
+              addr.residential ||
+              addr.building ||
+              addr.road ||
+              addr.pedestrian ||
+              addr.neighbourhood ||
+              addr.suburb ||
+              itemName ||
+              (item.display_name ? item.display_name.split(",")[0] : query);
+            const suburb =
+              addr.suburb ||
+              addr.neighbourhood ||
+              addr.city_district ||
+              (addr.road && road !== addr.road ? addr.road : "") ||
+              "";
             const hNum = addr.house_number || detectedNumber || "";
             const cat = detectLocationCategory(road || item.display_name, item.display_name, item.type, {
               osmClass: item.class,
               osmType: item.type,
             });
+            const fType =
+              cat.type === "neighborhood"
+                ? "neighborhood"
+                : cat.type === "condominium" || cat.type === "commercial"
+                ? "locality"
+                : "address";
             results.push({
-              fullAddress: `${road}${hNum ? ", " + hNum : ""}${suburb ? ", " + suburb : ""}, Primavera do Leste - MT`,
+              fullAddress: `${road}${hNum ? ", " + hNum : ""}${suburb && suburb.toLowerCase() !== road.toLowerCase() ? ", " + suburb : ""}, Primavera do Leste - MT`,
               street: road,
               number: hNum,
               neighborhood: suburb,
@@ -579,7 +619,7 @@ async function fetchNominatimSuggestions(
               coordinates: { latitude: latNum, longitude: lonNum },
               lngLat: [lonNum, latNum],
               mapboxId: `osm-${item.place_id || item.osm_id || Math.random().toString(36).substring(7)}`,
-              featureType: "address",
+              featureType: fType,
               isValidPrimavera: true,
               placeCategory: cat.type,
               placeCategoryLabel: cat.badge,
@@ -635,7 +675,7 @@ export async function searchAddressSuggestions(
   url.searchParams.set("country", "br");
   url.searchParams.set("language", "pt");
   url.searchParams.set("autocomplete", "true");
-  url.searchParams.set("types", "address,neighborhood,locality,place,street");
+  url.searchParams.set("types", "address,secondary_address,street,neighborhood,locality,place");
   url.searchParams.set("limit", limit.toString());
   url.searchParams.set("bbox", PRIMAVERA_DO_LESTE.BBOX.join(","));
   url.searchParams.set(
@@ -672,9 +712,10 @@ export async function searchAddressSuggestions(
       }
     }
 
-    // Se Mapbox retornou 0 resultados e a busca continha número predial,
+    // Se Mapbox retornou 0 resultados específicos e a busca continha número predial,
     // tenta buscar pelo nome do logradouro para cidades onde a Mapbox só indexa ruas
-    if (parsedList.length === 0 && detectedNumber) {
+    const hasSpecificMapbox = parsedList.some((p) => p.featureType !== "place");
+    if (!hasSpecificMapbox && detectedNumber) {
       const streetOnly = trimmed.replace(new RegExp(`[,\\s]*${detectedNumber}\\b`, "i"), "").trim();
       if (streetOnly.length >= 3 && streetOnly !== trimmed) {
         const streetUrl = new URL(MAPBOX_GEOCODE_FORWARD_URL);
@@ -682,6 +723,7 @@ export async function searchAddressSuggestions(
         streetUrl.searchParams.set("access_token", token);
         streetUrl.searchParams.set("country", "br");
         streetUrl.searchParams.set("language", "pt");
+        streetUrl.searchParams.set("types", "address,secondary_address,street,neighborhood,locality,place");
         streetUrl.searchParams.set("limit", limit.toString());
         streetUrl.searchParams.set("bbox", PRIMAVERA_DO_LESTE.BBOX.join(","));
         streetUrl.searchParams.set(
@@ -711,13 +753,16 @@ export async function searchAddressSuggestions(
       }
     }
 
-    // Se a Mapbox retornou menos que o limite, complementa com Nominatim
-    if (parsedList.length < limit) {
-      const nomFallbacks = await fetchNominatimSuggestions(trimmed, limit - parsedList.length, detectedNumber, activeSignal);
+    // Sempre complementa com Nominatim (OSM) para condomínios, ruas e bairros de Primavera do Leste
+    // quando houver menos de `limit` resultados específicos (não genéricos de cidade)
+    const specificCount = parsedList.filter((p) => p.featureType !== "place").length;
+    if (specificCount < limit) {
+      const nomFallbacks = await fetchNominatimSuggestions(trimmed, limit, detectedNumber, activeSignal);
       for (const n of nomFallbacks) {
         const already = parsedList.some(
-          (p) => Math.abs(p.coordinates.latitude - n.coordinates.latitude) < 0.0008 &&
-                 Math.abs(p.coordinates.longitude - n.coordinates.longitude) < 0.0008
+          (p) => Math.abs(p.coordinates.latitude - n.coordinates.latitude) < 0.0005 &&
+                 Math.abs(p.coordinates.longitude - n.coordinates.longitude) < 0.0005 &&
+                 p.street.toLowerCase() === n.street.toLowerCase()
         );
         if (!already) {
           parsedList.push(n);
@@ -725,7 +770,41 @@ export async function searchAddressSuggestions(
       }
     }
 
-    return parsedList.length > 0 ? parsedList : fetchNominatimSuggestions(trimmed, limit, detectedNumber, activeSignal);
+    // Remove resultado genérico "place" (centro da cidade) se houver qualquer resultado específico
+    const normalizedQuery = normalizePrimaveraAddressQuery(trimmed).toLowerCase();
+    const isCityOnlyQuery = normalizedQuery === "primavera do leste" || normalizedQuery === "primavera";
+    const specificResults = parsedList.filter((p) => p.featureType !== "place");
+    const finalResults =
+      specificResults.length > 0
+        ? specificResults
+        : isCityOnlyQuery
+        ? parsedList
+        : [];
+
+    // Ordena por aderência textual e especificidade (rua/endereço/condomínio/bairro)
+    const queryTokens = normalizedQuery
+      .replace(/[^\p{L}\p{N}\s]/gu, " ")
+      .split(/\s+/)
+      .filter((t) => t.length >= 2 && t !== "primavera" && t !== "leste" && t !== "mt");
+
+    finalResults.sort((a, b) => {
+      const score = (item: MapboxParsedAddress) => {
+        let s = 0;
+        const hay = `${item.street} ${item.neighborhood} ${item.fullAddress}`.toLowerCase();
+        for (const tok of queryTokens) {
+          if (item.street.toLowerCase().includes(tok)) s += 15;
+          else if (hay.includes(tok)) s += 8;
+        }
+        if (item.featureType === "address" || item.featureType === "secondary_address") s += 10;
+        else if (item.featureType === "street") s += 8;
+        else if (item.placeCategory === "condominium" || item.placeCategory === "commercial") s += 7;
+        else if (item.featureType === "neighborhood" || item.featureType === "locality") s += 5;
+        return s;
+      };
+      return score(b) - score(a);
+    });
+
+    return finalResults.slice(0, limit);
   } catch (error: any) {
     if (error?.name === "AbortError") {
       return [];
