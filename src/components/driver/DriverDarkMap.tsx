@@ -33,7 +33,7 @@ export const DriverDarkMap: React.FC<DriverDarkMapProps> = ({
   const lastRouteOriginRef = useRef<{ lat: number; lng: number } | null>(null);
   const lastRouteDestRef = useRef<{ lat: number; lng: number } | null>(null);
   const currentRoutePointsRef = useRef<LatLngLiteral[]>([]);
-  const isFetchingRouteRef = useRef<boolean>(false);
+  const routeRequestIdRef = useRef<number>(0);
 
   const [routePath, setRoutePath] = useState<LatLngLiteral[]>([]);
   const [autoFollow, setAutoFollow] = useState(true);
@@ -99,18 +99,18 @@ export const DriverDarkMap: React.FC<DriverDarkMapProps> = ({
     }
 
     let isCancelled = false;
+    const requestId = ++routeRequestIdRef.current;
+    const controller = new AbortController();
 
     const updateRoute = async () => {
-      if (isFetchingRouteRef.current) return;
-      isFetchingRouteRef.current = true;
-
       try {
         const res = await calculateRoute(
           { lat: driverPosition.lat, lng: driverPosition.lng },
-          { lat: targetDestination.lat, lng: targetDestination.lng }
+          { lat: targetDestination.lat, lng: targetDestination.lng },
+          { profile: "driving", signal: controller.signal }
         );
 
-        if (isCancelled) return;
+        if (isCancelled || requestId !== routeRequestIdRef.current) return;
 
         const points: LatLngLiteral[] =
           res?.geometry && res.geometry.length > 0
@@ -125,14 +125,12 @@ export const DriverDarkMap: React.FC<DriverDarkMapProps> = ({
         lastRouteDestRef.current = { lat: targetDestination.lat, lng: targetDestination.lng };
         setRoutePath(points);
       } catch {
-        if (isCancelled) return;
+        if (isCancelled || requestId !== routeRequestIdRef.current) return;
         const fallbackPoints: LatLngLiteral[] = [
           { lat: driverPosition.lat, lng: driverPosition.lng },
           { lat: targetDestination.lat, lng: targetDestination.lng },
         ];
         setRoutePath(fallbackPoints);
-      } finally {
-        isFetchingRouteRef.current = false;
       }
     };
 
@@ -140,6 +138,7 @@ export const DriverDarkMap: React.FC<DriverDarkMapProps> = ({
 
     return () => {
       isCancelled = true;
+      controller.abort();
     };
   }, [
     hasActiveDelivery,

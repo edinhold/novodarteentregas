@@ -498,8 +498,11 @@ export function parseMapboxFeature(
 export function normalizePrimaveraAddressQuery(rawInput: string): string {
   return rawInput
     .trim()
+    // Remove tags de categoria inseridas pelo painel (ex: [Condomínio], [Comércio/Supermercado])
+    .replace(/\[[^\]]+\]/g, " ")
     // Remove eventual CEP digitado para não restringir/confundir buscas locais sem CEP
     .replace(/\b\d{5}-?\d{3}\b/g, " ")
+    .replace(/\bn[ºo°]\s*/gi, " ")
     .replace(/^(av\.?|av)\s+/i, "Avenida ")
     .replace(/\b(av\.?)\s+/gi, "Avenida ")
     .replace(/^(r\.?|r)\s+/i, "Rua ")
@@ -716,7 +719,11 @@ export async function searchAddressSuggestions(
     // tenta buscar pelo nome do logradouro para cidades onde a Mapbox só indexa ruas
     const hasSpecificMapbox = parsedList.some((p) => p.featureType !== "place");
     if (!hasSpecificMapbox && detectedNumber) {
-      const streetOnly = trimmed.replace(new RegExp(`[,\\s]*${detectedNumber}\\b`, "i"), "").trim();
+      const streetOnly = trimmed
+        .replace(new RegExp(`[,\\s]*${detectedNumber}\\b`, "i"), "")
+        .replace(/,\s*,/g, ",")
+        .replace(/^[\s,-]+|[\s,-]+$/g, "")
+        .trim();
       if (streetOnly.length >= 3 && streetOnly !== trimmed) {
         const streetUrl = new URL(MAPBOX_GEOCODE_FORWARD_URL);
         streetUrl.searchParams.set("q", buildPrimaveraQuery(streetOnly));

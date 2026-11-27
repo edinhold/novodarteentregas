@@ -232,23 +232,40 @@ export const DriverMainDarkView: React.FC<DriverMainDarkViewProps> = ({
   }, [pendingRequests]);
 
   // Redirecionamento GPS Externo (Google Maps / Waze)
-  const handleOpenNavigation = (app: "google" | "waze") => {
+  const handleOpenNavigation = async (app: "google" | "waze") => {
     if (!currentDelivery) return;
 
     // Se já coletou (status === "picked_up"), o destino atual é a Entrega do cliente.
     // Se acabou de aceitar (status === "accepted" ou "pending"), o destino atual é a Coleta na loja.
     const isHeadingToDelivery = currentDelivery.status === "picked_up";
     const targetLoc = isHeadingToDelivery ? deliveryLocation : pickupLocation;
-    const rawTargetAddress = isHeadingToDelivery
-      ? currentDelivery.deliveryAddress
-      : currentDelivery.pickupAddress || currentDelivery.pickupName;
+    const rawTargetAddress = (
+      isHeadingToDelivery
+        ? currentDelivery.deliveryAddress
+        : currentDelivery.pickupAddress || currentDelivery.pickupName
+    )
+      ?.replace(/\[[^\]]+\]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
 
     const targetAddress = rawTargetAddress && !rawTargetAddress.includes("Primavera do Leste")
       ? `${rawTargetAddress}, Primavera do Leste - MT, Brasil`
       : rawTargetAddress || "Primavera do Leste - MT, Brasil";
 
-    const lat = targetLoc?.lat;
-    const lng = targetLoc?.lng;
+    let lat = targetLoc?.lat;
+    let lng = targetLoc?.lng;
+
+    if ((!lat || !lng) && rawTargetAddress) {
+      try {
+        const resolved = await geocodeAddress(targetAddress);
+        if (resolved?.coordinates) {
+          lat = resolved.coordinates.latitude;
+          lng = resolved.coordinates.longitude;
+        }
+      } catch {
+        // Segue com endereço textual limpo
+      }
+    }
 
     if (app === "waze") {
       if (lat && lng) {

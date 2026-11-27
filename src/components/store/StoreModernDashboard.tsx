@@ -880,8 +880,8 @@ export const StoreModernDashboard: React.FC<StoreModernDashboardProps> = ({
             pickup_address: pickupAddress,
             pickup_lat: storeCoords.lat,
             pickup_lng: storeCoords.lng,
-            delivery_lat: deliveryCoordinates?.lat || null,
-            delivery_lng: deliveryCoordinates?.lng || null,
+            delivery_lat: finalCoordinates?.lat || null,
+            delivery_lng: finalCoordinates?.lng || null,
             notes: compiledNotes || null,
           })
           .eq("id", requestId);

@@ -17,7 +17,7 @@ import {
   isWithinPrimaveraBounds,
   formatStorePickupAddress,
 } from "@/config/maps";
-import { calculateRoute } from "@/services/mapbox";
+import { calculateRoute, geocodeAddress } from "@/services/mapbox";
 import { latLngArrayToLiteralPath, type LatLngLiteral } from "@/utils/mapCoordinates";
 import MapLibreView from "@/components/maps/MapLibreView";
 import { useAuth } from "@/contexts/AuthContext";
@@ -73,16 +73,21 @@ const DriverGPS = ({
   const [mapMode, setMapMode] = useState<"roadmap" | "satellite">("roadmap");
   const [routePath, setRoutePath] = useState<LatLngLiteral[]>([]);
   const [recenterTrigger, setRecenterTrigger] = useState(0);
+  const [geocodedDest, setGeocodedDest] = useState<{ lat: number; lng: number } | null>(null);
 
   const openNavigation = (
     address: string,
     app: "google" | "waze",
     coords?: { lat: number; lng: number } | null
   ) => {
+    const cleanAddress = (address || "")
+      .replace(/\[[^\]]+\]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
     const formattedAddress =
-      address && !address.includes("Primavera do Leste")
-        ? `${address}, Primavera do Leste - MT, Brasil`
-        : address || "Primavera do Leste - MT, Brasil";
+      cleanAddress && !cleanAddress.includes("Primavera do Leste")
+        ? `${cleanAddress}, Primavera do Leste - MT, Brasil`
+        : cleanAddress || "Primavera do Leste - MT, Brasil";
 
     if (app === "waze") {
       if (coords && coords.lat && coords.lng) {
@@ -107,7 +112,7 @@ const DriverGPS = ({
 
   const isPickupPhase = activeRequest?.status === "accepted";
 
-  const activeDestCoords = useMemo(() => {
+  const baseDestCoords = useMemo(() => {
     if (!activeRequest) return null;
     if (isPickupPhase) {
       return resolveStoreCoordinates(
@@ -124,6 +129,26 @@ const DriverGPS = ({
     }
     return null;
   }, [activeRequest, isPickupPhase]);
+
+  useEffect(() => {
+    if (!activeRequest || isPickupPhase || baseDestCoords || !activeRequest.delivery_address) {
+      setGeocodedDest(null);
+      return;
+    }
+    let cancelled = false;
+    geocodeAddress(activeRequest.delivery_address)
+      .then((res) => {
+        if (!cancelled && res?.coordinates) {
+          setGeocodedDest({ lat: res.coordinates.latitude, lng: res.coordinates.longitude });
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [activeRequest?.id, activeRequest?.delivery_address, isPickupPhase, baseDestCoords]);
+
+  const activeDestCoords = baseDestCoords || geocodedDest;
 
   // Calcula rota viária usando exclusivamente Mapbox Directions API
   useEffect(() => {
